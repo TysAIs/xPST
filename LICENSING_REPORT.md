@@ -1,0 +1,71 @@
+# xPST Licensing Report
+
+This report summarizes the current repository licensing posture for launch review. It complements [NOTICES.md](NOTICES.md), which lists direct dependency notices.
+
+## Project License
+
+xPST is dual licensed under:
+
+- MIT License
+- Apache License 2.0
+
+Users may choose either license. The combined license text is in [LICENSE](LICENSE).
+
+## Direct Dependency Posture
+
+The direct dependencies declared in `pyproject.toml` are compatible with open-source redistribution when packaged with appropriate notices:
+
+| License family | Direct packages |
+|---|---|
+| MIT | PyYAML, rich, twikit, instagrapi, keyring, pydantic-settings, mcp, winshell |
+| Apache-2.0 | google-api-python-client, google-auth-oauthlib, google-auth-httplib2, prometheus-client, bcrypt |
+| Apache-2.0 OR BSD-3-Clause | cryptography |
+| MIT OR Apache-2.0 | structlog |
+| BSD-3-Clause | click, uvicorn, httpx |
+| PSF | pywin32 |
+| Unlicense | yt-dlp |
+
+## Desktop Packaging Notes
+
+There is no Qt/PySide6 dependency to reconcile: the repository ships one desktop
+app, the Tauri 2 shell (MIT OR Apache-2.0) in `src-tauri/`, wrapping a
+PyInstaller-built Python engine sidecar whose dependency set is the same as the
+`full` extra. No desktop installer may nest a second, differently licensed GUI
+toolkit.
+
+- Include the Tauri/WebView2/WebKitGTK notices that the shell's bundler emits for each platform.
+- The engine sidecar ships the same third-party set as the wheel; that set is covered by this report.
+- If a future release bundles a new native toolkit, add its notice and relinking information here before shipping.
+
+## Release Artifact Requirements
+
+Every public release should include:
+
+- `LICENSE`
+- `NOTICES.md`
+- Generated transitive dependency license report for the shipped environment
+- SHA-256 checksums for release artifacts
+- SBOM, preferably CycloneDX JSON
+- Platform-specific notices for bundled Windows/macOS desktop artifacts
+
+## Verification Commands
+
+Run these before release:
+
+```bash
+uv run pytest -q --timeout=60 --timeout-method=thread
+uv run ruff check src tests
+uv run mypy src/xpst
+uv build
+```
+
+For vulnerability and license reporting in CI:
+
+```bash
+python -m pip install pip-audit pip-licenses cyclonedx-bom
+pip-audit
+pip-licenses --format=markdown --with-urls --with-license-file > LICENSING_REPORT.generated.md
+cyclonedx-py environment -o xpst-sbom.cdx.json
+```
+
+Last updated: June 2026.

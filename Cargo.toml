@@ -1,0 +1,122 @@
+[workspace]
+resolver = "2"
+# The Rust engine rebuild (docs/PROPOSAL-RUST-REBUILD.md, P0). The existing
+# Tauri shell keeps its own manifest and is deliberately NOT a member: the
+# proposal folds it into `xpst-app` at P4+, and P0 must not touch it.
+members = [
+    "crates/xpst-cli",
+    "crates/xpst-core",
+    "crates/xpst-config",
+    "crates/xpst-state",
+    "crates/xpst-auth",
+    "crates/xpst-authflow",
+    "crates/xpst-provider",
+    "crates/xpst-provider-youtube",
+    "crates/xpst-provider-x",
+    "crates/xpst-provider-instagram",
+    "crates/xpst-provider-tiktok",
+    "crates/xpst-provider-threads",
+    "crates/xpst-provider-meta",
+    "crates/xpst-provider-bluesky",
+    "crates/xpst-source",
+    "crates/xpst-media",
+    "crates/xpst-store",
+    "crates/xpst-limits",
+    "crates/xpst-api",
+    "crates/xpst-mcp",
+    "crates/xpst-app",
+    "crates/xpst-pipeline",
+    "crates/xpst-verify",
+    "xtask",
+]
+exclude = ["src-tauri"]
+
+[workspace.package]
+version = "1.3.0"
+edition = "2021"
+# The floor is a measured fact, not a preference: the locked tree already fails
+# to resolve on 1.85 (`encoding_rs 0.8.44` requires 1.88, `uuid 1.29.3` requires
+# 1.89), so the old value was a promise the build could not keep. 1.89 is the
+# lowest floor that (a) the committed graph actually builds on and (b) admits
+# the two patched releases the advisory gate needs — `time 0.3.47+` for
+# RUSTSEC-2026-0009 and `rusqlite 0.41`/`libsqlite3-sys 0.39` for
+# RUSTSEC-2026-0459. Re-verify with `cargo +1.89.0 check --workspace
+# --all-targets` before moving it again; docs/technical/security-advisories.md
+# records the reasoning.
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/TysAIs/xPST"
+authors = ["xPST contributors"]
+
+[workspace.dependencies]
+# One runtime, per the proposal §2: no OpenSSL, no plugin loader.
+clap = { version = "4", features = ["derive", "wrap_help", "string"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# YAML: safe Rust parser, no C translation layer. Replaces `serde_yaml`, which
+# is deprecated and reaches the unmaintained `unsafe-libyaml`
+# (RUSTSEC-2024-0449). The data model lives in `crates/xpst-config/src/yaml.rs`
+# with the compatibility options pinned there.
+serde-saphyr = { version = "2.2", default-features = false, features = [
+    "serialize",
+    "deserialize",
+] }
+# Time: replaces `chrono`/`chrono-tz` in this workspace's own code
+# (RUSTSEC-2026-0543/-0555). Carries the IANA database for platforms without a
+# system copy and reads the system database where one exists.
+jiff = "1"
+thiserror = "2"
+xpst-config = { path = "crates/xpst-config" }
+xpst-state = { path = "crates/xpst-state" }
+xpst-media = { path = "crates/xpst-media" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+# Release profile: tuned for the D-4 target (<= 25 MB single binary) rather than
+# for the fastest possible code. Every setting below is measured, and the cost of
+# each one is recorded in docs/technical/packaging.md ("Release profile") and
+# perf/rust-binary-budget.json. Numbers are `cargo build --release -p xpst-cli`
+# from this tree on x86_64-linux (rustc 1.99.1), cumulative in the order listed:
+#
+#   default profile .................. 2,083,464 B   3.4 s
+#   + strip = "symbols" .............. 1,636,648 B   3.3 s   (-21.4 %)
+#   + lto = "fat", codegen-units = 1 .. 1,338,736 B   8.5 s   (-18.2 %, +5.2 s build)
+#   + panic = "abort" ................ 1,218,952 B   8.0 s   (-8.9 %)
+#   + opt-level = "z" ................   961,912 B   5.4 s   (-21.1 %, -2.7 s build)
+#
+# `strip = "symbols"`: drops the symbol table and debug info. It is the cheapest
+# 447 kB in the graph and costs nothing at build time; the price is symbol names
+# in a crash backtrace, so symbolication builds use
+# `--config 'profile.release.strip="none"'` (that is what size attribution runs).
+#
+# `lto = "fat"` + `codegen-units = 1`: cross-crate inlining and a single codegen
+# unit, which is the only way the compiler can drop monomorphised code that only
+# one crate uses. This is the expensive one: builds go from 3.3 s to 8.5 s in
+# this tree and the multiple grows with the dependency graph. `lto = "thin"`
+# spends most of that time and buys 65 kB less (1,304,392 B at opt-level 3), so
+# it is not worth the extra knob.
+#
+# `panic = "abort"`: no landing pads, no unwinder tables. There is no
+# `catch_unwind` in the workspace (`grep -rn catch_unwind crates/ xtask/` is
+# empty), so nothing loses behaviour; a panic that would have unwound out of a
+# worker thread now aborts the process, which is the correct outcome for a CLI.
+#
+# `opt-level = "z"`: 21 % smaller than opt-level 3 *and* faster to compile,
+# because it stops doing the work that makes the code bigger. The runtime cost is
+# real but immaterial at this scale: median `xpst version --json` process time is
+# 0.81 ms against 0.65 ms at opt-level 3, i.e. 0.016 % of the 1 s cold-boot
+# budget, and it buys 257 kB. opt-level = "s" was measured too: 1,004,632 B at
+# 8.9 s, worse on both axes than "z" here.
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+# Explicit, though it is already the release default: an incremental release
+# build is both bigger and not reproducible, and reproducibility is a D-5 bar.
+incremental = false

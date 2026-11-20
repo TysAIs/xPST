@@ -1,0 +1,274 @@
+import assert from "node:assert/strict";
+import { readFile, access } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { test } from "node:test";
+import { currentRoute, NAV_ITEMS } from "../src/lib/api.js";
+import { platformLabel, statusLabel } from "../src/lib/labels.js";
+
+const UI_ROOT = resolve(import.meta.dirname, "..");
+const REPO_ROOT = resolve(UI_ROOT, "..");
+
+async function text(path) {
+  return readFile(path, "utf8");
+}
+
+async function exists(path) {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("DESIGN.md declares the canonical token sections in order", async () => {
+  const design = await text(join(REPO_ROOT, "DESIGN.md"));
+  assert.match(design, /^---\nversion:/);
+  assert.match(design, /\nname: xPST Design System\n/);
+  assert.match(design, /\ncolors:\n/);
+  assert.match(design, /\ntypography:\n/);
+  assert.match(design, /\nspacing:\n/);
+  assert.match(design, /\nmotion:/);
+  assert.match(design, /\nfocus:/);
+  const headings = [...design.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
+  assert.deepEqual(headings, [
+    "Overview",
+    "Colors",
+    "Typography",
+    "Layout",
+    "Elevation & Depth",
+    "Shapes",
+    "Components",
+    "Do's and Don'ts",
+  ]);
+});
+
+test("the UI has local semantic tokens for both color modes and interaction states", async () => {
+  const tokens = await text(join(UI_ROOT, "src/tokens.css"));
+  for (const token of [
+    "--xpst-color-background",
+    "--xpst-color-surface",
+    "--xpst-color-text-primary",
+    "--xpst-space-4",
+    "--xpst-type-body",
+    "--xpst-radius-md",
+    "--xpst-elevation-card",
+    "--xpst-motion-standard",
+    "--xpst-focus-ring",
+  ]) {
+    assert.match(tokens, new RegExp(token.replaceAll("-", "\\-")));
+  }
+  assert.match(tokens, /\[data-theme="dark"\]/);
+  assert.match(tokens, /prefers-color-scheme: dark/);
+  assert.match(tokens, /prefers-reduced-motion: reduce/);
+});
+
+test("all design-system primitives exist and declare accessible contracts", async () => {
+  const components = [
+    "Button",
+    "Card",
+    "StatusBadge",
+    "PlatformBadge",
+    "PlatformIcon",
+    "EmptyState",
+    "LoadingSkeleton",
+    "ErrorState",
+    "EngineStarting",
+    "FormField",
+    "Shell",
+    "Nav",
+    "BrandMark",
+  ];
+  for (const component of components) {
+    const path = join(UI_ROOT, "src/lib/components", `${component}.svelte`);
+    assert.equal(await exists(path), true, `${component} is missing`);
+  }
+  assert.match(await text(join(UI_ROOT, "src/lib/components/Button.svelte")), /focus-visible/);
+  assert.match(await text(join(UI_ROOT, "src/lib/components/FormField.svelte")), /aria-describedby/);
+  assert.match(await text(join(UI_ROOT, "src/lib/components/LoadingSkeleton.svelte")), /aria-busy/);
+  assert.match(await text(join(UI_ROOT, "src/lib/components/ErrorState.svelte")), /Retry/);
+  assert.match(await text(join(UI_ROOT, "src/lib/components/EngineStarting.svelte")), /aria-busy/);
+  assert.match(await text(join(UI_ROOT, "src/lib/components/BrandMark.svelte")), /assets\/icon\.png/);
+});
+
+test("settings is readable and links to capability truth", async () => {
+  const settings = await text(join(UI_ROOT, "src/pages/Settings.svelte"));
+  assert.match(settings, /Review capabilities/);
+  assert.match(settings, /Secrets remain masked server-side/);
+  assert.match(settings, /xpst-settings-grid/);
+});
+
+test("navigation uses one local icon family and exposes all foundation routes", () => {
+  assert.deepEqual(NAV_ITEMS.map((item) => item.id), [
+    "dashboard",
+    "phone",
+    "compose",
+    "connect",
+    "chat",
+    "create",
+    "schedule",
+    "result",
+    "analytics",
+    "videos",
+    "activity",
+    "accounts",
+    "library",
+    "onboarding",
+    "settings",
+    "about",
+  ]);
+  for (const item of NAV_ITEMS) {
+    assert.match(item.icon, /^[a-z-]+$/);
+  }
+  // Every item carries a group, and every group id is a declared group.
+  for (const item of NAV_ITEMS) {
+    assert.match(item.group, /^[a-z]+$/);
+  }
+});
+
+test("hash routing normalizes root, known routes, and unknown routes", () => {
+  assert.equal(currentRoute("#/"), "dashboard");
+  assert.equal(currentRoute("#/analytics"), "analytics");
+  assert.equal(currentRoute("#videos"), "videos");
+  assert.equal(currentRoute("#/not-a-route"), "dashboard");
+});
+
+test("the shell listens to hash and history navigation", async () => {
+  const app = await text(join(UI_ROOT, "src/App.svelte"));
+  assert.match(app, /addEventListener\("hashchange"/);
+  assert.match(app, /addEventListener\("popstate"/);
+  assert.match(app, /removeEventListener\("hashchange"/);
+  assert.match(app, /removeEventListener\("popstate"/);
+});
+
+test("platform and status labels are human-readable without changing API values", () => {
+  assert.equal(platformLabel("youtube"), "YouTube");
+  assert.equal(platformLabel("instagram"), "Instagram");
+  assert.equal(platformLabel("x"), "X");
+  assert.equal(platformLabel("tiktok"), "TikTok");
+  assert.equal(statusLabel("healthy"), "Healthy");
+  assert.equal(statusLabel("ok"), "OK");
+  assert.equal(statusLabel("degraded"), "Degraded");
+});
+
+test("dashboard empty action is placed before health and copy does not promise duplicate data", async () => {
+  const dashboard = await text(join(UI_ROOT, "src/pages/Dashboard.svelte"));
+  const emptyPosition = dashboard.indexOf("No posts tracked yet");
+  const healthPosition = dashboard.indexOf("Engine health");
+  assert.ok(emptyPosition >= 0 && emptyPosition < healthPosition);
+  assert.match(dashboard, /Tracked source posts/);
+  assert.match(dashboard, /Platform post records/);
+  assert.doesNotMatch(dashboard, /platform health will appear here/);
+  assert.match(dashboard, /Readiness/);
+  assert.match(dashboard, /Create post/);
+});
+
+test("loading state exposes a bounded retry path", async () => {
+  const skeleton = await text(join(UI_ROOT, "src/lib/components/LoadingSkeleton.svelte"));
+  assert.match(skeleton, /setTimeout/);
+  assert.match(skeleton, /onRetry/);
+  assert.match(skeleton, /Retry/);
+  assert.match(skeleton, /aria-live/);
+});
+
+test("the icon dependency and license manifest are explicit and offline-safe", async () => {
+  const packageJson = JSON.parse(await text(join(UI_ROOT, "package.json")));
+  assert.ok(packageJson.dependencies["lucide-svelte"] || packageJson.dependencies["@lucide/svelte"]);
+  const manifest = await text(join(UI_ROOT, "THIRD_PARTY_NOTICES.md"));
+  assert.match(manifest, /lucide-svelte/i);
+  assert.match(manifest, /ISC/i);
+  assert.match(manifest, /@fontsource-variable\/inter/i);
+  assert.match(manifest, /SIL Open Font License/i);
+  assert.match(manifest, /assets\/icon\.png/);
+  assert.doesNotMatch(manifest, /https:\/\/fonts\.googleapis\.com/);
+});
+
+test("create route exposes local preflight and no-network copy", async () => {
+  const create = await text(join(UI_ROOT, "src/pages/Create.svelte"));
+  assert.match(create, /Run preflight/);
+  assert.match(create, /never uploads media/);
+  assert.match(await text(join(UI_ROOT, "src/lib/api.js")), /api\/preflight/);
+});
+
+test("home shows a checking state instead of guessing while readiness is pending", async () => {
+  const dashboard = await text(join(UI_ROOT, "src/pages/Dashboard.svelte"));
+  assert.match(dashboard, /readiness_pending/);
+  assert.match(dashboard, /readiness\?\.pending/);
+  assert.match(dashboard, /Live account checks are still running\./);
+  // bounded polling, never an unbounded loop
+  assert.match(dashboard, /pendingPolls < 8/);
+  // The pending verdict itself comes from the engine's readiness document.
+  assert.match(
+    dashboard,
+    /import \{ readinessVerdict, roleLabel \} from "\.\.\/lib\/labels\.js"/
+  );
+  assert.match(dashboard, /const verdict = \$derived\(readinessVerdict\(readiness\)\)/);
+});
+
+test("home renders one distinguishable readiness row per platform role", async () => {
+  const dashboard = await text(join(UI_ROOT, "src/pages/Dashboard.svelte"));
+
+  // A row is identified by (platform, role) and the role is RENDERED: a
+  // platform with three roles used to produce three rows that all read
+  // "Instagram / degraded / Review" with nothing telling them apart.
+  assert.match(dashboard, /\{row\.role_label \?\? roleLabel\(row\.role\)\}/);
+  assert.match(dashboard, /aria-label="Readiness roles needing attention"/);
+  assert.match(dashboard, /<StatusBadge status=\{row\.state\} \/>/);
+  // A row with nothing to say is not rendered at all.
+  assert.match(
+    dashboard,
+    /filter\(\(row\) => row && row\.platform && row\.role && row\.state\)/
+  );
+  // The old flat row printed only the state text with no role.
+  assert.doesNotMatch(dashboard, /blocker\.state\.replaceAll/);
+});
+
+test("the readiness verdict is the engine's, shared with the onboarding payload", async () => {
+  const labels = await text(join(UI_ROOT, "src/lib/labels.js"));
+  assert.match(labels, /export function readinessVerdict/);
+  // Rendered from the engine's document, with a fallback only for payloads
+  // that predate the field — no screen invents a second verdict.
+  assert.match(labels, /readiness\?\.verdict/);
+  assert.match(labels, /export function roleLabel/);
+  assert.match(labels, /video_destination: "Destination"/);
+
+  const onboarding = await text(join(UI_ROOT, "src/pages/Onboarding.svelte"));
+  assert.match(onboarding, /readinessVerdict\(readiness\)/);
+});
+
+test("the primary button paints its own background colour pair", async () => {
+  const css = await text(join(UI_ROOT, "src/app.css"));
+  const rule = css.slice(css.indexOf(".xpst-button {"), css.indexOf(".xpst-button:hover"));
+  assert.match(rule, /background: var\(--xpst-color-primary\)/);
+  assert.match(rule, /color: var\(--xpst-color-on-primary\)/);
+});
+
+test("home readiness copy comes from the engine verdict, never a local opinion", async () => {
+  const dashboard = await text(join(UI_ROOT, "src/pages/Dashboard.svelte"));
+  // The card copy is the engine's readiness verdict detail, so it cannot
+  // contradict the Create-post action the same payload offers.
+  assert.match(dashboard, /<Card description=\{verdict\.detail\}>/);
+  assert.match(dashboard, /readinessVerdict\(readiness\)/);
+  // No locally invented readiness wording (the engine owns these strings).
+  assert.doesNotMatch(dashboard, /"Needs attention"/);
+  assert.doesNotMatch(dashboard, /Ready to post\./);
+});
+
+test("engine health is labelled as a recorded run, not live truth", async () => {
+  const dashboard = await text(join(UI_ROOT, "src/pages/Dashboard.svelte"));
+  assert.match(dashboard, /Engine health \(last recorded\)/);
+  assert.match(dashboard, /not a live re-check/);
+  // The pill reports the RECORDED status it sits next to (the engine decides
+  // it from the recorded platform block). It used to be flipped to "degraded"
+  // by the live role states, which put a Degraded pill beside its own
+  // "YouTube OK" row; the live verdict is the Readiness card above.
+  assert.match(dashboard, /<StatusBadge status=\{health\?\.status \?\? "unknown"\} \/>/);
+});
+
+test("home uses explicit empty-value copy and actionable recovery links", async () => {
+  const dashboard = await text(join(UI_ROOT, "src/pages/Dashboard.svelte"));
+  assert.doesNotMatch(dashboard, /best_platform \|\| "—"/);
+  assert.match(dashboard, /best_platform \|\| "None yet"/);
+  assert.match(dashboard, /class="xpst-inline-link" href="#\/accounts"/);
+  assert.match(await text(join(UI_ROOT, "src/app.css")), /\.xpst-inline-link/);
+});

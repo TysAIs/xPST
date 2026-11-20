@@ -1,0 +1,30 @@
+{
+  "captured_from": "src/xpst/dashboard/devices.py",
+  "refusals": {
+    "expired": {
+      "code": "PAIR_CODE_EXPIRED",
+      "message": "That pairing code expired. Run `xpst pair` again for a fresh one.",
+      "status_code": 401
+    },
+    "shape": {
+      "code": "PAIR_CODE_SHAPE",
+      "message": "A pairing code must be 8 characters.",
+      "status_code": 400
+    },
+    "spent": {
+      "code": "PAIR_CODE_SPENT",
+      "message": "That pairing code was already used. Run `xpst pair` again for a new one.",
+      "status_code": 401
+    },
+    "too_many_attempts": {
+      "code": "PAIR_TOO_MANY_ATTEMPTS",
+      "message": "Too many wrong pairing codes. Run `xpst pair` on the engine machine for a fresh one.",
+      "status_code": 429
+    },
+    "unknown": {
+      "code": "PAIR_CODE_UNKNOWN",
+      "message": "That pairing code is not valid. Run `xpst pair` on the engine machine for a fresh one.",
+      "status_code": 401
+    }
+  }
+}

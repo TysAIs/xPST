@@ -1,0 +1,1648 @@
+"""Instagram Reels uploader for xPST
+
+Uses instagrapi for authentication and video uploads to Instagram Reels.
+
+Authentication:
+- Session-based authentication via instagrapi
+- Delegates session management to SessionManager
+- Supports session export from browser cookies
+
+Upload specs:
+- Reels: Vertical video (9:16), max 90 seconds
+- Recommended: 720p @ CRF 23, Main@L3.0, fixed GOP 72, 30fps
+- Max file size: 250 MB
+"""
+
+from __future__ import annotations
+
+import contextlib
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from xpst.anti_bot import AntiBotProtection
+
+if TYPE_CHECKING:
+    import httpx
+
+    from xpst.config import XPSTConfig
+from xpst.content import TEXT_LIMITS
+from xpst.platforms.base import (
+    DeleteOutcome,
+    DeleteResult,
+    PlatformHealth,
+    PlatformRegistry,
+    PlatformUploader,
+    UploadResult,
+)
+from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
+from xpst.reconcile import PublishAttempt, ReconcileOutcome, ReconcileResult
+from xpst.utils.errors import truncate_error
+from xpst.utils.graph_api import graph_api_url, graph_upload_url
+from xpst.utils.logger import get_logger
+from xpst.utils.probe_errors import classify_probe_failure, probe_details_from_error
+
+logger = get_logger(__name__)
+
+
+# instagrapi publishes the Reel and *then* calls `qe/expose/` — an experiment
+# telemetry ping (see instagrapi/mixins/clip.py) — before it returns the created
+# Media. When that unrelated call fails, the Reel is already live but no id is
+# ever returned to us. Such an error must be reconciled against the account
+# instead of being reported as a plain failure: otherwise the post exists with
+# no recorded id and `delete` can never remove it.
+_POST_PUBLISH_ERROR_MARKERS = ("qe/expose", "expose/")
+_RECONCILE_WINDOW = timedelta(minutes=30)
+
+#: Meta Graph error codes that mean "slow down": 4 (app request limit),
+#: 17 (user request limit), 32 (Page request limit), 613 (calls-per-hour).
+#: Meta's prose for these is usually "Please reduce the amount of data you're
+#: asking for…" — no "rate limit" wording, no 429 anywhere in the body — so the
+#: code is the only reliable throttle signal on the Graph publishing path.
+_META_THROTTLE_CODES = frozenset({4, 17, 32, 613})
+
+
+def _rate_limited_result(
+    error_text: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> UploadResult:
+    """Hand a throttle back to the service retry layer, keeping its hint.
+
+    The service owns the retry economy and the cooldown state machine, so a
+    throttle must reach it with the provider's own ``Retry-After`` intact:
+    dropping the hint cost the cooldown a 60s floor where the provider had
+    asked for 15 minutes, and left the retry layer unable to tell a short
+    throttle (worth retrying) from a long one (futile to re-ask).
+    """
+    from xpst.utils.retry import parse_declared_retry_after_s
+
+    message = "IG_RATE_LIMITED: Too many requests, try again later"
+    declared = parse_declared_retry_after_s(error_text)
+    if declared:
+        message = f"{message} (Retry-After: {int(declared)})"
+    meta = {"rate_limited": True}
+    if metadata:
+        meta.update(metadata)
+    return UploadResult(
+        success=False,
+        error=message,
+        platform="instagram",
+        metadata=meta,
+    )
+
+
+def _meta_throttle_response(response: Any, body: str) -> bool:
+    """Whether a Graph response is a throttle, by status or Meta error code."""
+    if getattr(response, "status_code", None) == 429:
+        return True
+    try:
+        import json
+
+        payload = json.loads(body)
+    except (TypeError, ValueError):
+        return False
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return False
+    try:
+        return int(error.get("code")) in _META_THROTTLE_CODES
+    except (TypeError, ValueError):
+        return False
+
+
+def _normalize_caption(text: str | None) -> str:
+    """Collapse whitespace and case so a caption can match the published media."""
+    return " ".join((text or "").split()).strip().lower()
+
+
+# ── Read-path failure classification (analytics fetch side) ──────────────────
+# Reading metrics goes through the same unofficial web API as uploading
+# (instagrapi), and its failures look alike in a traceback while needing
+# different fixes:
+#
+# * an HTML login/interstitial page served with HTTP **200** — instagrapi then
+#   raises ``JSONDecodeError: Expecting value`` and the caller sees a parse
+#   error instead of "your session is not logged in" (captured live
+#   2026-11-17: ``https://www.instagram.com/api/v1/media/1/info/`` answers
+#   text/html, 399873 chars, status 200, anonymous);
+# * a rejected hardcoded GraphQL ``doc_id`` — provider constant drift, reported
+#   as ``Missing 'data' in doc_id GraphQL response … Summary: 'Query Error'``;
+# * an expired/invalid sessionid — ``login_required``.
+#
+# One home, next to the uploader that shares the library, so the remediation
+# text cannot drift from the failure. Analytics must never publish a number it
+# could not read, and must never present one of these as "no engagement".
+INSTAGRAM_FETCH_LOGIN_WALL = "instagram_login_wall"
+INSTAGRAM_FETCH_QUERY_STALE = "instagram_query_stale"
+INSTAGRAM_FETCH_RATE_LIMITED = "instagram_rate_limited"
+INSTAGRAM_FETCH_SESSION_MISSING = "instagram_session_missing"
+INSTAGRAM_FETCH_UNKNOWN = "instagram_fetch_failed"
+
+INSTAGRAM_FETCH_REMEDIATION: dict[str, str] = {
+    INSTAGRAM_FETCH_LOGIN_WALL: (
+        "Instagram answered with an HTML login page instead of JSON, so the stored "
+        "sessionid is not accepted by the web API. Re-authenticate with: xpst connect "
+        "instagram (then re-run xpst analytics --live). If it recurs the account is on "
+        "a login checkpoint: open instagram.com in a browser, clear the prompt, re-connect."
+    ),
+    INSTAGRAM_FETCH_QUERY_STALE: (
+        "instagrapi's hardcoded GraphQL doc_id for media metrics is being rejected "
+        "(Summary: Query Error) — that id is a provider constant that drifts. Upgrade "
+        "instagrapi (pip install -U instagrapi) and retry; on an older pin, switch this "
+        "account to auth_mode: graph_api with graph_access_token + graph_ig_user_id."
+    ),
+    INSTAGRAM_FETCH_RATE_LIMITED: (
+        "Instagram is throttling this session. Wait out the window (minutes to an hour) "
+        "before re-running; repeated retries extend it."
+    ),
+    INSTAGRAM_FETCH_SESSION_MISSING: (
+        "No Instagram session file was found for this config directory. Run: xpst "
+        "connect instagram, or point accounts.instagram.session_file at the existing "
+        "session export."
+    ),
+    INSTAGRAM_FETCH_UNKNOWN: (
+        "Re-run with XPST_LOG_LEVEL=DEBUG to see the provider response, then "
+        "re-authenticate with: xpst connect instagram"
+    ),
+}
+
+_IG_LOGIN_WALL_MARKERS = (
+    "<!doctype",
+    "<html",
+    "login_required",
+    "login required",
+    "challenge_required",
+    "checkpoint_required",
+    "checkpoint_url",
+)
+_IG_RATE_LIMIT_MARKERS = (
+    "429",
+    "too many requests",
+    "please wait a few minutes",
+    "rate limit",
+)
+
+
+def looks_like_html(text: str | None) -> bool:
+    """Whether a provider body is an HTML page rather than an API payload.
+
+    Instagram serves its login wall with HTTP 200, so the body is the only
+    reliable signal that a request was not answered as an API call.
+    """
+    body = (text or "").lstrip()[:512].lower()
+    return body.startswith("<!doctype") or body.startswith("<html")
+
+
+def classify_instagram_fetch_error(exc: BaseException | str) -> str:
+    """Map an Instagram read failure to a machine reason code.
+
+    Never raises; an unrecognised error returns
+    :data:`INSTAGRAM_FETCH_UNKNOWN` so the caller still reports a classified
+    failure instead of a bare string.
+    """
+    import json as _json
+
+    text = str(exc or "")
+    lowered = text.lower()
+
+    # Stale doc_id first: its text can also contain "Query Error", which must
+    # not be mistaken for a login wall.
+    if "doc_id" in lowered and ("query error" in lowered or "missing 'data'" in lowered):
+        return INSTAGRAM_FETCH_QUERY_STALE
+    if isinstance(exc, _json.JSONDecodeError) or looks_like_html(text.removeprefix("Error: ")):
+        return INSTAGRAM_FETCH_LOGIN_WALL
+    if any(marker in lowered for marker in _IG_LOGIN_WALL_MARKERS):
+        return INSTAGRAM_FETCH_LOGIN_WALL
+    if any(marker in lowered for marker in _IG_RATE_LIMIT_MARKERS):
+        return INSTAGRAM_FETCH_RATE_LIMITED
+    return INSTAGRAM_FETCH_UNKNOWN
+
+
+def instagram_fetch_shape(exc: BaseException | str) -> dict[str, Any]:
+    """Bounded description of a failed Instagram read for the log.
+
+    ``{"reason", "kind", "sample"}`` — ``kind`` is ``html``/``json_error``/
+    ``error_text`` so a triager can tell a wall from an API error without a
+    packet capture. A ``JSONDecodeError`` keeps the offending body in ``doc``;
+    that body is the only evidence that the parse failure was a login page, so
+    its head is carried into the sample (bounded, redacted). No ids, tokens or
+    handles are copied out.
+    """
+    from xpst.utils.redaction import redact_text
+
+    text = str(exc or "")
+    body = ""
+    if isinstance(exc, ValueError):
+        doc = getattr(exc, "doc", None)
+        if isinstance(doc, str):
+            body = doc
+    if looks_like_html(body) or looks_like_html(text.removeprefix("Error: ")):
+        kind = "html"
+        text = body or text
+    elif isinstance(exc, ValueError) and "Expecting value" in text:
+        kind = "json_error"
+        text = body or text
+    else:
+        kind = "error_text"
+    return {
+        "reason": classify_instagram_fetch_error(exc),
+        "kind": kind,
+        "sample": redact_text(text)[:400],
+    }
+
+
+
+class InstagramUploader(PlatformUploader):
+    """Instagram Reels uploader with session persistence and quality encoding."""
+
+    # Instagram limits
+    #: The same number the preflight gate refuses on (``xpst.content``): the
+    #: uploader truncates at it, so a local literal here could silently disagree
+    #: with what preflight allowed. One table, read by both.
+    MAX_CAPTION_LENGTH = TEXT_LIMITS["instagram"]
+    MAX_HASHTAGS = 30
+    # One carousel holds at most this many items. It is a refusal boundary, not
+    # a truncation boundary: xPST never silently drops items from a carousel.
+    MAX_CAROUSEL_ITEMS = 10
+
+    # ── retry economy (pinned by ``xpst.utils.request_budget``) ───────────
+    #: Extra attempts the instagrapi path makes for TRANSIENT errors (503,
+    #: timeouts). 3 extra attempts = at most 4 provider requests per upload
+    #: call.
+    MAX_TRANSIENT_RETRIES = 3
+    #: A rate limit is NOT retried here: the service's ``retry_operation`` owns
+    #: that retry and records the cooldown. Looping on a throttle in both
+    #: layers multiplied one throttled post into 16 provider requests / ~96s of
+    #: sleeping (measured). ``tests/test_retry_economy_budget.py`` derives the
+    #: worst case from this flag and fails loudly if it is ever flipped back.
+    RETRIES_A_THROTTLE = False
+
+    def __init__(self, config: XPSTConfig) -> None:
+        """Initialize Instagram uploader with lazy client caching."""
+        super().__init__(config)
+        self._client = None  # Cached instagrapi Client
+
+    @property
+    def manifest(self) -> ProviderManifest:
+        """Return Instagram video-destination capabilities for active auth mode."""
+        graph_api = (
+            self.config.instagram.auth_mode == "graph_api"
+            and bool(self.config.instagram.graph_access_token)
+        )
+        return ProviderManifest(
+            name="instagram",
+            display_name="Instagram Reels",
+            roles=(ProviderRole.VIDEO_DESTINATION, ProviderRole.DESTINATION),
+            capabilities=(
+                ProviderCapability.UPLOAD,
+                ProviderCapability.DELETE,
+                ProviderCapability.CAROUSEL,
+                ProviderCapability.HEALTH,
+                ProviderCapability.OFFICIAL_API
+                if graph_api
+                else ProviderCapability.COOKIE_AUTH,
+                ProviderCapability.RATE_LIMITS,
+            ),
+            auth_mode=AuthMode.GRAPH_API if graph_api else AuthMode.SESSION,
+            is_official_api=graph_api,
+            docs_url=(
+                "https://developers.facebook.com/docs/instagram-api"
+                if graph_api
+                else "https://github.com/subzeroid/instagrapi"
+            ),
+            notes=(
+                "Uses the official Meta Graph API."
+                if graph_api
+                else "Uses persisted Instagram sessions through instagrapi; not an official Meta publishing API."
+            ),
+            extra={
+                "content": ("video", "image", "carousel"),
+                "max_caption_length": self.MAX_CAPTION_LENGTH,
+                "max_carousel_items": self.MAX_CAROUSEL_ITEMS,
+            },
+        )
+
+    async def _get_client(self):
+        """Get an authenticated Instagram client via SessionManager.
+
+        Loads session from SessionManager, authenticates via ``login_by_sessionid``
+        to bypass anti-bot detection, and caches the client.
+
+        Returns:
+            Authenticated instagrapi Client.
+
+        Raises:
+            FileNotFoundError: If session file is missing.
+            ValueError: If sessionid is not found or session is expired.
+        """
+        if self._client is None:
+            if self._session_manager:
+                self._client = await self._session_manager.get_instagram_client(
+                    self.config.instagram.session_file,
+                    self.config.instagram.username,
+                    self.config.instagram.password,
+                )
+            else:
+                # Fallback for direct instantiation (testing)
+                self._client = await self._get_client_direct()
+        return self._client
+
+    async def _get_client_direct(self):
+        """Get Instagram client directly (fallback when no SessionManager)."""
+        try:
+            from instagrapi import Client
+        except ImportError:
+            raise ImportError(
+                "instagrapi is required for Instagram uploader. "
+                "Install it with: pip install instagrapi"
+            )
+
+        # Direct file-based session loading (fallback)
+        session_file = Path(self.config.instagram.session_file)
+
+        if not session_file.exists():
+            raise FileNotFoundError(
+                f"Instagram session file not found at {session_file}. "
+                "Run: xpst auth instagram"
+            )
+
+        # Load session
+        import json
+
+        try:
+            with open(session_file) as f:
+                data = json.load(f)
+        except json.JSONDecodeError:
+            raise ValueError(f"Invalid JSON in session file: {session_file}")
+
+        # Extract sessionid from various formats
+        sessionid = (
+            data.get("authorization_data", {}).get("sessionid")
+            or data.get("cookies", {}).get("sessionid")
+            or data.get("sessionid")
+        )
+
+        if not sessionid:
+            raise ValueError("No sessionid found in session file")
+
+        # Create client with anti-bot protections
+        anti_bot = AntiBotProtection()
+        client = Client()
+
+        # Use rotated User-Agent from anti_bot instead of hardcoded UA
+        client.set_user_agent(anti_bot.get_user_agent())
+
+        # Apply stable device-ID for this account (anti-ban)
+        username = self.config.instagram.username or "default"
+        device_id = self.config.instagram.device_id or AntiBotProtection.generate_device_id(username)
+        device_settings = AntiBotProtection.get_instagram_device_string(device_id)
+        try:
+            client.set_device(device_settings)
+            logger.debug(f"Instagram device-ID set for @{username}")
+        except Exception as e:
+            logger.debug(f"Could not set device on Instagram client: {e}")
+
+        # Apply proxy if configured
+        if self.config.instagram.proxy:
+            AntiBotProtection.apply_proxy_to_instagrapi(client, self.config.instagram.proxy)
+
+        # Login with session
+        try:
+            client.login_by_sessionid(sessionid)
+        except Exception as e:
+            raise ValueError(f"Session expired: {e}") from e
+
+        return client
+
+    async def upload(self, video_path: Path, caption: str) -> UploadResult:
+        """Upload a video to Instagram Reels.
+
+        Dispatches based on auth_mode:
+        - "graph_api": Uses official Meta Graph API (ban-safe, official)
+        - "session": Uses instagrapi (unofficial, session-based)
+
+        Args:
+            video_path: Path to video file
+            caption: Caption for the reel
+
+        Returns:
+            UploadResult with media code and URL
+        """
+        if self.config.instagram.auth_mode == "graph_api":
+            return await self._upload_graph_api(video_path, caption)
+        return await self._upload_instagrapi(video_path, caption)
+
+    async def _upload_graph_api(self, video_path: Path, caption: str) -> UploadResult:
+        """Upload via official Meta Graph API (ban-safe, official path).
+
+        Requires Instagram Business account + linked Facebook Page.
+
+        Supports two upload modes:
+        - **URL-based**: When video_path is an http(s) URL, passes it directly
+          to the Graph API ``video_url`` parameter.
+        - **Resumable upload**: When video_path is a local file, uses Meta's
+          resumable upload endpoint (``rupload.facebook.com``) to upload the
+          binary directly — no public URL or CDN required.
+
+        Raises:
+            ValueError: If video_path is empty or unreadable.
+        """
+        import httpx
+
+        token = self.config.instagram.graph_access_token
+        ig_user_id = self.config.instagram.graph_ig_user_id
+
+        if not token or not ig_user_id:
+            return UploadResult(
+                success=False,
+                error="IG_GRAPH_API_NOT_CONFIGURED: Set graph_access_token and graph_ig_user_id in config, "
+                      "or switch auth_mode to 'session' for instagrapi-based uploads.",
+                platform="instagram",
+            )
+
+        # A *verified* personal account cannot publish through Meta, whatever
+        # the token says — refuse here with the guided switch instead of
+        # letting Meta's opaque access-denied be the user's first hint.
+        # "" (never probed) and "unknown" deliberately still attempt the
+        # upload: an unprobed account is not a proven personal one.
+        if self.config.instagram.account_type == "personal":
+            from xpst.platforms.instagram_account import (
+                AccountTypeFinding,
+                InstagramAccountType,
+                guidance_message,
+            )
+
+            guidance = guidance_message(
+                AccountTypeFinding(InstagramAccountType.PERSONAL, source="stored_verdict")
+            )
+            return UploadResult(
+                success=False,
+                error=guidance or "Instagram account is personal; switch to a Creator account.",
+                platform="instagram",
+            )
+
+        # Truncate caption if needed
+        if len(caption) > self.MAX_CAPTION_LENGTH:
+            caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
+
+        base_url = graph_api_url(str(ig_user_id))
+        video_str = str(video_path)
+
+        try:
+            async with httpx.AsyncClient(timeout=300) as client:
+                if video_str.startswith(("http://", "https://")):
+                    container_id = await self._graph_api_create_url_container(
+                        client, base_url, token, video_str, caption
+                    )
+                else:
+                    # Local file → resumable upload
+                    container_id = await self._graph_api_resumable_upload(
+                        client, base_url, token, ig_user_id, Path(video_path), caption
+                    )
+
+                if isinstance(container_id, UploadResult):
+                    return container_id  # Error occurred
+
+                # Publish the media container
+                logger.info(f"Publishing Instagram Graph API media: {container_id}")
+                resp = await client.post(
+                    f"{base_url}/media_publish",
+                    data={
+                        "creation_id": container_id,
+                        "access_token": token,
+                    },
+                )
+                resp.raise_for_status()
+                media_id = resp.json().get("id")
+
+                if not media_id:
+                    return UploadResult(
+                        success=False,
+                        error=f"IG_GRAPH_API_ERROR: No media ID in response: {truncate_error(resp.text)}",
+                        platform="instagram",
+                    )
+
+                # Get permalink
+                permalink = ""
+                try:
+                    resp = await client.get(
+                        graph_api_url(str(media_id)),
+                        params={"fields": "permalink", "access_token": token},
+                    )
+                    permalink = resp.json().get("permalink", "")
+                except Exception:
+                    pass
+
+                logger.info(f"Posted to Instagram via Graph API: {permalink or media_id}")
+                return UploadResult(
+                    success=True,
+                    post_id=str(media_id),
+                    post_url=permalink or f"https://www.instagram.com/reel/{media_id}/",
+                    platform="instagram",
+                    metadata={
+                        "caption_length": len(caption),
+                        "auth_mode": "graph_api",
+                        "container_id": container_id,
+                        "upload_type": "url" if video_str.startswith(("http://", "https://")) else "resumable",
+                    },
+                )
+
+        except httpx.HTTPStatusError as e:
+            error_body = truncate_error(e.response.text) if e.response else str(e)
+            logger.error(f"Instagram Graph API HTTP error: {e}")
+            # A Meta throttle on the Graph publishing path arrives as HTTP 429
+            # with a body whose only signal is the numeric error code (4/17/32/
+            # 613) — no "rate limit" wording anywhere. Left unmapped it looked
+            # like a generic failure, so no cooldown was recorded and the next
+            # video walked straight back into the same wall.
+            if _meta_throttle_response(getattr(e, "response", None), error_body):
+                hint = ""
+                with contextlib.suppress(Exception):
+                    hint = (e.response.headers.get("retry-after") or "").strip()
+                error = (
+                    "IG_RATE_LIMITED: Meta throttled the Graph API — backing off"
+                    + (f" (Retry-After: {hint})" if hint else "")
+                )
+                return UploadResult(success=False, error=error, platform="instagram")
+            # If Meta itself says the account went personal (a switch-back
+            # after connect), record that fact so the next status shows it and
+            # the next upload refuses fast with the guided steps.
+            from xpst.platforms.instagram_account import (
+                PERSONAL_REFUSAL_MARKERS,
+                classify_graph_payload,
+                persist_account_type,
+            )
+
+            if any(marker in error_body.lower() for marker in PERSONAL_REFUSAL_MARKERS):
+                persist_account_type(self.config, classify_graph_payload({"error": {"message": error_body}}))
+            return UploadResult(
+                success=False,
+                error=f"IG_GRAPH_API_HTTP_ERROR: {error_body}",
+                platform="instagram",
+            )
+        except Exception as e:
+            logger.error(f"Instagram Graph API upload failed: {e}")
+            return UploadResult(
+                success=False,
+                error=f"IG_GRAPH_API_ERROR: {truncate_error(str(e))}",
+                platform="instagram",
+            )
+
+    async def _graph_api_create_url_container(
+        self,
+        client: httpx.AsyncClient,
+        base_url: str,
+        token: str,
+        video_url: str,
+        caption: str,
+    ) -> str | UploadResult:
+        """Create a media container using a public video URL.
+
+        Returns the container ID on success, or an UploadResult on failure.
+        """
+        logger.info(f"Creating Instagram Graph API media container for URL: {video_url}")
+        resp = await client.post(
+            f"{base_url}/media",
+            data={
+                "media_type": "REELS",
+                "video_url": video_url,
+                "caption": caption,
+                "access_token": token,
+            },
+        )
+        resp.raise_for_status()
+        container_id = resp.json().get("id")
+
+        if not container_id:
+            return UploadResult(
+                success=False,
+                error=f"IG_GRAPH_API_ERROR: No container ID in response: {truncate_error(resp.text)}",
+                platform="instagram",
+            )
+        return container_id
+
+    async def _graph_api_resumable_upload(
+        self,
+        client: httpx.AsyncClient,
+        base_url: str,
+        token: str,
+        ig_user_id: str,
+        video_path: Path,
+        caption: str,
+    ) -> str | UploadResult:
+        """Upload a local video file via Meta's resumable upload endpoint.
+
+        Flow:
+        1. POST ``/{ig-user-id}/media`` with ``upload_type=resumable`` → container ID
+        2. PUT binary chunks to ``rupload.facebook.com/ig-api-upload/...``
+        3. Poll ``/{container-id}?fields=status`` until ``FINISHED``
+        4. Return container ID for the caller to publish
+
+        Returns the container ID on success, or an UploadResult on failure.
+        """
+
+        self._validate_video(video_path)
+        file_size = video_path.stat().st_size
+
+        # Step 1: Initialize resumable upload session
+        logger.info(f"Initializing IG resumable upload for {video_path.name} ({file_size} bytes)")
+        resp = await client.post(
+            f"{base_url}/media",
+            data={
+                "media_type": "REELS",
+                "upload_type": "resumable",
+                "caption": caption,
+                "access_token": token,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        container_id = data.get("id")
+
+        if not container_id:
+            return UploadResult(
+                success=False,
+                error=f"IG_GRAPH_API_ERROR: No container ID for resumable upload: {truncate_error(resp.text)}",
+                platform="instagram",
+            )
+
+        # Step 2: Upload binary data to rupload endpoint
+        upload_url = graph_upload_url(str(container_id))
+        chunk_size = 8 * 1024 * 1024  # 8 MB chunks
+
+        logger.info(f"Uploading video data to resumable endpoint ({chunk_size // (1024*1024)} MB chunks)")
+
+        with open(video_path, "rb") as f:
+            offset = 0
+            while offset < file_size:
+                chunk = f.read(chunk_size)
+                chunk_len = len(chunk)
+                headers = {
+                    "Authorization": f"OAuth {token}",
+                    "X-Entity-Length": str(file_size),
+                    "X-Entity-Name": video_path.name,
+                    "X-Entity-Type": "video/mp4",
+                    "Offset": str(offset),
+                    "Content-Length": str(chunk_len),
+                }
+                resp = await client.put(upload_url, content=chunk, headers=headers)
+                resp.raise_for_status()
+                offset += chunk_len
+                progress = min(100, int(offset / file_size * 100))
+                logger.info(f"IG resumable upload: {progress}%")
+
+        # Step 3: Poll for processing status
+        import asyncio
+
+        for _ in range(60):  # Max 5 minutes (60 × 5s)
+            resp = await client.get(
+                graph_api_url(str(container_id)),
+                params={"fields": "status", "access_token": token},
+            )
+            resp.raise_for_status()
+            status = resp.json().get("status", {}).get("video_status", "")
+
+            if status == "FINISHED":
+                logger.info("IG resumable upload processing complete")
+                return container_id
+            elif status == "ERROR":
+                return UploadResult(
+                    success=False,
+                    error="IG_GRAPH_API_PROCESSING_ERROR: Video processing failed on Meta's side",
+                    platform="instagram",
+                )
+
+            await asyncio.sleep(5)
+
+        return UploadResult(
+            success=False,
+            error="IG_GRAPH_API_TIMEOUT: Video processing did not complete within 5 minutes",
+            platform="instagram",
+        )
+
+    @staticmethod
+    async def _instagram_backoff(attempt: int) -> float:
+        """Calculate exponential backoff delay for Instagram retries.
+
+        Returns delay in seconds: base * 2^attempt + jitter.
+        Base is 2s, max 60s, with ±0.5s jitter.
+        """
+        import random
+        base = 2.0
+        max_delay = 60.0
+        delay = min(base * (2 ** attempt), max_delay)
+        jitter = random.uniform(-0.5, 0.5)
+        return max(1.0, delay + jitter)
+
+    async def _reconcile_published_media(
+        self, caption: str, *, within: timedelta = _RECONCILE_WINDOW
+    ) -> Any | None:
+        """Read-only: find a just-published media whose caption matches.
+
+        Used when the upload raised *after* publication (see
+        ``_POST_PUBLISH_ERROR_MARKERS``). Only read methods are called — no
+        upload, publish or delete — so reconciliation can never double-post.
+
+        Returns the matching media object, or ``None`` when the account does not
+        show it (in which case the caller must not claim success).
+        """
+        import asyncio
+
+        try:
+            client = await self._get_client()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Instagram reconciliation could not authenticate: %s", exc)
+            return None
+
+        try:
+            # user_medias is a read-only feed listing; instagrapi is sync.
+            media = await asyncio.to_thread(client.user_medias, client.user_id, 6)
+        except Exception as exc:
+            logger.warning("Instagram reconciliation listing failed: %s", exc)
+            return None
+
+        target = _normalize_caption(caption)
+        cutoff = datetime.now(timezone.utc) - within
+        for item in media or []:
+            taken_at = getattr(item, "taken_at", None)
+            if isinstance(taken_at, datetime):
+                taken_at = taken_at if taken_at.tzinfo else taken_at.replace(tzinfo=timezone.utc)
+                if taken_at < cutoff:
+                    continue
+            if _normalize_caption(getattr(item, "caption_text", "")) == target:
+                return item
+        return None
+
+    async def reconcile_publish(self, attempt: PublishAttempt) -> ReconcileResult:
+        """Read-only: is the attempted Reel on the account after all?
+
+        Used by the retry gate after an unknown outcome (timeout, connection
+        drop, post-publish error). Lists recent media through the same
+        read-only path as :meth:`_reconcile_published_media` — no publish or
+        delete call — and only reports FOUND on a caption match inside the
+        window.
+
+        A single feed listing cannot prove a Reel is missing, so a miss is
+        ``UNKNOWN`` (the gate then blocks the retry) rather than ``ABSENT``.
+        """
+        media = await self._reconcile_published_media(attempt.caption, within=_RECONCILE_WINDOW)
+        if media is None:
+            return ReconcileResult(
+                outcome=ReconcileOutcome.UNKNOWN,
+                detail=(
+                    "the account's recent reels do not show this caption; "
+                    "absence is not proven by a feed listing"
+                ),
+            )
+        media_id = getattr(media, "pk", None) or getattr(media, "id", None)
+        code = getattr(media, "code", None)
+        return ReconcileResult(
+            outcome=ReconcileOutcome.FOUND,
+            post_id=str(media_id) if media_id is not None else attempt.post_id,
+            post_url=(
+                f"https://www.instagram.com/reel/{code}/"
+                if code
+                else attempt.post_url
+            ),
+            detail="listed by the account inside the reconciliation window",
+        )
+
+    async def _upload_instagrapi(self, video_path: Path, caption: str) -> UploadResult:
+        """Upload via instagrapi (session-based, unofficial path).
+
+        Includes anti-ban safeguards:
+        - Pre-upload delay (1-3s with jitter) to mimic human behavior
+        - Retry with exponential backoff for transient errors (503)
+        - Max 3 retry attempts before giving up
+
+        Rate limits are NOT retried here. The service layer's
+        ``retry_operation`` owns that retry (and records the cooldown), so
+        looping again inside the uploader multiplied one throttled post into
+        16 provider requests / ~96s of sleeping.
+        """
+        import asyncio
+        import random
+
+        self._validate_video(video_path)
+
+        # Truncate caption if needed
+        if len(caption) > self.MAX_CAPTION_LENGTH:
+            caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
+
+        max_retries = self.MAX_TRANSIENT_RETRIES
+        last_error = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                # Anti-ban: pre-upload delay with jitter (1-3 seconds)
+                pre_delay = random.uniform(1.0, 3.0)
+                logger.debug(f"Instagram anti-ban: waiting {pre_delay:.1f}s before upload (attempt {attempt + 1})")
+                await asyncio.sleep(pre_delay)
+
+                client = await self._get_client()
+
+                logger.info(f"Uploading to Instagram: {video_path.name} (attempt {attempt + 1})")
+
+                # Generate thumbnail with ffmpeg (avoids MoviePy dependency)
+                thumb_path = video_path.with_suffix(".jpg")
+                try:
+                    import subprocess
+
+                    from xpst.utils.platform import get_ffmpeg_name, resolve_ffmpeg_path
+                    # NOTE: This blocks briefly. Could be moved to thread pool if needed.
+                    subprocess.run(
+                        [resolve_ffmpeg_path() or get_ffmpeg_name(), "-y", "-i", str(video_path), "-ss", "1",
+                         "-vframes", "1", "-q:v", "2", str(thumb_path)],
+                        capture_output=True, timeout=30,
+                    )
+                except Exception as e:
+                    logger.debug("Unexpected error: %s", e)
+                    thumb_path = None
+
+                # Upload as Reel (clip)
+                media = client.clip_upload(
+                    Path(video_path),
+                    caption=caption,
+                    thumbnail=thumb_path if thumb_path and thumb_path.exists() else None,
+                )
+
+                # Cleanup thumbnail
+                if thumb_path and thumb_path.exists():
+                    with contextlib.suppress(Exception):
+                        thumb_path.unlink()
+
+                # Anti-ban: post-upload delay (2-5s) to avoid rapid successive calls
+                post_delay = random.uniform(2.0, 5.0)
+                logger.debug(f"Instagram anti-ban: waiting {post_delay:.1f}s after upload")
+                await asyncio.sleep(post_delay)
+
+                reel_url = f"https://www.instagram.com/reel/{media.code}/"
+                logger.info(f"Posted to Instagram: {reel_url}")
+
+                return UploadResult(
+                    success=True,
+                    post_id=str(media.pk),
+                    post_url=reel_url,
+                    platform="instagram",
+                    metadata={
+                        "code": media.code,
+                        "caption_length": len(caption),
+                        "auth_mode": "session",
+                        "attempts": attempt + 1,
+                    },
+                )
+
+            except Exception as e:
+                error_msg = str(e).lower()
+                last_error = e
+                logger.error(f"Instagram upload failed (attempt {attempt + 1}/{max_retries + 1}): {e}")
+
+                # The Reel may already be live: instagrapi configures/publishes
+                # the media and only then calls `qe/expose/` (an experiment ping)
+                # before returning the created Media. A failure after
+                # publication must be reconciled, never reported as a plain
+                # failure — otherwise the post exists with no recorded id and
+                # `delete` cannot remove it.
+                if any(marker in error_msg for marker in _POST_PUBLISH_ERROR_MARKERS):
+                    reconciled = await self._reconcile_published_media(caption)
+                    if reconciled is not None:
+                        reel_url = f"https://www.instagram.com/reel/{reconciled.code}/"
+                        logger.warning(
+                            "Instagram upload raised '%s' after publication, but the reel is live: "
+                            "reconciled it as %s so it can be deleted",
+                            e,
+                            reel_url,
+                        )
+                        return UploadResult(
+                            success=True,
+                            post_id=str(reconciled.pk),
+                            post_url=reel_url,
+                            platform="instagram",
+                            metadata={
+                                "code": reconciled.code,
+                                "caption_length": len(caption),
+                                "auth_mode": "session",
+                                "attempts": attempt + 1,
+                                "reconciled": True,
+                                "original_error": truncate_error(str(e)),
+                            },
+                        )
+                    return UploadResult(
+                        success=False,
+                        error=(
+                            "IG_UNCONFIRMED: the upload failed after publication and the reel was "
+                            "not found on the account — check the Instagram profile before retrying"
+                        ),
+                        platform="instagram",
+                    )
+
+                # Check for specific errors
+                if "login" in error_msg or "unauthorized" in error_msg or "required" in error_msg:
+                    return UploadResult(
+                        success=False,
+                        error="IG_SESSION_EXPIRED: Run 'xpst auth instagram'",
+                        platform="instagram",
+                    )
+
+                if "rate limit" in error_msg or "too many" in error_msg or "429" in error_msg:
+                    # ONE retry layer, not two. A throttle is the provider
+                    # asking for less traffic; retrying it here *and* in the
+                    # service's ``retry_operation`` cost 4x4 = 16 provider
+                    # requests and ~96s of sleeping for a single post on the
+                    # mode this box runs (instagram.auth_mode: session).
+                    # Hand the throttle back immediately: the service owns the
+                    # retry economy, and its cooldown state machine records the
+                    # pause with the provider's Retry-After.
+                    logger.warning(
+                        "Instagram rate limited (attempt %s/%s) — returning it to the "
+                        "service retry layer instead of looping here",
+                        attempt + 1,
+                        max_retries + 1,
+                    )
+                    return _rate_limited_result(
+                        str(e),
+                        metadata={"uploader_attempts": attempt + 1},
+                    )
+
+                # Retry on 503 / transient server errors
+                if "503" in error_msg or "server error" in error_msg or "timeout" in error_msg:
+                    if attempt < max_retries:
+                        backoff = await self._instagram_backoff(attempt)
+                        logger.warning(f"Instagram transient error, retrying in {backoff:.1f}s: {e}")
+                        await asyncio.sleep(backoff)
+                        continue
+
+                if "video" in error_msg and ("format" in error_msg or "codec" in error_msg):
+                    return UploadResult(
+                        success=False,
+                        error="IG_INVALID_FORMAT: Video format not supported",
+                        platform="instagram",
+                    )
+
+                # Non-retryable error
+                break
+
+        # All retries exhausted or non-retryable error
+        return UploadResult(
+            success=False,
+            error=f"IG_UPLOAD_ERROR: {truncate_error(str(last_error)) if last_error else 'Unknown error'}",
+            platform="instagram",
+        )
+
+    async def _check_health_graph_api(self) -> PlatformHealth:
+        """Check the configured Instagram Graph API account."""
+        import httpx
+
+        ig_config = self.config.instagram
+        if not ig_config.graph_access_token or not ig_config.graph_ig_user_id:
+            return PlatformHealth(
+                platform="instagram",
+                authenticated=False,
+                session_valid=False,
+                error="IG_GRAPH_API_NOT_CONFIGURED: graph_access_token and graph_ig_user_id are required",
+                details={"auth_mode": "graph_api", "probe": "graph_api"},
+            )
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.get(
+                    graph_api_url(str(ig_config.graph_ig_user_id)),
+                    params={
+                        "fields": "id,username,followers_count,account_type",
+                        "access_token": ig_config.graph_access_token,
+                    },
+                )
+            response.raise_for_status()
+            data = response.json()
+            if not data.get("id"):
+                return PlatformHealth(
+                    platform="instagram",
+                    authenticated=False,
+                    session_valid=False,
+                    error="Instagram Graph API returned no user data",
+                    details={"auth_mode": "graph_api", "probe": "graph_api"},
+                )
+            # One probe, two facts: the same payload answers the account-type
+            # question (B2). Store it only when it actually says something —
+            # an absent field keeps the last verified verdict rather than
+            # being overwritten with a guess.
+            from xpst.platforms.instagram_account import (
+                classify_graph_payload,
+                persist_account_type,
+            )
+
+            finding = classify_graph_payload(data)
+            persist_account_type(self.config, finding)
+            details: dict[str, Any] = {
+                "username": data.get("username", ""),
+                "user_id": str(data.get("id", ig_config.graph_ig_user_id)),
+                "auth_mode": "graph_api",
+                "probe": "graph_api",
+                "account_type": (
+                    self.config.instagram.account_type
+                    or finding.account_type.value
+                ),
+                "account_type_source": self.config.instagram.account_type_source,
+            }
+            return PlatformHealth(
+                platform="instagram",
+                authenticated=True,
+                session_valid=True,
+                details=details,
+            )
+        except Exception as exc:  # noqa: BLE001 — health must fail closed
+            return PlatformHealth(
+                platform="instagram",
+                authenticated=False,
+                session_valid=False,
+                error=f"Instagram Graph API health check failed: {truncate_error(str(exc))}",
+                details={"auth_mode": "graph_api", "probe": "graph_api"},
+            )
+
+    async def detect_account_type(self) -> Any:
+        """Answer "can Meta publish to this account?" on the active auth mode.
+
+        Uses one read-only call through the credential the account already
+        has. Never raises: an unreachable account answers
+        ``unknown:<reason>``, never a guessed type.
+        """
+        from xpst.platforms.instagram_account import (
+            classify_session_account_info,
+            detect_graph_account_type,
+            persist_account_type,
+            unknown_finding,
+        )
+
+        ig = self.config.instagram
+        if ig.auth_mode == "graph_api":
+            finding = detect_graph_account_type(ig.graph_ig_user_id, ig.graph_access_token)
+            persist_account_type(self.config, finding)
+            return finding
+        try:
+            client = await self._get_client()
+            account = client.account_info()
+            info_map = {
+                "is_business": bool(getattr(account, "is_business", False)),
+                "business_category_name": getattr(account, "business_category_name", "") or "",
+            }
+            finding = classify_session_account_info(info_map)
+            persist_account_type(self.config, finding)
+            return finding
+        except Exception as exc:  # noqa: BLE001 — an unprobed account is unknown, not personal
+            return unknown_finding(f"session_probe_failed:{type(exc).__name__}")
+
+    async def check_health(self) -> PlatformHealth:
+        """Check Instagram authentication health.
+
+        Returns:
+            PlatformHealth with authentication status
+        """
+        if self.config.instagram.auth_mode == "graph_api":
+            return await self._check_health_graph_api()
+
+        try:
+            client = await self._get_client()
+
+            # Try to get account info to verify auth
+            try:
+                account = client.account_info()
+                from xpst.platforms.instagram_account import (
+                    classify_session_account_info,
+                    persist_account_type,
+                )
+
+                info_map = {
+                    "is_business": bool(getattr(account, "is_business", False)),
+                    "business_category_name": getattr(account, "business_category_name", "") or "",
+                }
+                finding = classify_session_account_info(info_map)
+                persist_account_type(self.config, finding)
+                return PlatformHealth(
+                    platform="instagram",
+                    authenticated=True,
+                    session_valid=True,
+                    details={
+                        "username": account.username,
+                        "user_id": str(account.pk),
+                        "full_name": account.full_name,
+                        "account_type": self.config.instagram.account_type
+                        or finding.account_type.value,
+                        "account_type_source": self.config.instagram.account_type_source,
+                    },
+                )
+            except Exception as exc:
+                failure = classify_probe_failure("instagram", exc, probe="sessionid")
+                return PlatformHealth(
+                    platform="instagram",
+                    authenticated=False,
+                    session_valid=False,
+                    error=failure.error,
+                    details=failure.as_details(),
+                )
+
+        except FileNotFoundError as e:
+            return PlatformHealth(
+                platform="instagram",
+                authenticated=False,
+                session_valid=False,
+                error=str(e),
+            )
+        except ValueError as e:
+            # SessionManager already classified the failure; keep the raw error
+            # and the verdict instead of flattening them back into a string.
+            return PlatformHealth(
+                platform="instagram",
+                authenticated=False,
+                session_valid=False,
+                error=str(e),
+                details=probe_details_from_error(e),
+            )
+        except Exception as e:
+            failure = classify_probe_failure("instagram", e, probe="sessionid")
+            return PlatformHealth(
+                platform="instagram",
+                authenticated=False,
+                session_valid=False,
+                error=failure.error,
+                details=failure.as_details(),
+            )
+
+    async def delete(
+        self,
+        post_id: str,
+        *,
+        soft: bool = False,
+        visibility: str | None = None,
+    ) -> DeleteResult:
+        """Delete a post from Instagram (hard delete via instagrapi)."""
+        try:
+            client = await self._get_client()
+            result = client.media_delete(post_id)
+            if result:
+                logger.info(f"Deleted Instagram post: {post_id}")
+                return DeleteResult(
+                    outcome=DeleteOutcome.DELETED,
+                    platform=self.platform_name,
+                    post_id=post_id,
+                )
+            return DeleteResult(
+                outcome=DeleteOutcome.PENDING,
+                platform=self.platform_name,
+                post_id=post_id,
+                detail="instagrapi media_delete returned False",
+            )
+        except Exception as e:
+            logger.error(f"Failed to delete Instagram post {post_id}: {e}")
+            return DeleteResult(
+                outcome=DeleteOutcome.PENDING,
+                platform=self.platform_name,
+                post_id=post_id,
+                detail=truncate_error(str(e)),
+            )
+
+    async def upload_image(self, image_path: Path, caption: str) -> UploadResult:
+        """Publish a single image to the Instagram feed.
+
+        Dispatches on auth_mode exactly like :meth:`upload`:
+
+        - ``graph_api``: official Meta Graph API. Feed photos are published from
+          a publicly reachable ``image_url``; a local file cannot be sent, and
+          saying so is the honest answer (Meta's content-publishing contract).
+        - ``session``: instagrapi ``photo_upload`` — local file, JPEG only.
+
+        The image is validated against the shard of the media spec matrix that
+        applies to Instagram (``xpst.media.specs``: JPEG, ≤ 8 MB, aspect within
+        4:5–1.91:1) *before* the client is touched, so an unsupported image
+        never reaches Instagram.
+
+        Args:
+            image_path: Path to the image file (or an http(s) URL on graph_api).
+            caption: Caption for the post.
+
+        Returns:
+            UploadResult with media code and URL.
+        """
+        image_str = str(image_path)
+        if self.config.instagram.auth_mode == "graph_api":
+            return await self._upload_image_graph_api(image_str, caption)
+        return await self._upload_image_instagrapi(Path(image_path), caption)
+
+    def image_rejection_reasons(self, image_path: Path) -> tuple[str, ...]:
+        """Destination-named reasons Instagram cannot publish this image."""
+        from xpst.media.specs import image_rejection_reasons
+
+        return image_rejection_reasons(image_path, self.platform_name)
+
+    async def _upload_image_graph_api(self, image_url: str, caption: str) -> UploadResult:
+        """Publish a feed photo through the official Meta Graph API.
+
+        Meta publishes photos from a public URL it fetches itself, so a local
+        file cannot be posted this way — the refusal says so instead of sending
+        a broken request.
+        """
+        import httpx
+
+        token = self.config.instagram.graph_access_token
+        ig_user_id = self.config.instagram.graph_ig_user_id
+
+        if not token or not ig_user_id:
+            return UploadResult(
+                success=False,
+                error="IG_GRAPH_API_NOT_CONFIGURED: Set graph_access_token and graph_ig_user_id in config, "
+                "or switch auth_mode to 'session' for instagrapi-based uploads.",
+                platform="instagram",
+                retryable=False,
+            )
+
+        if not image_url.startswith(("http://", "https://")):
+            return UploadResult(
+                success=False,
+                error=(
+                    "IG_GRAPH_API_IMAGE_NEEDS_URL: the official Instagram API publishes feed photos "
+                    "from a public image URL and cannot accept a local file. Use auth_mode 'session' "
+                    "(xpst auth instagram) to post a local image, or host the image and pass its URL."
+                ),
+                platform="instagram",
+                retryable=False,
+            )
+
+        if len(caption) > self.MAX_CAPTION_LENGTH:
+            caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
+
+        base_url = graph_api_url(str(ig_user_id))
+        try:
+            async with httpx.AsyncClient(timeout=300) as client:
+                resp = await client.post(
+                    f"{base_url}/media",
+                    data={
+                        "image_url": image_url,
+                        "caption": caption,
+                        "access_token": token,
+                    },
+                )
+                resp.raise_for_status()
+                container_id = resp.json().get("id")
+                if not container_id:
+                    return UploadResult(
+                        success=False,
+                        error=f"IG_GRAPH_API_ERROR: No container ID for image: {truncate_error(resp.text)}",
+                        platform="instagram",
+                    )
+
+                resp = await client.post(
+                    f"{base_url}/media_publish",
+                    data={"creation_id": container_id, "access_token": token},
+                )
+                resp.raise_for_status()
+                media_id = resp.json().get("id")
+                if not media_id:
+                    return UploadResult(
+                        success=False,
+                        error=f"IG_GRAPH_API_ERROR: No media ID in publish response: {truncate_error(resp.text)}",
+                        platform="instagram",
+                    )
+
+                permalink = ""
+                try:
+                    resp = await client.get(
+                        graph_api_url(str(media_id)),
+                        params={"fields": "permalink", "access_token": token},
+                    )
+                    permalink = resp.json().get("permalink", "")
+                except Exception:
+                    pass
+
+                logger.info(f"Posted image to Instagram via Graph API: {permalink or media_id}")
+                return UploadResult(
+                    success=True,
+                    post_id=str(media_id),
+                    post_url=permalink or f"https://www.instagram.com/p/{media_id}/",
+                    platform="instagram",
+                    metadata={
+                        "caption_length": len(caption),
+                        "auth_mode": "graph_api",
+                        "container_id": container_id,
+                        "content_type": "image",
+                    },
+                )
+        except httpx.HTTPStatusError as e:
+            error_body = truncate_error(e.response.text) if e.response else str(e)
+            logger.error(f"Instagram Graph API image upload HTTP error: {e}")
+            return UploadResult(
+                success=False,
+                error=f"IG_GRAPH_API_HTTP_ERROR: {error_body}",
+                platform="instagram",
+            )
+        except Exception as e:
+            logger.error(f"Instagram Graph API image upload failed: {e}")
+            return UploadResult(
+                success=False,
+                error=f"IG_GRAPH_API_ERROR: {truncate_error(str(e))}",
+                platform="instagram",
+            )
+
+    async def _upload_image_instagrapi(self, image_path: Path, caption: str) -> UploadResult:
+        """Upload a local image to the Instagram feed via instagrapi.
+
+        Instagram publishes the photo and *then* calls ``qe/expose/`` (see the
+        video path); a failure after publication is reconciled against the
+        account rather than reported as a plain failure, so the post can never
+        exist without a recorded id.
+        """
+        import asyncio
+        import random
+
+        rejections = self.image_rejection_reasons(image_path)
+        if rejections:
+            message = " ".join(rejections)
+            logger.warning("Refusing Instagram image upload: %s", message)
+            return UploadResult(
+                success=False,
+                error=f"IG_IMAGE_REJECTED: {message}",
+                platform="instagram",
+                retryable=False,
+                metadata={"content_type": "image"},
+            )
+
+        if len(caption) > self.MAX_CAPTION_LENGTH:
+            caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
+
+        # Anti-ban: pre-upload delay with jitter (1-3 seconds), like the video path.
+        await asyncio.sleep(random.uniform(1.0, 3.0))
+
+        try:
+            client = await self._get_client()
+            logger.info(f"Uploading image to Instagram: {image_path.name}")
+            media = client.photo_upload(image_path, caption=caption)
+        except Exception as e:
+            error_msg = str(e).lower()
+            logger.error(f"Instagram image upload failed: {e}")
+
+            if any(marker in error_msg for marker in _POST_PUBLISH_ERROR_MARKERS):
+                reconciled = await self._reconcile_published_media(caption)
+                if reconciled is not None:
+                    post_url = f"https://www.instagram.com/p/{reconciled.code}/"
+                    logger.warning(
+                        "Instagram image upload raised '%s' after publication, but the post is live: "
+                        "reconciled it as %s so it can be deleted",
+                        e,
+                        post_url,
+                    )
+                    return UploadResult(
+                        success=True,
+                        post_id=str(reconciled.pk),
+                        post_url=post_url,
+                        platform="instagram",
+                        metadata={
+                            "code": reconciled.code,
+                            "caption_length": len(caption),
+                            "auth_mode": "session",
+                            "content_type": "image",
+                            "reconciled": True,
+                            "original_error": truncate_error(str(e)),
+                        },
+                    )
+                return UploadResult(
+                    success=False,
+                    error=(
+                        "IG_UNCONFIRMED: the image upload failed after publication and the post was "
+                        "not found on the account — check the Instagram profile before retrying"
+                    ),
+                    platform="instagram",
+                    retryable=False,
+                )
+
+            if "login" in error_msg or "unauthorized" in error_msg or "required" in error_msg:
+                return UploadResult(
+                    success=False,
+                    error="IG_SESSION_EXPIRED: Run 'xpst auth instagram'",
+                    platform="instagram",
+                    retryable=False,
+                )
+
+            if "rate limit" in error_msg or "too many" in error_msg or "429" in error_msg:
+                return _rate_limited_result(str(e))
+
+            return UploadResult(
+                success=False,
+                error=f"IG_IMAGE_ERROR: {truncate_error(str(e))}",
+                platform="instagram",
+            )
+
+        post_url = f"https://www.instagram.com/p/{media.code}/"
+        logger.info(f"Posted image to Instagram: {post_url}")
+        return UploadResult(
+            success=True,
+            post_id=str(media.pk),
+            post_url=post_url,
+            platform="instagram",
+            metadata={
+                "code": media.code,
+                "caption_length": len(caption),
+                "auth_mode": "session",
+                "content_type": "image",
+            },
+        )
+
+    async def upload_carousel(self, media_paths: list[Path], caption: str) -> UploadResult:
+        """Publish a native Instagram carousel (album) — one post, N items.
+
+        Uses instagrapi's ``album_upload``: Instagram publishes the items as a
+        single carousel, in the order given. Nothing is stitched, re-encoded or
+        reordered, and every refusal below happens *before* the client is
+        touched:
+
+        * fewer than 2 items is refused (a 1-item "carousel" is an image or a
+          Reel post, and guessing which one the caller meant is how a photo
+          used to end up on the video path);
+        * more than ``MAX_CAROUSEL_ITEMS`` is refused, never silently truncated
+          — the caller learns which items would have been dropped;
+        * ``graph_api`` mode is refused by name: Meta's carousel publishing
+          needs public item URLs and is not implemented on that path;
+        * each image item is checked against Instagram's image contract with
+          ``image_rejection_reasons`` — the preflight's own destination-named
+          wording — so an unsupported still never reaches the album call.
+
+        Args:
+            media_paths: List of paths to images/videos, in post order.
+            caption: Caption for the carousel.
+
+        Returns:
+            UploadResult with the post URL and the published item order.
+        """
+        items = [Path(p) for p in media_paths]
+
+        if len(items) < 2:
+            reason = (
+                "Instagram carousels need at least 2 items "
+                f"(got {len(items)}). Post it as an image or a Reel instead."
+            )
+            logger.warning("Refusing Instagram carousel: %s", reason)
+            return UploadResult(
+                success=False,
+                error=f"IG_CAROUSEL_NEEDS_TWO: {reason}",
+                platform="instagram",
+                retryable=False,
+                metadata={"content_type": "carousel", "items": len(items)},
+            )
+
+        if len(items) > self.MAX_CAROUSEL_ITEMS:
+            reason = (
+                f"Instagram carousels hold at most {self.MAX_CAROUSEL_ITEMS} items "
+                f"(got {len(items)}). Split the post instead — xPST will not drop items silently."
+            )
+            logger.warning("Refusing Instagram carousel: %s", reason)
+            return UploadResult(
+                success=False,
+                error=f"IG_CAROUSEL_TOO_MANY_ITEMS: {reason}",
+                platform="instagram",
+                retryable=False,
+                metadata={"content_type": "carousel", "items": len(items)},
+            )
+
+        if self.config.instagram.auth_mode == "graph_api":
+            reason = (
+                "IG_GRAPH_API_CAROUSEL_UNSUPPORTED: the official Instagram API path publishes a "
+                "carousel from public item URLs and is not implemented in xPST; use auth_mode "
+                "'session' (xpst auth instagram) to publish a carousel from local files."
+            )
+            logger.warning("Refusing Instagram carousel: %s", reason)
+            return UploadResult(
+                success=False,
+                error=reason,
+                platform="instagram",
+                retryable=False,
+                metadata={"content_type": "carousel", "items": len(items), "auth_mode": "graph_api"},
+            )
+
+        rejections = self.carousel_item_rejection_reasons(items)
+        if rejections:
+            message = " ".join(rejections)
+            logger.warning("Refusing Instagram carousel: %s", message)
+            return UploadResult(
+                success=False,
+                error=f"IG_CAROUSEL_ITEM_REJECTED: {message}",
+                platform="instagram",
+                retryable=False,
+                metadata={"content_type": "carousel", "items": len(items)},
+            )
+
+        # Truncate caption if needed (Instagram's own hard limit, reported back)
+        caption_truncated = len(caption) > self.MAX_CAPTION_LENGTH
+        if caption_truncated:
+            caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
+
+        try:
+            client = await self._get_client()
+            logger.info(f"Uploading carousel to Instagram: {len(items)} items")
+
+            # Upload as album — order is the caller's order, unchanged.
+            media = client.album_upload(
+                items,
+                caption=caption,
+            )
+
+            post_url = f"https://www.instagram.com/p/{media.code}/"
+            logger.info(f"Posted carousel to Instagram: {post_url}")
+
+            return UploadResult(
+                success=True,
+                post_id=str(media.pk),
+                post_url=post_url,
+                platform="instagram",
+                metadata={
+                    "code": media.code,
+                    "caption_length": len(caption),
+                    "caption_truncated": caption_truncated,
+                    "carousel_items": len(items),
+                    "item_order": [p.name for p in items],
+                    "content_type": "carousel",
+                },
+            )
+
+        except Exception as e:
+            error_msg = str(e).lower()
+            logger.error(f"Instagram carousel upload failed: {e}")
+
+            if "login" in error_msg or "unauthorized" in error_msg or "required" in error_msg:
+                return UploadResult(
+                    success=False,
+                    error="IG_SESSION_EXPIRED: Run 'xpst auth instagram'",
+                    platform="instagram",
+                )
+
+            if "rate limit" in error_msg or "too many" in error_msg:
+                return _rate_limited_result(str(e))
+
+            return UploadResult(
+                success=False,
+                error=f"IG_CAROUSEL_ERROR: {truncate_error(str(e))}",
+                platform="instagram",
+            )
+
+    def carousel_item_rejection_reasons(self, items: list[Path]) -> tuple[str, ...]:
+        """Destination-named reasons Instagram cannot publish these carousel items.
+
+        Only still images are checked here, and with Instagram's image contract
+        (JPEG, size and aspect limits) — the same rules and the same wording the
+        preflight uses, so a refused item reads identically on both surfaces. The
+        check reads the file header in pure Python: no ffmpeg, no ffprobe, so an
+        image-only carousel request never invokes a media binary.
+        """
+        from xpst.content import MEDIA_KIND_IMAGE, media_kind
+        from xpst.media.specs import image_rejection_reasons
+
+        reasons: list[str] = []
+        for item in items:
+            if media_kind(item) != MEDIA_KIND_IMAGE:
+                continue
+            reasons.extend(image_rejection_reasons(item, self.platform_name))
+        return tuple(reasons)
+
+    async def get_followers(self) -> int:
+        """Return follower count for the authenticated Instagram account.
+
+        Dispatches based on auth_mode:
+        - graph_api: Uses /{ig-user-id}?fields=followers_count
+        - session: Uses instagrapi client.user_info()
+        """
+        if self.config.instagram.auth_mode == "graph_api":
+            return await self._get_followers_graph_api()
+        return await self._get_followers_instagrapi()
+
+    async def _get_followers_graph_api(self) -> int:
+        """Get follower count via official Meta Graph API."""
+        import httpx
+
+        token = self.config.instagram.graph_access_token
+        ig_user_id = self.config.instagram.graph_ig_user_id
+        if not token or not ig_user_id:
+            return 0
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(
+                    graph_api_url(str(ig_user_id)),
+                    params={"fields": "followers_count", "access_token": token},
+                )
+                resp.raise_for_status()
+                return int(resp.json().get("followers_count", 0))
+        except Exception as e:
+            logger.debug(f"Instagram Graph API get_followers failed: {e}")
+            return 0
+
+    async def _get_followers_instagrapi(self) -> int:
+        """Get follower count via instagrapi session."""
+        try:
+            client = await self._get_client()
+            username = self.config.instagram.username
+            if not username:
+                account = client.account_info()
+                return int(account.follower_count or 0)
+            user_info = client.user_info_by_username(username)
+            return int(user_info.follower_count or 0)
+        except Exception as e:
+            logger.debug(f"Instagram instagrapi get_followers failed: {e}")
+            return 0
+
+
+PlatformRegistry.register("instagram", InstagramUploader)

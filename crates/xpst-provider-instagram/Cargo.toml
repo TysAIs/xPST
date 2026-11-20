@@ -1,0 +1,24 @@
+[package]
+name = "xpst-provider-instagram"
+description = "Instagram Graph destination (P3)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+default = ["live-http"]
+# The reqwest-backed transport in [`http`]. On by default so the workspace gate
+# builds and tests it; `--no-default-features` keeps the protocol-only graph.
+live-http = ["xpst-provider/live-http"]
+
+[dependencies]
+serde_json = { workspace = true }
+xpst-core = { path = "../xpst-core" }
+xpst-provider = { path = "../xpst-provider" }
+
+[lints]
+workspace = true
+

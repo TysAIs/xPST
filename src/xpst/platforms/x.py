@@ -1,0 +1,1325 @@
+"""X/Twitter uploader for xPST
+
+Uses twikit for authentication and video uploads to X/Twitter.
+
+Authentication:
+- Cookie-based authentication via twikit
+- Delegates session management to SessionManager
+- Automatic session validation
+
+Upload specs:
+- Video: H.264, yuv420p (REQUIRED), bt.709, max 512 MB
+- Duration: Max 2:20 (140 seconds)
+- Resolution: Up to 1920x1200
+- Recommended: 1080p @ 10 Mbps, High@L4.0
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from xpst.anti_bot import AntiBotProtection
+from xpst.content import TEXT_LIMITS, video_duration_limit, video_envelope
+from xpst.media.specs import measured_video_format
+from xpst.platforms.base import (
+    DeleteOutcome,
+    DeleteResult,
+    PlatformHealth,
+    PlatformRegistry,
+    PlatformUploader,
+    ReadbackResult,
+    ReadbackState,
+    UploadResult,
+)
+from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
+from xpst.utils.errors import truncate_error
+from xpst.utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from xpst.config import XPSTConfig
+
+logger = get_logger(__name__)
+
+# Still-image contracts for the official API path. X accepts JPG/PNG/WEBP up to
+# 5 MB (see ``xpst.media.specs`` — the preflight and this adapter read the same
+# numbers); images go up in one segment, video in 5 MB chunks.
+_IMAGE_MIME_TYPES: dict[str, str] = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+_IMAGE_CHUNK_BYTES = 5 * 1024 * 1024
+
+
+# ─── twikit compatibility patches ─────────────────────────────────────────────
+# The patches live in ONE home — :mod:`xpst.platforms.twikit_compat` — so every
+# surface that constructs a twikit client (this uploader AND the analytics
+# collector) gets them.  QA-2026-09-28 defect D1: they used to be defined
+# inline here, so the analytics path, which never imported this module, ran
+# the unpatched library and failed every metric fetch.
+# TODO: Remove when twikit publishes a fixed release (2.4.0+).
+# -------------------------------------------------------------------------------
+
+from xpst.platforms.twikit_compat import apply_twikit_patches as _apply_twikit_patches
+
+_apply_twikit_patches()
+# ─── end twikit compatibility patches ──────────────────────────────────────────
+
+
+class XUploader(PlatformUploader):
+    """X/Twitter uploader with cookie-based authentication via twikit."""
+
+    #: Text-post limit, read from the content contract's single source
+    #: (:data:`xpst.content.TEXT_LIMITS`) so preflight and the sender cannot
+    #: disagree about how long a post may be. A missing entry is a loud
+    #: KeyError at import rather than a silently invented number.
+    MAX_TEXT_LENGTH = TEXT_LIMITS["x"]
+
+    def __init__(self, config: XPSTConfig) -> None:
+        """Initialize X/Twitter uploader with lazy client caching."""
+        super().__init__(config)
+        self._client = None  # Cached twikit Client
+
+    @property
+    def video_duration_cap(self) -> int | None:
+        """This account's real video ceiling, in seconds.
+
+        Read from config when the account owner has verified it (a Premium
+        account X lets upload longer), otherwise from the capability registry
+        (``xpst.content.VIDEO_ENVELOPES["x"]``: 140 s standard tier). One
+        function decides, so the manifest the upload guard reads and the
+        refusal this adapter raises cannot disagree.
+        """
+        configured = getattr(self.config.x, "max_video_duration_seconds", 0)
+        if isinstance(configured, int) and configured > 0:
+            return configured
+        return video_duration_limit("x")
+
+    def _effective_envelope(self):
+        """The registry envelope with this account's real ceiling applied."""
+        from dataclasses import replace
+
+        envelope = video_envelope("x")
+        cap = self.video_duration_cap
+        if envelope is None or cap is None or cap == envelope.max_duration_seconds:
+            return envelope
+        return replace(envelope, max_duration_seconds=cap)
+
+    def _video_envelope_violation(self, video_path: Path) -> UploadResult | None:
+        """Refuse a video outside the account's envelope, with the number.
+
+        The upload guard in ``UploadService`` refuses the same file with the
+        same number before encoding; this keeps the *sender* honest when it is
+        called directly (adapter probes, plugins, tests). Refused, never
+        truncated.
+        """
+        from xpst.content import envelope_violation
+
+        measured = measured_video_format(video_path)
+        issue = envelope_violation(
+            self._effective_envelope(),
+            duration_s=measured["duration_s"],
+            size_bytes=measured["size_bytes"],
+            width=measured["width"],
+            height=measured["height"],
+        )
+        if issue is None:
+            return None
+        logger.warning("Refusing X upload: %s", issue.message)
+        return UploadResult(
+            success=False,
+            error=f"X_VIDEO_ENVELOPE: {issue.message}",
+            platform="x",
+            retryable=False,
+            metadata={
+                "capability": "video_envelope",
+                "code": issue.code,
+                "duration_s": measured["duration_s"],
+                "limit": self.video_duration_cap,
+            },
+        )
+
+    def _caption_limit_violation(self, caption: str) -> UploadResult | None:
+        """Refuse a media caption past X's limit instead of truncating it.
+
+        The content gate (``xpst.content.validate_content_request``) refuses
+        the same caption with the same number, so this path exists to keep the
+        *sender* honest when it is called directly (adapter probes, plugins,
+        tests) — before this, a 463-character caption was refused by preflight
+        and silently cut to ``277 + "..."`` here. Two answers for one question
+        is the defect; the answer is the one every other destination already
+        gives: **refused, never truncated** (``PlatformUploader._text_limit_violation``).
+        """
+        limit = self.MAX_TEXT_LENGTH
+        if limit is None or len(caption) <= limit:
+            return None
+        logger.warning(
+            "Refusing X media upload: caption is %s characters, limit is %s", len(caption), limit
+        )
+        return UploadResult(
+            success=False,
+            error=(
+                f"X_CAPTION_TOO_LONG: {len(caption)} characters exceeds the {limit}-character "
+                f"limit for x; xPST will not truncate it. Shorten the caption, or give x its "
+                f"own with --caption-for x='…' (MCP: overrides)."
+            ),
+            platform="x",
+            retryable=False,
+            metadata={"caption_length": len(caption), "limit": limit},
+        )
+
+    @property
+    def manifest(self) -> ProviderManifest:
+        """Return X video-destination capabilities for the active auth mode."""
+        return ProviderManifest(
+            name="x",
+            display_name="X",
+            roles=(ProviderRole.VIDEO_DESTINATION, ProviderRole.DESTINATION),
+            capabilities=(
+                ProviderCapability.UPLOAD,
+                ProviderCapability.DELETE,
+                ProviderCapability.CAROUSEL,
+                ProviderCapability.HEALTH,
+                ProviderCapability.OFFICIAL_API
+                if self.config.x.auth_mode == "api_v2"
+                else ProviderCapability.COOKIE_AUTH,
+                ProviderCapability.RATE_LIMITS,
+            ),
+            auth_mode=(
+                AuthMode.API_V2
+                if self.config.x.auth_mode == "api_v2"
+                else AuthMode.COOKIES
+            ),
+            is_official_api=self.config.x.auth_mode == "api_v2",
+            docs_url=(
+                "https://developer.x.com/en/docs/x-api"
+                if self.config.x.auth_mode == "api_v2"
+                else "https://github.com/d60/twikit"
+            ),
+            notes=(
+                "Uses the official X API v2 media/tweet path."
+                if self.config.x.auth_mode == "api_v2"
+                else "Uses persisted X cookies through twikit; carousel posts are published as threads."
+            ),
+            extra={
+                # "thread" was declared here with no implementation behind it
+                # (a text-only thread has no sender), so agents read "X supports
+                # threads" and attempted a post that could not work. Multi-media
+                # posts are published as a tweet thread and are declared as
+                # ``carousel`` instead. Re-add "thread" in the same change that
+                # adds the text-thread sender; the content contract refuses a
+                # declared-but-unimplemented type and its test fails on drift.
+                # "text" (post_text) and "image" (upload_image) ARE implemented,
+                # so both are declared here and echoed by the content contract's
+                # table for this destination.
+                "content": ("video", "carousel", "text", "image"),
+                "max_caption_length": self.MAX_TEXT_LENGTH,
+                # The account's real ceiling, not a copy of it: config override
+                # when verified, else the capability registry's 140 s.
+                "max_video_duration_seconds": self.video_duration_cap,
+            },
+        )
+
+    async def _get_client(self):
+        """Get an authenticated twikit client via SessionManager.
+
+        Loads cookies from SessionManager, validates, and caches the client.
+
+        Returns:
+            Authenticated twikit Client.
+
+        Raises:
+            FileNotFoundError: If cookies file is missing.
+        """
+        if self._client is None:
+            if self._session_manager:
+                self._client = await self._session_manager.get_x_client(
+                    self.config.x.cookies_file,
+                    self.config.x.username,
+                    self.config.x.password,
+                )
+            else:
+                # Fallback for direct instantiation (testing)
+                self._client = await self._get_client_direct()
+        return self._client
+
+    async def _get_client_direct(self):
+        """Get X client directly (fallback when no SessionManager)."""
+        import twikit
+
+        cookies_file = Path(self.config.x.cookies_file)
+
+        if not cookies_file.exists():
+            raise FileNotFoundError(
+                f"X cookies file not found at {cookies_file}. "
+                "Run: xpst auth x"
+            )
+
+        # Use rotated User-Agent from anti_bot
+        anti_bot = AntiBotProtection()
+
+        client = twikit.Client("en-US", user_agent=anti_bot.get_user_agent())
+        client.load_cookies(str(cookies_file))
+
+        # Apply proxy if configured
+        if self.config.x.proxy:
+            AntiBotProtection.apply_proxy_to_twikit(client, self.config.x.proxy)
+
+        return client
+
+    async def upload(self, video_path: Path, caption: str) -> UploadResult:
+        """Upload a video to X/Twitter.
+
+        Dispatches based on auth_mode:
+        - "api_v2": Uses official X API v2 (ban-safe, free tier: 17 posts/day)
+        - "cookies": Uses twikit (unofficial, cookie-based)
+
+        Args:
+            video_path: Path to video file
+            caption: Tweet text (max 280 chars)
+
+        Returns:
+            UploadResult with tweet ID and URL
+        """
+        if self.config.x.auth_mode == "api_v2":
+            return await self._upload_api_v2(video_path, caption)
+        return await self._upload_twikit(video_path, caption)
+
+    async def _upload_api_v2(self, video_path: Path, caption: str) -> UploadResult:
+        """Upload via official X API v2 (ban-safe, official path).
+
+        Uses OAuth 1.0a User Context with the free tier (17 posts/day).
+        Media upload uses v1.1 chunked endpoint, tweet creation uses v2.
+        """
+        from authlib.integrations.httpx_client import AsyncOAuth1Client
+
+        api_key = self.config.x.api_key
+        api_secret = self.config.x.api_secret
+        access_token = self.config.x.access_token
+        access_token_secret = self.config.x.access_token_secret
+
+        if not all([api_key, api_secret, access_token, access_token_secret]):
+            return UploadResult(
+                success=False,
+                error="X_API_V2_NOT_CONFIGURED: Set api_key, api_secret, access_token, "
+                      "and access_token_secret in config, or switch auth_mode to 'cookies' "
+                      "for twikit-based uploads.",
+                platform="x",
+            )
+
+        self._validate_video(video_path)
+
+        # Refused, never truncated: the gate refuses the same caption with the
+        # same number, so the sender must not quietly shorten what it sends.
+        violation = self._caption_limit_violation(caption)
+        if violation is not None:
+            return violation
+
+        # Same contract for the video itself: over the account's duration/size/
+        # aspect envelope is refused with the number, never trimmed or
+        # silently shipped for the platform to reject.
+        envelope_violation = self._video_envelope_violation(video_path)
+        if envelope_violation is not None:
+            return envelope_violation
+
+        try:
+            async with AsyncOAuth1Client(
+                api_key,
+                api_secret,
+                access_token,
+                access_token_secret,
+                timeout=300,
+            ) as client:
+                file_size = video_path.stat().st_size
+
+                # Step 1: INIT media upload
+                logger.info(f"X API v2: initializing media upload ({file_size} bytes)")
+                resp = await client.post(
+                    "https://upload.twitter.com/1.1/media/upload.json",
+                    data={
+                        "command": "INIT",
+                        "media_type": "video/mp4",
+                        "total_bytes": str(file_size),
+                    },
+                )
+                resp.raise_for_status()
+                media_id = resp.json().get("media_id")
+
+                if not media_id:
+                    return UploadResult(
+                        success=False,
+                        error=f"X_API_V2_ERROR: No media_id in INIT response: {truncate_error(resp.text)}",
+                        platform="x",
+                    )
+
+                # Step 2: APPEND media in chunks (5 MB chunks)
+                chunk_size = 5 * 1024 * 1024  # 5 MB
+                segment_index = 0
+
+                with open(video_path, "rb") as f:
+                    while True:
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
+                        logger.debug(f"X API v2: uploading chunk {segment_index} ({len(chunk)} bytes)")
+                        resp = await client.post(
+                            "https://upload.twitter.com/1.1/media/upload.json",
+                            data={
+                                "command": "APPEND",
+                                "media_id": str(media_id),
+                                "segment_index": str(segment_index),
+                            },
+                            files={"media": chunk},
+                        )
+                        resp.raise_for_status()
+                        segment_index += 1
+
+                # Step 3: FINALIZE media upload
+                logger.info(f"X API v2: finalizing media upload (media_id={media_id})")
+                resp = await client.post(
+                    "https://upload.twitter.com/1.1/media/upload.json",
+                    data={
+                        "command": "FINALIZE",
+                        "media_id": str(media_id),
+                    },
+                )
+                resp.raise_for_status()
+
+                # Step 4: Create tweet with media
+                logger.info("X API v2: creating tweet")
+                resp = await client.post(
+                    "https://api.twitter.com/2/tweets",
+                    json={
+                        "text": caption,
+                        "media": {"media_ids": [str(media_id)]},
+                    },
+                )
+                resp.raise_for_status()
+                tweet_data = resp.json()
+                tweet_id = tweet_data.get("data", {}).get("id")
+
+                if not tweet_id:
+                    return UploadResult(
+                        success=False,
+                        error=f"X_API_V2_ERROR: No tweet ID in response: {truncate_error(resp.text)}",
+                        platform="x",
+                    )
+
+                tweet_url = f"https://x.com/i/status/{tweet_id}"
+                logger.info(f"Posted to X via API v2: {tweet_url}")
+
+                return UploadResult(
+                    success=True,
+                    post_id=str(tweet_id),
+                    post_url=tweet_url,
+                    platform="x",
+                    metadata={
+                        "caption_length": len(caption),
+                        "media_id": str(media_id),
+                        "auth_mode": "api_v2",
+                    },
+                )
+
+        except Exception as e:
+            error_msg = str(e).lower()
+            logger.error(f"X API v2 upload failed: {e}")
+
+            if "rate limit" in error_msg or "429" in error_msg:
+                return UploadResult(
+                    success=False,
+                    error="X_API_V2_RATE_LIMITED: Free tier limit is 17 posts/day. Try again tomorrow.",
+                    platform="x",
+                )
+
+            if "unauthorized" in error_msg or "401" in error_msg:
+                return UploadResult(
+                    success=False,
+                    error="X_API_V2_AUTH_ERROR: Check api_key, api_secret, access_token, access_token_secret.",
+                    platform="x",
+                )
+
+            return UploadResult(
+                success=False,
+                error=f"X_API_V2_ERROR: {truncate_error(str(e))}",
+                platform="x",
+            )
+
+    async def _upload_twikit(self, video_path: Path, caption: str) -> UploadResult:
+        """Upload via twikit (cookie-based, unofficial path)."""
+        self._validate_video(video_path)
+
+        # Refused, never truncated (see _caption_limit_violation).
+        violation = self._caption_limit_violation(caption)
+        if violation is not None:
+            return violation
+
+        # The account's video envelope, enforced before any network call.
+        envelope_violation = self._video_envelope_violation(video_path)
+        if envelope_violation is not None:
+            return envelope_violation
+
+        try:
+            client = await self._get_client()
+
+            logger.info(f"Uploading to X: {video_path.name}")
+
+            # Upload media. media_category routes the upload through X's
+            # async video pipeline (chunked, higher quality tier) instead of
+            # the default image path (G17).
+            media_id = await client.upload_media(
+                str(video_path),
+                wait_for_completion=True,
+                media_category="tweet_video",
+            )
+
+            # Create tweet with media
+            tweet = await client.create_tweet(
+                text=caption,
+                media_ids=[media_id],
+            )
+
+            tweet_url = f"https://x.com/i/status/{tweet.id}"
+            logger.info(f"Posted to X: {tweet_url}")
+
+            return UploadResult(
+                success=True,
+                post_id=str(tweet.id),
+                post_url=tweet_url,
+                platform="x",
+                metadata={
+                    "caption_length": len(caption),
+                    "media_id": media_id,
+                },
+            )
+
+        except Exception as e:
+            error_msg = str(e).lower()
+            logger.error(f"X upload failed: {e}")
+
+            # Check for specific errors
+            if "unauthorized" in error_msg or "login" in error_msg:
+                return UploadResult(
+                    success=False,
+                    error="X_SESSION_EXPIRED: Run 'xpst auth x'",
+                    platform="x",
+                )
+
+            if "duplicate" in error_msg:
+                # Already posted - treat as success
+                return UploadResult(
+                    success=True,
+                    error=None,
+                    platform="x",
+                    metadata={"duplicate": True},
+                )
+
+            if "rate limit" in error_msg:
+                # Keep the provider's own text: X/twikit carry the back-off
+                # window there ("Retry-After: 900") and the persistent cooldown
+                # parses the hint out of this string. Flattening it to prose
+                # made every X throttle resume on the 60s ladder instead.
+                return UploadResult(
+                    success=False,
+                    error=(
+                        "X_RATE_LIMITED: Too many requests, try again later"
+                        f" ({truncate_error(str(e))})"
+                    ),
+                    platform="x",
+                )
+
+            return UploadResult(
+                success=False,
+                error=f"X_UPLOAD_ERROR: {truncate_error(str(e))}",
+                platform="x",
+            )
+
+    # ── Text posts (content_type: text) ─────────────────────────────────
+
+    def _oauth1_client(self, timeout: int = 60) -> Any:
+        """Build the official-API OAuth 1.0a client for this config.
+
+        A method (rather than an inline import) so tests can stub the HTTP
+        client without patching authlib itself.
+        """
+        from authlib.integrations.httpx_client import AsyncOAuth1Client
+
+        x_config = self.config.x
+        return AsyncOAuth1Client(
+            x_config.api_key,
+            x_config.api_secret,
+            x_config.access_token,
+            x_config.access_token_secret,
+            timeout=timeout,
+        )
+
+    async def post_text(self, text: str) -> UploadResult:
+        """Publish a text-only post to X.
+
+        Dispatches on ``auth_mode`` exactly like :meth:`upload`:
+        ``api_v2`` posts through the official ``POST /2/tweets``, ``cookies``
+        posts through twikit's ``create_tweet``.
+
+        The text is sent **verbatim**: an empty post, or one longer than X's
+        limit, is refused with an explicit error naming the limit — xPST does
+        not truncate a post into something the user never wrote. The limit is
+        read from the content contract's single source
+        (:data:`xpst.content.TEXT_LIMITS`).
+
+        Args:
+            text: the post's text (no media).
+
+        Returns:
+            UploadResult with the tweet id and URL, or an explicit failure.
+        """
+        violation = self._text_limit_violation(text)
+        if violation is not None:
+            return violation
+        if self.config.x.auth_mode == "api_v2":
+            return await self._post_text_api_v2(text)
+        return await self._post_text_twikit(text)
+
+    async def _post_text_twikit(self, text: str) -> UploadResult:
+        """Publish a text post through twikit (cookie-based path)."""
+        try:
+            client = await self._get_client()
+            logger.info(f"Posting text to X ({len(text)} characters)")
+            tweet = await client.create_tweet(text=text)
+            tweet_id = getattr(tweet, "id", None)
+            if not tweet_id:
+                return UploadResult(
+                    success=False,
+                    error="X_POST_TEXT_ERROR: no tweet id in the create_tweet response",
+                    platform="x",
+                    retryable=False,
+                )
+            tweet_url = f"https://x.com/i/status/{tweet_id}"
+            logger.info(f"Posted text to X: {tweet_url}")
+            return UploadResult(
+                success=True,
+                post_id=str(tweet_id),
+                post_url=tweet_url,
+                platform="x",
+                metadata={
+                    "text_length": len(text),
+                    "content_type": "text",
+                    "auth_mode": "cookies",
+                },
+            )
+        except Exception as e:
+            return self._text_failure(e)
+
+    async def _post_text_api_v2(self, text: str) -> UploadResult:
+        """Publish a text post through the official X API v2 (OAuth 1.0a)."""
+        x_config = self.config.x
+        if not all([x_config.api_key, x_config.api_secret, x_config.access_token, x_config.access_token_secret]):
+            return UploadResult(
+                success=False,
+                error=(
+                    "X_API_V2_NOT_CONFIGURED: Set api_key, api_secret, access_token and "
+                    "access_token_secret in config, or switch auth_mode to 'cookies'."
+                ),
+                platform="x",
+                retryable=False,
+            )
+        try:
+            async with self._oauth1_client(timeout=60) as client:
+                logger.info(f"Posting text to X via API v2 ({len(text)} characters)")
+                resp = await client.post("https://api.twitter.com/2/tweets", json={"text": text})
+                resp.raise_for_status()
+                tweet_id = resp.json().get("data", {}).get("id")
+                if not tweet_id:
+                    return UploadResult(
+                        success=False,
+                        error=f"X_API_V2_ERROR: No tweet ID in response: {truncate_error(resp.text)}",
+                        platform="x",
+                        retryable=False,
+                    )
+                tweet_url = f"https://x.com/i/status/{tweet_id}"
+                logger.info(f"Posted text to X via API v2: {tweet_url}")
+                return UploadResult(
+                    success=True,
+                    post_id=str(tweet_id),
+                    post_url=tweet_url,
+                    platform="x",
+                    metadata={
+                        "text_length": len(text),
+                        "content_type": "text",
+                        "auth_mode": "api_v2",
+                    },
+                )
+        except Exception as e:
+            return self._text_failure(e)
+
+    def _text_failure(self, exc: Exception) -> UploadResult:
+        """Map a text-post exception onto the X error vocabulary."""
+        error_msg = str(exc).lower()
+        logger.error(f"X text post failed: {exc}")
+        if "unauthorized" in error_msg or "login" in error_msg or "401" in error_msg:
+            return UploadResult(
+                success=False,
+                error="X_SESSION_EXPIRED: Run 'xpst auth x'",
+                platform="x",
+                retryable=False,
+            )
+        if "rate limit" in error_msg or "429" in error_msg:
+            return UploadResult(
+                success=False,
+                error="X_RATE_LIMITED: Too many requests, try again later",
+                platform="x",
+                retryable=True,
+            )
+        if "duplicate" in error_msg:
+            # The upload path silently treats a duplicate as success; that is
+            # not honest for a text post — no new post exists, so say so.
+            return UploadResult(
+                success=False,
+                error=(
+                    "X_DUPLICATE_TEXT: X already has a post with this exact text, "
+                    "so nothing new was published."
+                ),
+                platform="x",
+                retryable=False,
+            )
+        return UploadResult(
+            success=False,
+            error=f"X_POST_TEXT_ERROR: {truncate_error(str(exc))}",
+            platform="x",
+        )
+
+    async def _check_health_api_v2(self) -> PlatformHealth:
+        """Check the configured official X API v2 user context."""
+        import httpx
+
+        x_config = self.config.x
+        has_oauth1 = all(
+            getattr(x_config, field, "")
+            for field in ("api_key", "api_secret", "access_token", "access_token_secret")
+        )
+        bearer = x_config.bearer_token
+        if not bearer and not has_oauth1:
+            return PlatformHealth(
+                platform="x",
+                authenticated=False,
+                session_valid=False,
+                error="X_API_V2_NOT_CONFIGURED: API credentials are missing",
+                details={"auth_mode": "api_v2", "probe": "api_v2"},
+            )
+
+        try:
+            if bearer:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    response = await client.get(
+                        "https://api.twitter.com/2/users/me",
+                        headers={"Authorization": f"Bearer {bearer}"},
+                    )
+            else:
+                from authlib.integrations.httpx_client import AsyncOAuth1Client
+
+                async with AsyncOAuth1Client(
+                    x_config.api_key,
+                    x_config.api_secret,
+                    x_config.access_token,
+                    x_config.access_token_secret,
+                    timeout=30,
+                ) as client:
+                    response = await client.get("https://api.twitter.com/2/users/me")
+            response.raise_for_status()
+            data = response.json().get("data", {})
+            if not data.get("id"):
+                return PlatformHealth(
+                    platform="x",
+                    authenticated=False,
+                    session_valid=False,
+                    error="X API v2 returned no user data",
+                    details={"auth_mode": "api_v2", "probe": "api_v2"},
+                )
+            return PlatformHealth(
+                platform="x",
+                authenticated=True,
+                session_valid=True,
+                details={
+                    "username": data.get("username", ""),
+                    "name": data.get("name", ""),
+                    "user_id": str(data["id"]),
+                    "auth_mode": "api_v2",
+                    "probe": "api_v2",
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 — health must fail closed
+            return PlatformHealth(
+                platform="x",
+                authenticated=False,
+                session_valid=False,
+                error=f"X API v2 health check failed: {truncate_error(str(exc))}",
+                details={"auth_mode": "api_v2", "probe": "api_v2"},
+            )
+
+    async def check_health(self) -> PlatformHealth:
+        """Check X/Twitter authentication health.
+
+        Returns:
+            PlatformHealth with authentication status
+        """
+        if self.config.x.auth_mode == "api_v2":
+            return await self._check_health_api_v2()
+
+        try:
+            client = await self._get_client()
+
+            # Try to get current user to verify auth
+            try:
+                user = await client.user()
+                return PlatformHealth(
+                    platform="x",
+                    authenticated=True,
+                    session_valid=True,
+                    details={
+                        "username": user.screen_name,
+                        "user_id": user.id,
+                        "auth_mode": "cookies",
+                        "probe": "cookie_session",
+                    },
+                )
+            except Exception:
+                # Cookies might be expired
+                return PlatformHealth(
+                    platform="x",
+                    authenticated=False,
+                    session_valid=False,
+                    error="Session expired - run 'xpst auth x'",
+                )
+
+        except FileNotFoundError as e:
+            return PlatformHealth(
+                platform="x",
+                authenticated=False,
+                session_valid=False,
+                error=str(e),
+            )
+        except Exception as e:
+            return PlatformHealth(
+                platform="x",
+                authenticated=False,
+                session_valid=False,
+                error=f"Health check failed: {truncate_error(str(e))}",
+            )
+
+    async def delete(
+        self,
+        post_id: str,
+        *,
+        soft: bool = False,
+        visibility: str | None = None,
+    ) -> DeleteResult:
+        """Delete a tweet from X (hard delete only — no soft delete exists)."""
+        try:
+            client = await self._get_client()
+            await client.delete_tweet(post_id)
+            logger.info(f"Deleted X tweet: {post_id}")
+            return DeleteResult(
+                outcome=DeleteOutcome.DELETED,
+                platform=self.platform_name,
+                post_id=post_id,
+            )
+        except Exception as e:
+            logger.error(f"Failed to delete X tweet {post_id}: {e}")
+            return DeleteResult(
+                outcome=DeleteOutcome.PENDING,
+                platform=self.platform_name,
+                post_id=post_id,
+                detail=truncate_error(str(e)),
+            )
+
+    async def readback(self, post_id: str) -> ReadbackResult:
+        """Confirm an X post id exists via the authenticated twikit session.
+
+        twikit has carried both ``get_tweet_by_id`` and ``get_tweet`` across
+        releases, so the adapter probes for the newer spelling and falls back.
+        An unanswerable read (expired session, network) is ``UNKNOWN`` — never
+        reported as "not found" and never as verified.
+        """
+        try:
+            client = await self._get_client()
+            reader = getattr(client, "get_tweet_by_id", None) or getattr(client, "get_tweet", None)
+            if reader is None:
+                return ReadbackResult(
+                    state=ReadbackState.UNSUPPORTED,
+                    platform=self.platform_name,
+                    post_id=post_id,
+                    detail="this twikit build exposes no single-tweet read",
+                )
+            tweet = await reader(post_id)
+            if tweet is None:
+                return ReadbackResult(
+                    state=ReadbackState.NOT_FOUND,
+                    platform=self.platform_name,
+                    post_id=post_id,
+                    detail="the tweet read returned nothing",
+                )
+            return ReadbackResult(
+                state=ReadbackState.VERIFIED,
+                platform=self.platform_name,
+                post_id=post_id,
+                url=f"https://x.com/i/status/{post_id}",
+                detail="confirmed by twikit tweet read",
+            )
+        except Exception as exc:  # noqa: BLE001 - an unanswerable read is not a failure
+            text = str(exc)
+            # twikit answers a deleted/absent tweet with a "… not found in detail
+            # response" error. That IS an answer ("it is gone"), unlike a session
+            # or network error, so report it as such instead of "could not confirm".
+            if "not found" in text.lower():
+                return ReadbackResult(
+                    state=ReadbackState.NOT_FOUND,
+                    platform=self.platform_name,
+                    post_id=post_id,
+                    detail=truncate_error(text),
+                )
+            logger.warning("X readback failed for %s: %s", post_id, exc)
+            return ReadbackResult(
+                state=ReadbackState.UNKNOWN,
+                platform=self.platform_name,
+                post_id=post_id,
+                detail=truncate_error(text),
+            )
+
+    async def upload_image(self, image_path: Path, caption: str) -> UploadResult:
+        """Post a single image to X.
+
+        Dispatches on auth_mode exactly like :meth:`upload`:
+
+        - ``api_v2``: official X API (v1.1 chunked media upload + ``/2/tweets``).
+        - ``cookies``: twikit ``upload_media`` + ``create_tweet``.
+
+        The image is validated against X's slice of the media spec matrix
+        (``xpst.media.specs``: JPG/PNG/WEBP, ≤ 5 MB, aspect between 1:3 and 3:1)
+        *before* any media call, so an unsupported image never reaches X.
+
+        Args:
+            image_path: Path to the image file.
+            caption: Tweet text (max 280 chars).
+
+        Returns:
+            UploadResult with tweet ID and URL.
+        """
+        if self.config.x.auth_mode == "api_v2":
+            return await self._upload_image_api_v2(Path(image_path), caption)
+        return await self._upload_image_twikit(Path(image_path), caption)
+
+    def image_rejection_reasons(self, image_path: Path) -> tuple[str, ...]:
+        """Destination-named reasons X cannot publish this image."""
+        from xpst.media.specs import image_rejection_reasons
+
+        return image_rejection_reasons(image_path, self.platform_name)
+
+    async def _upload_image_api_v2(self, image_path: Path, caption: str) -> UploadResult:
+        """Post an image through the official X API (v1.1 media + v2 tweet)."""
+        import httpx
+        from authlib.integrations.httpx_client import AsyncOAuth1Client
+
+        api_key = self.config.x.api_key
+        api_secret = self.config.x.api_secret
+        access_token = self.config.x.access_token
+        access_token_secret = self.config.x.access_token_secret
+
+        if not all([api_key, api_secret, access_token, access_token_secret]):
+            return UploadResult(
+                success=False,
+                error="X_API_V2_NOT_CONFIGURED: Set api_key, api_secret, access_token, "
+                "and access_token_secret in config, or switch auth_mode to 'cookies' "
+                "for twikit-based uploads.",
+                platform="x",
+                retryable=False,
+            )
+
+        rejections = self.image_rejection_reasons(image_path)
+        if rejections:
+            message = " ".join(rejections)
+            logger.warning("Refusing X image upload: %s", message)
+            return UploadResult(
+                success=False,
+                error=f"X_IMAGE_REJECTED: {message}",
+                platform="x",
+                retryable=False,
+                metadata={"content_type": "image"},
+            )
+
+        # Refused, never truncated (see _caption_limit_violation).
+        violation = self._caption_limit_violation(caption)
+        if violation is not None:
+            return violation
+
+        media_type = _IMAGE_MIME_TYPES.get(image_path.suffix.lower(), "image/jpeg")
+        try:
+            async with AsyncOAuth1Client(
+                api_key,
+                api_secret,
+                access_token,
+                access_token_secret,
+                timeout=300,
+            ) as client:
+                file_size = image_path.stat().st_size
+                logger.info("X API v2: initializing image upload (%s bytes)", file_size)
+                resp = await client.post(
+                    "https://upload.twitter.com/1.1/media/upload.json",
+                    data={
+                        "command": "INIT",
+                        "media_type": media_type,
+                        "media_category": "tweet_image",
+                        "total_bytes": str(file_size),
+                    },
+                )
+                resp.raise_for_status()
+                media_id = resp.json().get("media_id")
+                if not media_id:
+                    return UploadResult(
+                        success=False,
+                        error=f"X_API_V2_ERROR: No media_id in INIT response: {truncate_error(resp.text)}",
+                        platform="x",
+                    )
+
+                segment_index = 0
+                with open(image_path, "rb") as handle:
+                    while True:
+                        chunk = handle.read(_IMAGE_CHUNK_BYTES)
+                        if not chunk:
+                            break
+                        resp = await client.post(
+                            "https://upload.twitter.com/1.1/media/upload.json",
+                            data={
+                                "command": "APPEND",
+                                "media_id": str(media_id),
+                                "segment_index": str(segment_index),
+                            },
+                            files={"media": chunk},
+                        )
+                        resp.raise_for_status()
+                        segment_index += 1
+
+                resp = await client.post(
+                    "https://upload.twitter.com/1.1/media/upload.json",
+                    data={"command": "FINALIZE", "media_id": str(media_id)},
+                )
+                resp.raise_for_status()
+
+                resp = await client.post(
+                    "https://api.twitter.com/2/tweets",
+                    json={"text": caption, "media": {"media_ids": [str(media_id)]}},
+                )
+                resp.raise_for_status()
+                tweet_id = resp.json().get("data", {}).get("id")
+                if not tweet_id:
+                    return UploadResult(
+                        success=False,
+                        error=f"X_API_V2_ERROR: No tweet ID in response: {truncate_error(resp.text)}",
+                        platform="x",
+                    )
+
+                tweet_url = f"https://x.com/i/status/{tweet_id}"
+                logger.info(f"Posted image to X via API v2: {tweet_url}")
+                return UploadResult(
+                    success=True,
+                    post_id=str(tweet_id),
+                    post_url=tweet_url,
+                    platform="x",
+                    metadata={
+                        "caption_length": len(caption),
+                        "auth_mode": "api_v2",
+                        "media_id": str(media_id),
+                        "content_type": "image",
+                    },
+                )
+        except httpx.HTTPStatusError as e:
+            error_body = truncate_error(e.response.text) if e.response else str(e)
+            logger.error(f"X API v2 image upload HTTP error: {e}")
+            return UploadResult(
+                success=False,
+                error=f"X_API_V2_HTTP_ERROR: {error_body}",
+                platform="x",
+            )
+        except Exception as e:
+            logger.error(f"X API v2 image upload failed: {e}")
+            return UploadResult(
+                success=False,
+                error=f"X_API_V2_ERROR: {truncate_error(str(e))}",
+                platform="x",
+            )
+
+    async def _upload_image_twikit(self, image_path: Path, caption: str) -> UploadResult:
+        """Post a local image via twikit (cookie session)."""
+        rejections = self.image_rejection_reasons(image_path)
+        if rejections:
+            message = " ".join(rejections)
+            logger.warning("Refusing X image upload: %s", message)
+            return UploadResult(
+                success=False,
+                error=f"X_IMAGE_REJECTED: {message}",
+                platform="x",
+                retryable=False,
+                metadata={"content_type": "image"},
+            )
+
+        # Refused, never truncated (see _caption_limit_violation).
+        violation = self._caption_limit_violation(caption)
+        if violation is not None:
+            return violation
+
+        try:
+            client = await self._get_client()
+            logger.info(f"Uploading image to X: {image_path.name}")
+            media_id = await client.upload_media(str(image_path), wait_for_completion=True)
+            tweet = await client.create_tweet(text=caption, media_ids=[media_id])
+
+            tweet_url = f"https://x.com/i/status/{tweet.id}"
+            logger.info(f"Posted image to X: {tweet_url}")
+
+            return UploadResult(
+                success=True,
+                post_id=str(tweet.id),
+                post_url=tweet_url,
+                platform="x",
+                metadata={
+                    "caption_length": len(caption),
+                    "auth_mode": "cookies",
+                    "media_id": str(media_id),
+                    "content_type": "image",
+                },
+            )
+        except Exception as e:
+            error_msg = str(e).lower()
+            logger.error(f"X image upload failed: {e}")
+
+            if "unauthorized" in error_msg or "login" in error_msg:
+                return UploadResult(
+                    success=False,
+                    error="X_SESSION_EXPIRED: Run 'xpst auth x'",
+                    platform="x",
+                    retryable=False,
+                )
+
+            if "rate limit" in error_msg:
+                return UploadResult(
+                    success=False,
+                    error="X_RATE_LIMITED: Too many requests, try again later",
+                    platform="x",
+                )
+
+            return UploadResult(
+                success=False,
+                error=f"X_IMAGE_ERROR: {truncate_error(str(e))}",
+                platform="x",
+            )
+
+    async def upload_carousel(self, media_paths: list[Path], caption: str) -> UploadResult:
+        """Publish a multi-media post as a tweet thread on X/Twitter.
+
+        Creates a tweet thread: the first tweet carries the caption + first
+        media, then one reply per remaining item, in the order given. Each item
+        keeps its own modality — images go through the media upload endpoint as
+        images (twikit derives ``media_type`` from the file), never stitched or
+        re-encoded — and image items are checked against X's image contract
+        before any client call.
+
+        Args:
+            media_paths: List of paths to media files, in post order.
+            caption: Caption for the first tweet.
+
+        Returns:
+            UploadResult with root tweet ID and URL.
+        """
+        items = [Path(p) for p in media_paths]
+
+        if len(items) < 2:
+            reason = (
+                "X multi-media posts need at least 2 items "
+                f"(got {len(items)}). Post it as a single image or video instead."
+            )
+            logger.warning("Refusing X thread: %s", reason)
+            return UploadResult(
+                success=False,
+                error=f"X_THREAD_NEEDS_TWO: {reason}",
+                platform="x",
+                retryable=False,
+                metadata={"content_type": "thread", "items": len(items)},
+            )
+
+        if self.config.x.auth_mode == "api_v2":
+            # The official API path has no thread implementation in xPST. Say so
+            # instead of letting the twikit client fail with a path error that
+            # reads like a bug.
+            reason = (
+                "X_THREAD_API_V2_UNSUPPORTED: the official X API path has no multi-media thread "
+                "implementation in xPST (one tweet per item); switch auth_mode to 'cookies' to "
+                "publish a multi-media post, or post the items separately."
+            )
+            logger.warning("Refusing X thread: %s", reason)
+            return UploadResult(
+                success=False,
+                error=reason,
+                platform="x",
+                retryable=False,
+                metadata={"content_type": "thread", "items": len(items), "auth_mode": "api_v2"},
+            )
+
+        rejections = self.carousel_item_rejection_reasons(items)
+        if rejections:
+            message = " ".join(rejections)
+            logger.warning("Refusing X thread: %s", message)
+            return UploadResult(
+                success=False,
+                error=f"X_THREAD_ITEM_REJECTED: {message}",
+                platform="x",
+                retryable=False,
+                metadata={"content_type": "thread", "items": len(items)},
+            )
+
+        # Trim for the "🧵 1/N" header this adapter appends: the gate measures
+        # the caption it was given, and the header is the adapter's own addition,
+        # so the room it needs is reserved here. (Media captions sent verbatim are
+        # refused, not trimmed — see _caption_limit_violation.)
+        thread_header = f"\n\n🧵 1/{len(items)}"
+        max_caption = 280 - len(thread_header)
+        if len(caption) > max_caption:
+            caption = caption[:max_caption - 3] + "..."
+
+        try:
+            client = await self._get_client()
+
+            logger.info(f"Creating X thread with {len(items)} items")
+
+            # First tweet: caption + first media
+            media_id_1 = await client.upload_media(
+                str(items[0]),
+                wait_for_completion=True,
+            )
+            first_tweet = await client.create_tweet(
+                text=f"{caption}{thread_header}",
+                media_ids=[media_id_1],
+            )
+            # Every item's own tweet id, in order: a caller can verify each
+            # media item landed, not just that the thread started.
+            tweet_ids: list[str] = [str(first_tweet.id)]
+
+            # Reply tweets for remaining media
+            last_tweet_id = first_tweet.id
+            for i, path in enumerate(items[1:], 2):
+                media_id = await client.upload_media(
+                    str(path),
+                    wait_for_completion=True,
+                )
+                reply = await client.create_tweet(
+                    text=f"{i}/{len(items)}",
+                    reply_to=last_tweet_id,
+                    media_ids=[media_id],
+                )
+                last_tweet_id = reply.id
+                tweet_ids.append(str(reply.id))
+
+            tweet_url = f"https://x.com/i/status/{first_tweet.id}"
+            logger.info(f"Posted X thread: {tweet_url} ({len(items)} tweets)")
+
+            return UploadResult(
+                success=True,
+                post_id=str(first_tweet.id),
+                post_url=tweet_url,
+                platform="x",
+                metadata={
+                    "caption_length": len(caption),
+                    "thread_items": len(items),
+                    "item_order": [p.name for p in items],
+                    "tweet_ids": tweet_ids,
+                    "content_type": "thread",
+                    "last_tweet_id": str(last_tweet_id),
+                },
+            )
+
+        except Exception as e:
+            error_msg = str(e).lower()
+            logger.error(f"X thread creation failed: {e}")
+
+            if "unauthorized" in error_msg or "login" in error_msg:
+                return UploadResult(
+                    success=False,
+                    error="X_SESSION_EXPIRED: Run 'xpst auth x'",
+                    platform="x",
+                )
+
+            if "rate limit" in error_msg:
+                return UploadResult(
+                    success=False,
+                    error="X_RATE_LIMITED: Too many requests, try again later",
+                    platform="x",
+                )
+
+            return UploadResult(
+                success=False,
+                error=f"X_THREAD_ERROR: {truncate_error(str(e))}",
+                platform="x",
+            )
+
+    def carousel_item_rejection_reasons(self, items: list[Path]) -> tuple[str, ...]:
+        """Destination-named reasons X cannot publish these thread items.
+
+        Only still images are checked, with X's image contract (JPG/PNG/WEBP,
+        ≤ 5 MB, aspect between 1:3 and 3:1) and the preflight's own wording. The
+        check reads the file header in pure Python — no ffmpeg, no ffprobe.
+        """
+        from xpst.content import MEDIA_KIND_IMAGE, media_kind
+        from xpst.media.specs import image_rejection_reasons
+
+        reasons: list[str] = []
+        for item in items:
+            if media_kind(item) != MEDIA_KIND_IMAGE:
+                continue
+            reasons.extend(image_rejection_reasons(item, self.platform_name))
+        return tuple(reasons)
+
+    async def get_followers(self) -> int:
+        """Return follower count for the authenticated X account.
+
+        Dispatches based on auth_mode:
+        - cookies: Uses twikit client.get_user_by_username()
+        - api_v2: Uses X API v2 /2/users/me with user.fields
+        """
+        if self.config.x.auth_mode == "api_v2":
+            return await self._get_followers_api_v2()
+        return await self._get_followers_twikit()
+
+    async def _get_followers_twikit(self) -> int:
+        """Get follower count via twikit (cookie-based)."""
+        try:
+            client = await self._get_client()
+            username = self.config.x.username
+            if not username:
+                return 0
+            user = await client.get_user_by_username(username)
+            return int(user.user_data.get("followers_count", 0))
+        except Exception as e:
+            logger.debug(f"X twikit get_followers failed: {e}")
+            return 0
+
+    async def _get_followers_api_v2(self) -> int:
+        """Get follower count via X API v2."""
+        import httpx
+
+        bearer = self.config.x.bearer_token
+        if not bearer:
+            return 0
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(
+                    "https://api.twitter.com/2/users/me",
+                    headers={"Authorization": f"Bearer {bearer}"},
+                    params={"user.fields": "public_metrics"},
+                )
+                resp.raise_for_status()
+                data = resp.json().get("data", {})
+                return int(data.get("public_metrics", {}).get("followers_count", 0))
+        except Exception as e:
+            logger.debug(f"X API v2 get_followers failed: {e}")
+            return 0
+
+
+PlatformRegistry.register("x", XUploader)

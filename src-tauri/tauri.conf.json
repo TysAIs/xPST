@@ -1,0 +1,62 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "xPST",
+  "mainBinaryName": "xPST",
+  "version": "1.3.0",
+  "identifier": "com.tysais.xpst",
+  "build": {
+    "beforeDevCommand": "",
+    "devUrl": "http://127.0.0.1:8080",
+    "beforeBuildCommand": "cd ../ui && npm ci && npm run build",
+    "frontendDist": "../ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "xPST",
+        "width": 1280,
+        "height": 800,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Cross-posting suite for short-form video",
+    "resources": {
+      "../ui/dist": "ui",
+      "binaries/engine": "binaries/engine",
+      "binaries/ytdlp": "binaries/ytdlp"
+    },
+    "createUpdaterArtifacts": false,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://tysais.github.io/xPST/updates/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIxMUNCOTMwQTVGQTJGNzQKUldSMEwvcWxNTGtjSWZibHBLc3hHOWlUZGJ4VmxnZXRsbXo1QkorL1JvT2R6dm5CM0RFcXVLNGwK"
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "xpst"
+        ]
+      }
+    }
+  }
+}

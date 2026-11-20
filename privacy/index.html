@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — xPST</title>
+<meta name="description" content="How xPST handles data: local-first storage, encrypted credentials, no telemetry, and no collection of your content.">
+<link rel="stylesheet" href="../assets/site.css">
+<link rel="icon" href="../assets/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/apple-touch-icon.png">
+
+</head>
+<body>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="/xPST/">x<span>PST</span></a>
+    <nav class="site">
+      <a href="../">Home</a>
+      <a href="../terms/">Terms</a>
+      <a href="https://github.com/TysAIs/xPST">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<div class="wrap">
+
+  <h1>Privacy Policy</h1>
+  <p class="muted">Last updated: 14 September 2026 · Applies to the xPST application and this website.</p>
+
+  <p class="lede">xPST is a local-first application. It runs on your computer, uses your own accounts,
+  and stores your data on your device. We do not operate a service that receives your content, and we
+  do not collect analytics or telemetry from the application.</p>
+
+  <h2>1. Who we are</h2>
+  <p>xPST is an open-source project distributed under the MIT or Apache-2.0 licence. The source code,
+  issue tracker and documentation are hosted at
+  <a href="https://github.com/TysAIs/xPST">github.com/TysAIs/xPST</a>. There is no company operating a
+  hosted xPST service, and no account is required to use the software.</p>
+
+  <h2>2. What the application stores, and where</h2>
+  <p>All application data stays on the device you install it on:</p>
+  <ul>
+    <li><strong>Platform credentials.</strong> When you connect a social account, xPST performs the
+      platform's own authorisation flow and stores the resulting session or token in a local
+      configuration directory (<code>~/.xpst/</code> on macOS and Linux). Credentials are encrypted at
+      rest; no plaintext credential is written to disk.</li>
+    <li><strong>Posting history and state.</strong> A local record of what was posted, where, and what
+      the platform returned, so the tool can avoid duplicate posts and retry failures.</li>
+    <li><strong>Configuration and logs.</strong> Your settings, and logs used for troubleshooting. Logs
+      are designed to exclude personal data and credentials.</li>
+  </ul>
+  <p>We have no access to any of this. It never leaves your machine except in the direct API calls you
+  initiate to the platforms you have connected.</p>
+
+  <h2>3. What we do not collect</h2>
+  <ul>
+    <li>No analytics or usage telemetry is sent to us.</li>
+    <li>No crash reports are uploaded automatically.</li>
+    <li>No personal identifiers are embedded in the software or its repository.</li>
+    <li>We do not collect, store, sell or share your video content, captions, or account data.</li>
+  </ul>
+
+  <h2>4. What is sent to third parties</h2>
+  <p>When you publish, xPST sends data <strong>directly from your device to the platform you chose</strong>
+  using that platform's official API. That is the only transfer that happens, and it is initiated by you.
+  For example, publishing to YouTube or Instagram sends the video and caption you selected to that
+  platform, using your own authorised account. When xPST downloads a video from TikTok as a source, the
+  transfer runs the other way: content is read from TikTok onto your machine, and xPST does not upload
+  anything back to TikTok.</p>
+  <p>The data each platform receives, and how that platform uses it, is governed by that platform's own
+  privacy policy. xPST does not act as an intermediary and never receives a copy.</p>
+
+  <h2>5. Permissions xPST requests, and why</h2>
+  <p>When you connect a platform, xPST asks only for the permissions needed to do the job you asked for:</p>
+  <table>
+    <thead><tr><th>Platform and scope</th><th>Why it is requested</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>TikTok — <code>user.info.basic</code></td>
+        <td>Read the authorised user's basic profile (open id, display name, avatar) so the application
+          can confirm which TikTok account is connected and label it in the interface. Stored only in
+          local configuration.</td>
+      </tr>
+      <tr>
+        <td>TikTok — <code>user.info.stats</code></td>
+        <td>Display the connected account's own follower, like and video counts in the application's
+          local analytics view, so the creator can see their own performance. Read-only, own account
+          only.</td>
+      </tr>
+      <tr>
+        <td>TikTok — <code>video.publish</code></td>
+        <td>Requested by the TikTok app registration for the pending destination path. xPST does not
+          offer TikTok publishing today: until TikTok approves an audited application, that API only
+          permits private (self-only) posts for at most 5 users per 24 hours, and xPST reports the
+          capability as blocked rather than advertising it. The permission is not exercised by the
+          current release.</td>
+      </tr>
+      <tr>
+        <td>TikTok — <code>video.upload</code></td>
+        <td>Requested for the same pending destination path, to upload the user's own video as a draft
+          to the account's inbox so the creator can finish captions or edits inside the TikTok
+          application. It is not used by the current release.</td>
+      </tr>
+      <tr>
+        <td>YouTube — <code>youtube.upload</code></td>
+        <td>Upload the video you selected to your own YouTube channel, after an explicit confirmation
+          in the application.</td>
+      </tr>
+      <tr>
+        <td>YouTube — <code>youtube.readonly</code></td>
+        <td>Read your own channel's name, id and uploads playlist, and the view/like/comment counts of
+          videos on that channel, so the application can label the connected account and show your
+          own performance. Read-only, own channel only.</td>
+      </tr>
+      <tr>
+        <td>YouTube — <code>youtube.force-ssl</code></td>
+        <td>Delete, or change the visibility of, a video on your own channel when you ask xPST to
+          remove a post.</td>
+      </tr>
+      <tr>
+        <td>X, Instagram</td>
+        <td>The equivalent posting, reading and analytics permissions for your own accounts on those
+          platforms, requested through each platform's own authorisation flow.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>You can revoke any of these at any time from the platform's own settings, or with
+  <code>xpst disconnect &lt;platform&gt;</code>, which removes the stored credentials from your device.</p>
+
+  <h2>6. YouTube API Services (Google)</h2>
+  <p>xPST uses <strong>YouTube API Services</strong>. When you connect a YouTube account, xPST asks
+  Google for only the three permissions listed in section 5 above, through Google's own OAuth 2.0
+  authorisation flow, and uses them only on the channel you authorised.</p>
+  <ul>
+    <li><code>https://www.googleapis.com/auth/youtube.upload</code> — upload the video file you
+      selected to your own channel, after you confirm the post in the application.</li>
+    <li><code>https://www.googleapis.com/auth/youtube.readonly</code> — read your own channel's
+      name, id and uploads playlist, and the view/like/comment counts of videos on that channel.</li>
+    <li><code>https://www.googleapis.com/auth/youtube.force-ssl</code> — delete, or change the
+      visibility of, a video on your own channel when you ask xPST to remove a post.</li>
+  </ul>
+  <p>The video file and the caption you write are sent directly from your device to Google's YouTube
+  API. xPST operates no server: nothing is proxied through us, and we never receive a copy of your
+  media, your channel data or your metrics. How Google handles the data it receives is described in
+  <a href="https://policies.google.com/privacy">Google's Privacy Policy</a>.</p>
+  <p>YouTube data (such as video titles, view/like/comment counts and post dates) is stored only on
+  your device, in the local xPST configuration directory, and only for as long as you keep it.
+  Deleting that directory, or running <code>xpst disconnect youtube</code>, removes the stored
+  credentials and the local copies of that data. There is no server-side copy for us to delete.</p>
+  <p>You can revoke xPST's access to your Google account at any time from
+  <a href="https://myaccount.google.com/permissions">Google's security settings</a>, or with
+  <code>xpst disconnect youtube</code>, which deletes the stored credentials from your device.</p>
+  <p>By using xPST's YouTube integration, you agree to be bound by the
+  <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>.</p>
+
+  <h2>7. Data retention and deletion</h2>
+  <p>Because data is stored locally, retention is yours to control. Removing the application's
+  configuration directory deletes the credentials, posting history and logs. The command
+  <code>xpst disconnect &lt;platform&gt;</code> removes a single platform's stored credentials without
+  touching the rest. There is no server-side copy for us to delete.</p>
+
+  <h2>8. This website</h2>
+  <p>This website is served by GitHub Pages as static files. It sets no cookies, runs no analytics and
+  performs no tracking. GitHub's own logging as the hosting provider is described in GitHub's privacy
+  statement.</p>
+
+  <h2>9. Children</h2>
+  <p>xPST is not directed at children and is not intended for use by anyone below the minimum age
+  required to hold an account on the platforms it connects to.</p>
+
+  <h2>10. Changes to this policy</h2>
+  <p>Material changes will be published on this page with an updated date, and recorded in the
+  repository's history at
+  <a href="https://github.com/TysAIs/xPST/commits/main/privacy/index.html">github.com/TysAIs/xPST</a>.</p>
+
+  <h2>11. Contact</h2>
+  <p>Questions about this policy can be raised as an issue at
+  <a href="https://github.com/TysAIs/xPST/issues">github.com/TysAIs/xPST/issues</a>.</p>
+
+</div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <span>© 2026 xPST contributors · MIT OR Apache-2.0</span>
+    <span>
+      <a href="../">Home</a> ·
+      <a href="../terms/">Terms of Service</a> ·
+      <a href="https://github.com/TysAIs/xPST">GitHub</a>
+    </span>
+  </div>
+</footer>
+</body>
+</html>

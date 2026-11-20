@@ -1,0 +1,44 @@
+# Fictional config used by the Rust read-path tests.
+# No personal handles, ids or absolute paths from a real machine: everything
+# here is obviously fake, which is what the public-safety scan expects.
+version: 4
+accounts:
+  youtube:
+    enabled: true
+    client_secrets: /fixture/.xpst/credentials/youtube_client_secrets.json
+    token_file: /fixture/.xpst/credentials/youtube_token.json
+    channel_id: UC0000000000000000000000
+    username: ''
+    proxy: null
+  x:
+    enabled: false
+    cookies_file: /fixture/.xpst/credentials/x_cookies.json
+    username: example_user
+    proxy: null
+    auth_mode: cookies
+  instagram:
+    enabled: false
+    session_file: ''
+    username: ''
+    auth_mode: session
+    device_id: null
+video:
+  # Directory checks in `config validate`/`doctor` accept a path whose parent
+  # exists, and /tmp exists on every unix CI runner — so a fixture that points
+  # here exercises the passing branch without depending on the test machine.
+  download_dir: /tmp
+  cleanup_after_post: false
+monitoring:
+  log_level: INFO
+  log_file: /tmp/xpst-fixture.log
+  healthcheck_port: 8080
+notifications:
+  enabled: false
+  discord:
+    webhook_url: https://discord.invalid/api/webhooks/0/example
+  telegram:
+    bot_token: ''
+    chat_id: ''
+rate_limits:
+  youtube: 5
+  x: 5

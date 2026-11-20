@@ -1,0 +1,768 @@
+# xPST MCP Server Tools
+
+The xPST MCP server exposes local xPST workflows over stdio so AI assistants and automation tools can inspect setup, check status, run posting workflows, and query the personal content knowledge base without scraping CLI text.
+
+This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). The current registry contains **46 tools: 40 `xpst_*` + 2 `messenger_*` + 4 `kb_*`**, including the canonical capability, readiness, browser-free auth plan, resumable setup tools, the failure/activity recovery tools (list + targeted retry), scheduling incl. cancel, pause and resume, the canonical post preflight, the read-only rate-limit cooldown view, and the read-only live-stream relay status.
+
+xPST posts to the destinations enabled by your configuration — YouTube, Instagram, and X/Twitter are the live-verified destinations (TikTok publishing is not available yet and awaits external TikTok developer review; Threads and Messenger are opt-in integrations, currently disabled/unauthenticated — see the [INSTALL.md capability truth table](INSTALL.md#capability-truth-table)) — and pulls source video from TikTok, YouTube, Instagram, X, and local files.
+
+## Setup
+
+Requires the optional extra: `pip install "xpst[mcp]"`. The kb_* tools additionally require `pip install "xpst[knowledge]"` (they return a clear install hint if the extra is missing).
+
+```json
+{
+  "mcpServers": {
+    "xpst": {
+      "command": "xpst-mcp",
+      "transport": "stdio"
+    }
+  }
+}
+```
+
+You can also start the server with `xpst-mcp` or `xpst mcp`.
+
+## Guardrails: these tools touch real accounts
+
+**`xpst_post` and `xpst_run` upload to the user's REAL social media accounts.** There is no sandbox. Before any live call:
+
+1. Use `dry_run: true` first and show the user what would happen.
+2. Get explicit user confirmation before a live `xpst_run` or `xpst_post`.
+3. `xpst_backfill` also performs live uploads when not in dry-run mode.
+4. `xpst_delete` performs a **real platform takedown**: it calls the platform delete API for every destination the video was posted to, then removes the local record. Each destination gets its own outcome (`deleted`, `soft_hidden`, `pending`, `unsupported`) and `platform_deleted` flag; the top-level `platform_deleted` is true only when every destination is really gone. `pending`/`unsupported` results mean the live post may still be public — act on the returned `share_url`. Removing the record can also cause the engine to consider the content "new" again, so treat the call as destructive and confirm with the user.
+
+Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers`, `xpst_config_show`, `xpst_auth_status`) never initialize the posting engine and are safe to call. `xpst_auth_start` is also side-effect-free: it returns a human action plan and never opens a browser or accepts secrets.
+
+## Tool index
+
+<!-- BEGIN GENERATED TOOL INDEX -->
+
+| Tool | Purpose | Mutates real accounts | Consent gate |
+|------|---------|-----------------------|--------------|
+| `xpst_run` | Check for new videos and cross-post them to configured platforms. A batch whe… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_post` | Post to platforms: one local video/image file, a carousel (carousel_paths), o… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_analytics` | Per-post and per-platform engagement metrics (views, likes, comments, shares)… | No | — |
+| `xpst_cross_post_analytics` | Cross-post correlation analytics (B1): one video posted to multiple platforms… | No | — |
+| `xpst_followers` | Follower counts per platform with growth history. Returns total followers acr… | No | — |
+| `xpst_best_time` | Best time to post per platform, based on engagement history. Analyzes when yo… | No | — |
+| `xpst_security_audit` | Run an automated security check on the xPST installation. Verifies credential… | No | — |
+| `xpst_suggest_caption` | Generate AI caption suggestions for a video file. Uses the video's transcript… | No | — |
+| `xpst_generate_ideas` | Generate post ideas for a content topic (AI content studio). Uses the KB LLM… | No | — |
+| `xpst_transcript` | Get the transcript for a video by its content_hash or video_id. Returns the f… | No | — |
+| `xpst_search` | Search the knowledge base for nuggets, clips, and topics. Returns matching kn… | No | — |
+| `xpst_activity` | List recorded platform failures with targeted retry or review actions (read-o… | No | — |
+| `xpst_schedule_list` | List scheduled posts (pending, completed, failed) with times and targets | No | — |
+| `xpst_schedule_add` | Schedule a post for later: local video file + caption + ISO-8601 time, option… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_schedule_cancel` | Cancel a scheduled post by entry id — the MCP equivalent of `xpst schedule re… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_schedule_pause` | Pause the schedule queue — the MCP equivalent of `xpst schedule pause`. No sc… | No | — |
+| `xpst_schedule_resume` | Release a paused schedule queue — the MCP equivalent of `xpst schedule resume… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_failures_retry` | Retry ONE recorded upload failure, identified by video_id + platform — the MC… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_health` | Test connectivity to all platforms and sources (no uploads) | No | — |
+| `xpst_status` | Show cross-posting statistics and health status | No | — |
+| `xpst_rate_limit_status` | Read-only view of active rate-limit cooldowns: per platform the remaining sec… | No | — |
+| `xpst_backfill` | Retry failed or incomplete posts from history. `attempted` / `successful` are… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_config_show` | Display current configuration (with sensitive values masked) | No | — |
+| `xpst_auth_status` | Show live authentication status and the truthful per-platform badge (connecte… | No | — |
+| `xpst_byo_app` | Bring-your-own developer app setup: report (masked) which platforms have a lo… | No | — |
+| `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the publi… | No | — |
+| `xpst_capabilities` | Return the canonical role-aware provider catalog AND the content contract wit… | No | — |
+| `xpst_preflight` | Resolve the per-destination plan BEFORE anything is published: for each desti… | No | — |
+| `xpst_readiness` | Return local setup readiness and actionable blockers without starting the pos… | No | — |
+| `xpst_auth_start` | Return a human-only authentication action plan; never opens a browser or acce… | No | — |
+| `xpst_providers` | List supported content sources and posting destinations with capabilities | No | — |
+| `xpst_disconnect` | Disconnect a platform: remove its stored account credentials (tokens, cookies… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_delete` | Delete a post for REAL on the platform and remove its local record. Calls the… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `messenger_send` | Send a text message to a Messenger recipient (page-scoped PSID) via the Meta… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `messenger_set_rules` | Configure the Messenger ManyChat-lite auto-reply rules. Provide a keyword->re… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_messenger_check_comments` | Fetch recent comments on an Instagram or Facebook post and auto-reply per the… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `kb_add` | Ingest a local file or URL into the knowledge base | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `kb_query` | Return stored knowledge nuggets whose text matches the query | No | — |
+| `kb_organize` | Discover areas, tag difficulty, and assign nuggets | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `kb_areas` | List discovered knowledge areas in course order (beginner -> advanced) | No | — |
+| `xpst_setup_start` | Start or return the shared resumable setup transaction | No | — |
+| `xpst_setup_status` | Read the shared setup transaction and pending human actions | No | — |
+| `xpst_setup_resume` | Resume setup with safe step state or caller-verified readiness | No | — |
+| `xpst_setup_reset` | Reset the shared setup transaction and its recovery copies | No | — |
+| `xpst_stream` | Live-stream relay status: every platform's ingest path (api/manual/unsupporte… | No | — |
+| `xpst_chat` | Read-only live chat from Twitch, YouTube and Kick as ONE merged timeline. Eac… | No | — |
+
+Registry size: **46 tools**.
+<!-- END GENERATED TOOL INDEX -->
+
+---
+
+## xpst_providers
+
+Lists all discovered content sources and posting destinations with auth modes and capabilities. Call this first so the agent adapts to the installed provider set instead of assuming a fixed platform list. The provider registry includes YouTube, Instagram Reels, X, TikTok, Threads, Facebook Page, Rumble (integration-uncertain) and Messenger (messaging/auto-reply), while the current live state is documented in [INSTALL.md](INSTALL.md#capability-truth-table). TikTok is currently source-only; destination publishing awaits external review.
+
+Arguments: none.
+
+Example call:
+
+```json
+{ "name": "xpst_providers", "arguments": {} }
+```
+
+Example response shape:
+
+```json
+{
+  "sources": [
+    {
+      "name": "tiktok",
+      "display_name": "TikTok",
+      "roles": ["source"],
+      "capabilities": ["list", "download", "carousel", "health", "cookie_auth", "rate_limits"],
+      "auth_mode": "cookies",
+      "is_official_api": false,
+      "is_local_first": true
+    }
+  ],
+  "destinations": [
+    {
+      "name": "youtube",
+      "display_name": "YouTube",
+      "roles": ["destination"],
+      "capabilities": ["upload", "delete", "health", "official_api", "oauth", "rate_limits"],
+      "auth_mode": "oauth",
+      "is_official_api": true,
+      "is_local_first": true
+    }
+  ]
+}
+```
+
+## xpst_config_show
+
+Displays the current configuration with sensitive account values (client secrets, token/cookie/session file paths, passwords) masked.
+
+Arguments: none.
+
+Example call:
+
+```json
+{ "name": "xpst_config_show", "arguments": {} }
+```
+
+Response shape: a JSON object with `accounts`, `video`, `monitoring`, and `schedule` sections mirroring `~/.xpst/config.yaml`, with sensitive account fields replaced by `***MASKED***`.
+
+## xpst_auth_status
+
+Returns the credential storage mode (OS keychain vs encrypted file fallback), the list of stored credential keys, and per-platform authentication plus remaining daily quota.
+
+Arguments: none.
+
+Example call:
+
+```json
+{ "name": "xpst_auth_status", "arguments": {} }
+```
+
+Example response shape:
+
+```json
+{
+  "credential_storage": "OS Keychain",
+  "stored_credentials": ["youtube_token", "x_cookies"],
+  "platforms": {
+    "youtube": { "authenticated": true, "quota_remaining": 5 },
+    "x": { "authenticated": true, "quota_remaining": 5 },
+    "instagram": { "authenticated": false, "quota_remaining": 5 }
+  }
+}
+```
+
+## xpst_status
+
+Returns local state statistics: tracked videos, processed counts, platform health, and dead-letter state. Read-only.
+
+Arguments: none.
+
+Example call:
+
+```json
+{ "name": "xpst_status", "arguments": {} }
+```
+
+Response shape: the engine's statistics dict (post counts per platform, failure counts, circuit-breaker state, DLQ size).
+
+## xpst_health
+
+Runs live source and platform connectivity checks. No uploads, but this does touch provider clients and stored credentials.
+
+Arguments: none.
+
+Example call:
+
+```json
+{ "name": "xpst_health", "arguments": {} }
+```
+
+Response shape: a per-provider health dict (`ok`/error detail for each configured source and destination).
+
+## xpst_rate_limit_status
+
+Read-only view of the persisted rate-limit cooldowns (`rate_cooldowns.json` under the config dir). It exists so an operator or agent can answer "why hasn't it posted?" without opening the file by hand. A cooldown defers a post; it does not fail it.
+
+Pure local read: no uploads, no platform API calls, no sleeps, no writes — safe in dry runs and safe to poll.
+
+Arguments: none.
+
+Example call:
+
+```json
+{ "name": "xpst_rate_limit_status", "arguments": {} }
+```
+
+Response shape: `state` (`cooling`/`idle`/`unknown`), `active` (platforms whose pause has not expired), `cooldowns` (per platform: `strikes`, `until_iso`, `last_hit_iso`, `last_reason`, `remaining_s`, `remaining_human`), `source` (the file read) and `file_present`. An absent file is a normal fresh install, not an error.
+
+## xpst_run
+
+Checks a source for new videos and cross-posts them to all configured destinations. **Live mode posts to real accounts.**
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `max_posts` | integer | no | `5` | Maximum posts per cycle (1-50). |
+| `source` | string | no | `"tiktok"` | One of `tiktok`, `youtube`, `x`, `instagram`, `local`. |
+| `catch_up` | boolean | no | `false` | Fetch extra videos for catch-up mode. |
+| `dry_run` | boolean | no | `false` | Preview without uploading. Always use first. |
+
+Example call (safe preview):
+
+```json
+{ "name": "xpst_run", "arguments": { "source": "tiktok", "max_posts": 3, "dry_run": true } }
+```
+
+Dry-run response shape:
+
+```json
+{
+  "dry_run": true,
+  "fetch_count": 2,
+  "videos": [
+    { "video_id": "7301...", "caption": "First 100 chars...", "source": "tiktok", "targets": ["youtube", "instagram", "x", "tiktok", "threads"] }
+  ]
+}
+```
+
+Live-run response shape:
+
+```json
+{
+  "ok": false,
+  "attempted": 1,
+  "uploads": 2,
+  "published": 1,
+  "processed": 1,
+  "exit_code": 0,
+  "batch_status": "partial",
+  "failed_destinations": [
+    { "video_id": "7301...", "platform": "threads", "attempted": true, "error": "THREADS_NEEDS_URL: requires a public URL", "exit_code": 10, "reason": "destination unavailable" }
+  ],
+  "results": [ { "video_id": "7301...", "results": { "youtube": { "success": true } }, "all_success": false, "partial_success": true } ]
+}
+```
+
+`exit_code` is the exit status the CLI (`xpst run`) would terminate with for the
+same batch, `batch_status` is one of `published` / `partial` / `failed` /
+`nothing_to_do`, and `failed_destinations` names every destination that failed —
+so a batch where nothing was published is not mistaken for a successful run.
+
+## xpst_post
+
+Posts one local video/image file, a carousel (when `carousel_paths` is given), or a
+**text post** (`content_type: "text"` with no file). `content_type` uses the canonical
+vocabulary (`video`, `image`, `carousel`, `text`, `thread`); omit it and the media decides
+(one file = video, several = carousel). **Live mode posts to real accounts.**
+
+A content type the chosen destination cannot publish is **refused before anything is
+uploaded**, with the reason in `blockers` and every requested destination reported as a
+failure — never as a success. Call `xpst_capabilities` first to see what each destination
+can really publish (`content.publish_routes`, `content.platforms.*.implemented`).
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `video_path` | string | no | — | Path to the video/image file (or the first item for a carousel); omit for a text post. |
+| `caption` | string | no | `""` | Caption/title for the post. The default for every destination without an entry in `overrides`; the text itself for a text post. |
+| `text` | string | no | — | The body of a text-only post (no media). Same body as `caption`; sending `text` on its own (or with `content_type: "text"`) publishes a text post. |
+| `content_type` | string | no | inferred | `video`, `image`, `carousel`, or `text`. Omit to let the media decide (one file = video, several = carousel). Destinations with no text path refuse `text`. |
+| `overrides` | object | no | `{}` | Per-destination copy: `{"x": "short copy"}` or `{"x": {"text": "short copy"}}`. A destination not listed keeps `caption`. An override over that destination's own caption limit (X 280, Instagram 2200, TikTok 2200, Threads 500) is refused before anything is uploaded, and the response names the destination. |
+| `platforms` | string[] | no | all configured | Subset of `youtube`, `instagram`, `x`, `tiktok`, `threads`. |
+| `carousel_paths` | string[] | no | `[]` | Additional image/video paths for a carousel. |
+| `dry_run` | boolean | no | `false` | Preview without uploading. Always use first. |
+
+`caption` is required for media posts; for a text post supply `text` (or `caption`).
+
+Example call:
+
+```json
+{
+  "name": "xpst_post",
+  "arguments": {
+    "video_path": "/tmp/xpst/clips/demo.mp4",
+    "caption": "New demo — full walkthrough in the description!",
+    "overrides": { "x": { "text": "New demo — short version." } },
+    "platforms": ["youtube", "x"],
+    "dry_run": true
+  }
+}
+```
+
+Example text post (X and Threads both publish text; a text post carries no file):
+
+```json
+{
+  "name": "xpst_post",
+  "arguments": { "text": "Shipping the text-post path today.", "platforms": ["x", "threads"] }
+}
+```
+
+Example refusal (a text post to a destination with no text path):
+
+```json
+{
+  "name": "xpst_post",
+  "arguments": { "text": "hello", "platforms": ["youtube"] }
+}
+```
+
+```json
+{
+  "ok": false,
+  "uploaded": false,
+  "blocked": true,
+  "content_type": "text",
+  "blockers": ["youtube does not support text posts. Supported content types for youtube: video."],
+  "destinations": [{ "platform": "youtube", "success": false, "published": false }],
+  "content": { "effective_content_type": "text", "route": "text", "ok": false }
+}
+```
+
+Live response shape (per-platform upload results):
+
+```json
+{
+  "video_id": "demo",
+  "caption": "New demo!",
+  "content_type": "video",
+  "results": {
+    "youtube": { "success": true, "url": "https://youtube.com/shorts/...", "error": null },
+    "x": { "success": false, "url": null, "error": "..." }
+  },
+  "all_success": false,
+  "partial_success": true
+}
+```
+
+## xpst_backfill
+
+Retries failed or incomplete posts from history. **Live mode posts to real accounts.**
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `max_count` | integer | no | `10` | Maximum videos to backfill. |
+| `source` | string | no | `"tiktok"` | Source provider name. |
+| `platforms` | string[] | no | all configured | Subset of `youtube`, `instagram`, `x`, `tiktok`, `threads`. |
+| `dry_run` | boolean | no | `false` | Preview what would be backfilled. |
+
+Example call:
+
+```json
+{ "name": "xpst_backfill", "arguments": { "max_count": 5, "dry_run": true } }
+```
+
+Live response shape:
+
+```json
+{
+  "attempted": 2,
+  "successful": 1,
+  "exit_code": 0,
+  "batch_status": "partial",
+  "failed_destinations": [
+    { "video_id": "...", "platform": "x", "attempted": true, "error": "X_UPLOAD_ERROR: No tweet ID in response", "exit_code": 1, "reason": "post failed" }
+  ],
+  "results": [ { "video_id": "...", "results": { "youtube": { "success": true } }, "all_success": true, "partial_success": false } ]
+}
+```
+
+`exit_code` / `batch_status` / `failed_destinations` are the same aggregate the
+CLI (`xpst backfill`) exits on: a backfill where **every** destination failed
+reports `"batch_status": "failed"` with a non-zero `exit_code` (`4` quota/rate
+limit, `3` authentication, `10` unavailable / refused, `1` otherwise), while
+`"nothing_to_do"` with `"exit_code": 0` means there was nothing to retry.
+`attempted` / `successful` alone cannot tell those two apart.
+
+## xpst_delete
+
+Deletes a post **for real on the platform** and removes its local record. For every destination the video was posted to it calls the platform delete API (`CrossPostEngine.delete_post`) and reports that destination's Phase-1.2 outcome:
+
+- `deleted` — hard delete confirmed (`platform_deleted: true`).
+- `soft_hidden` — reversible unpublish, e.g. YouTube `privacyStatus=private` (`platform_deleted: true`; not publicly visible).
+- `pending` — deletion could not be confirmed; remove manually via the returned `share_url` (`platform_deleted: false`).
+- `unsupported` — that destination has no delete path (`platform_deleted: false`).
+
+Every destination record also carries `platform_deleted`; the top-level `platform_deleted` is true only when **every** destination is gone. The local record is removed for all destinations regardless of outcome. Removing a record can make previously-posted content look "new" to the engine again, so confirm with the user.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `video_id` | string | yes | — | Video ID to delete on the platform(s) and drop from local state. |
+| `platform` | string | no | `"all"` | `youtube`, `instagram`, `x`, `tiktok`, `threads`, `facebook`, or `all`. |
+
+Example call:
+
+```json
+{ "name": "xpst_delete", "arguments": { "video_id": "7301234567890", "platform": "all" } }
+```
+
+Example response:
+
+```json
+{ "ok": true, "video_id": "7301234567890", "platform": "all", "removed": ["youtube", "x"], "success": true,
+  "operation": "delete", "scope": "platform_and_local_state", "platform_deleted": true,
+  "results": [
+    { "platform": "youtube", "outcome": "deleted", "platform_deleted": true, "post_id": "RZ6i-0HM5dM",
+      "message": "Deleted from youtube", "share_url": null, "detail": null, "local_record_removed": true },
+    { "platform": "x", "outcome": "pending", "platform_deleted": false, "post_id": "111",
+      "message": "Delete pending on x - remove manually: https://x.com/i/status/111", "share_url": "https://x.com/i/status/111",
+      "detail": "429", "local_record_removed": true }
+  ],
+  "note": "Deleted on each destination where xPST supports it and removed the local record. Per-destination outcomes say exactly what happened on the platform." }
+```
+
+## messenger_send
+
+Sends a text message to a Messenger recipient (page-scoped PSID) via the Meta Graph API. Requires a configured Messenger Page Access Token (`xpst auth messenger`). Returns the `message_id`.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `recipient` | string | yes | — | Page-scoped PSID of the recipient. |
+| `text` | string | yes | — | Message body (max 640 chars). |
+
+Example call:
+
+```json
+{ "name": "messenger_send", "arguments": { "recipient": "100234567890123", "text": "Hello from xPST!" } }
+```
+
+Response shape: `{ "ok": true, "response": { "message_id": "mid.1", ... } }`.
+
+## messenger_set_rules
+
+Configures the Messenger ManyChat-lite auto-reply rules. Provide a keyword → reply map (the `*` key is the catch-all) and optionally toggle `auto_reply`. Persists to `~/.xpst/config.yaml`.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `rules` | object | yes | — | Keyword → reply map (`*` = catch-all). |
+| `auto_reply` | boolean | no | `true` | Enable/disable auto-reply. |
+
+Example call:
+
+```json
+{ "name": "messenger_set_rules", "arguments": { "rules": { "pricing": "Our pricing starts at $X", "*": "Thanks for writing!" }, "auto_reply": true } }
+```
+
+Response shape: `{ "ok": true, "auto_reply": true, "reply_rules": { ... } }`.
+
+## xpst_analytics
+
+Returns per-post and per-platform engagement metrics with snapshot history. Read-only; does not upload.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `platform` | string | no | all | `youtube`, `instagram`, `x`, `tiktok`, or `threads`. |
+| `live` | boolean | no | `false` | Fetch fresh metrics from platforms instead of stored snapshots. |
+
+Example call:
+
+```json
+{ "name": "xpst_analytics", "arguments": { "platform": "youtube", "live": false } }
+```
+
+Response shape: per-platform engagement metrics (views, likes, comments, shares) with snapshot history, plus a `collection_status` block per platform (`status`: `ok`/`partial`/`failed`/`unavailable`/`unknown`, `source`, `error`, `last_attempt_at`). A failed collection is labelled with its error — it is never returned as a zero that reads as real data, and snapshots recorded before collection status was tracked report `unknown`, not `ok`.
+
+## xpst_cross_post_analytics
+
+Cross-post correlation analytics: aggregates how a single video performed across every platform it was posted to. Read-only.
+
+Arguments: none.
+
+Example call:
+
+```json
+{ "name": "xpst_cross_post_analytics", "arguments": {} }
+```
+
+Response shape: per-video records correlating one source video against its destination posts and their aggregated engagement.
+
+## xpst_followers
+
+Returns follower counts per platform with growth history. Read-only.
+
+Arguments: none.
+
+Example call:
+
+```json
+{ "name": "xpst_followers", "arguments": {} }
+```
+
+Response shape: per-platform follower counts plus historical growth points.
+
+## xpst_best_time
+
+Recommends the best time to post per platform based on engagement history. Read-only.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `platform` | string | no | all | Limit the recommendation to one platform. |
+
+Example call:
+
+```json
+{ "name": "xpst_best_time", "arguments": { "platform": "instagram" } }
+```
+
+Response shape: recommended posting windows per platform derived from past engagement.
+
+## xpst_security_audit
+
+Runs an automated security check on the xPST installation (credential storage, file permissions, configuration hygiene). Read-only.
+
+Arguments: none.
+
+Example call:
+
+```json
+{ "name": "xpst_security_audit", "arguments": {} }
+```
+
+Response shape: a list of audit findings with severity and remediation hints.
+
+## xpst_suggest_caption
+
+Generates AI caption suggestions for a video file, optionally tuned for a target platform.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `video_path` | string | yes | — | Path to the video to caption. |
+| `platform` | string | no | `"instagram"` | Target platform to tune the caption for. |
+
+Example call:
+
+```json
+{ "name": "xpst_suggest_caption", "arguments": { "video_path": "/tmp/xpst/clips/demo.mp4", "platform": "instagram" } }
+```
+
+Response shape: one or more suggested captions.
+
+## xpst_transcript
+
+Returns the transcript for a video identified by content hash or video ID. Read-only.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `video_id` | string | yes | — | Video ID or content hash to fetch the transcript for. |
+
+Example call:
+
+```json
+{ "name": "xpst_transcript", "arguments": { "video_id": "7301234567890" } }
+```
+
+Response shape: the transcript text (and timing segments when available) for the requested video.
+
+## xpst_search
+
+Searches the knowledge base for nuggets, clips, and topics. Read-only.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `query` | string | yes | — | Search text. |
+| `limit` | integer | no | `10` | Maximum results to return. |
+
+Example call:
+
+```json
+{ "name": "xpst_search", "arguments": { "query": "best thumbnail tips", "limit": 10 } }
+```
+
+Response shape: matching knowledge nuggets/clips with provenance.
+
+## xpst_schedule_list
+
+Lists scheduled posts (pending, completed, and failed). Read-only.
+
+Arguments: none.
+
+Example call:
+
+```json
+{ "name": "xpst_schedule_list", "arguments": {} }
+```
+
+Response shape: a list of scheduled posts with their status, target platforms, and scheduled times.
+
+## xpst_schedule_add
+
+Schedules a post for a future time: video + caption + ISO-8601 time, with an optional repeat rule and per-destination caption overrides. Creates a pending scheduled post; when it fires, each destination receives its own copy (destinations without an override keep `caption`). Omit `video_path` for a **text-only post**: `caption` IS the post, stored as `content_type=text` and fired through the text route (never a media encoder).
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `video_path` | string | no | — (text post) | Path to the media to schedule. Omit for a text-only post. |
+| `caption` | string | yes | — | Caption/title for the post. |
+| `overrides` | object | no | — | Per-destination caption overrides: `{"x": "short copy"}` or `{"x": {"text": "short copy"}}`. Same shape as `xpst_post`'s `overrides`. |
+| `scheduled_time` | string | yes | — | ISO-8601 timestamp for publishing. |
+| `platforms` | string[] | no | all configured | Subset of `youtube`, `instagram`, `x`, `tiktok`, `threads`. |
+| `repeat_rule` | string | no | none | `daily`, `weekly`, or `monthly`. |
+
+Example call:
+
+```json
+{
+  "name": "xpst_schedule_add",
+  "arguments": {
+    "video_path": "/tmp/xpst/clips/demo.mp4",
+    "caption": "Scheduled demo!",
+    "overrides": {"x": "Short demo — full write-up on YouTube"},
+    "scheduled_time": "2026-07-01T14:00:00Z",
+    "platforms": ["youtube", "instagram", "threads"]
+  }
+}
+```
+
+Response shape: a confirmation with the scheduled post's ID and stored details.
+
+---
+
+## Knowledge-base tools
+
+These mirror the `xpst kb` CLI and require the `xpst[knowledge]` extra. Handlers lazy-import the heavy subsystem (faster-whisper / fastembed / lancedb) only when invoked and run in a worker thread, so listing tools stays fast. All KB data lives in local workspaces (isolated data directories); `workspace` defaults to `"default"` on every tool.
+
+## kb_add
+
+Ingests a local file or URL into the knowledge base: downloads (if URL), transcribes (faster-whisper), extracts cited knowledge nuggets, embeds them, and stores them in the workspace. Transcription is CPU-bound and can take a while for long videos.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `source` | string | yes | — | Local file path or URL to ingest. |
+| `workspace` | string | no | `"default"` | Workspace name (isolated data dir). |
+
+Example call:
+
+```json
+{ "name": "kb_add", "arguments": { "source": "https://www.tiktok.com/@me/video/7301234567890" } }
+```
+
+Example response (`status` is `ingested`, `skipped`, or `failed`):
+
+```json
+{ "status": "ingested", "source": "https://...", "workspace": "default", "nugget_count": 12 }
+```
+
+## kb_query
+
+Searches stored knowledge nuggets. The query is embedded and vector-searched against the store (top 8 results over MCP); when embeddings are unavailable it automatically falls back to exact-text substring matching. The response's `mode` field reports which path answered (`"semantic"` or `"substring"`). Every hit carries provenance and a similarity score (`score` is `null` in substring mode).
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `text` | string | yes | — | Query text. |
+| `workspace` | string | no | `"default"` | Workspace name. |
+
+Example call:
+
+```json
+{ "name": "kb_query", "arguments": { "text": "what makes a good thumbnail" } }
+```
+
+Example response shape:
+
+```json
+{
+  "workspace": "default",
+  "query": "what makes a good thumbnail",
+  "mode": "semantic",
+  "count": 1,
+  "nuggets": [
+    {
+      "point": "Custom thumbnails lift CTR most in the first 24 hours.",
+      "citation": "https://www.tiktok.com/@me/video/7301234567890",
+      "source_url": "https://www.tiktok.com/@me/video/7301234567890",
+      "timestamp_start": 42.5,
+      "timestamp_end": 51.0,
+      "score": 0.83,
+      "area_id": "area-2"
+    }
+  ]
+}
+```
+
+## kb_organize
+
+Discovers knowledge areas by clustering nugget embeddings, tags difficulty, and assigns nuggets to areas. Rewrites the workspace's area assignments.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `workspace` | string | no | `"default"` | Workspace name. |
+| `threshold` | number | no | built-in default | Cosine similarity threshold for clustering/routing. |
+
+Example call:
+
+```json
+{ "name": "kb_organize", "arguments": { "workspace": "default" } }
+```
+
+Example response:
+
+```json
+{ "workspace": "default", "nugget_count": 48, "area_count": 5, "assigned": 46 }
+```
+
+## kb_areas
+
+Lists discovered knowledge areas in course order (beginner to advanced). Read-only.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `workspace` | string | no | `"default"` | Workspace name. |
+
+Example call:
+
+```json
+{ "name": "kb_areas", "arguments": {} }
+```
+
+Example response shape:
+
+```json
+{
+  "workspace": "default",
+  "count": 2,
+  "areas": [
+    { "order": 1, "label": "Hooks and openers", "nugget_count": 14 },
+    { "order": 2, "label": "Retention editing", "nugget_count": 9 }
+  ]
+}
+```
+
+Note: `kb course` and `kb doctor` exist as CLI commands only (`xpst kb course`, `xpst kb doctor`) and are not exposed over MCP yet.
+
+---
+
+## Recommended assistant flow
+
+1. `xpst_providers` to discover available sources and destinations.
+2. `xpst_config_show` / `xpst_auth_status` to check setup without starting the posting engine.
+3. `xpst_health` before real uploads when the user asks for a safety check.
+4. `xpst_run` / `xpst_post` with `dry_run: true` for previews.
+5. Live `xpst_run` / `xpst_post` only after the user explicitly confirms.
+6. `kb_add` / `kb_query` / `kb_organize` / `kb_areas` to build and mine the user's content knowledge base.
+
+## Error handling
+
+Tools return JSON text when successful. On MCP-level failures, `isError` is set and the text content contains the error message. Platform-level failures are returned inside the JSON payload so one destination can fail without hiding the others. A missing optional extra (mcp/knowledge) surfaces as a clear install-hint error, never a crash.
+
+## See also
+
+- [Install Guide](INSTALL.md)

@@ -1,0 +1,1081 @@
+"""
+xPST Dashboard API Server
+
+Launches a lightweight FastAPI/uvicorn server exposing health, metrics,
+and state endpoints.  No NiceGUI dependency required.
+
+For the full graphical dashboard, install ``xpst[dashboard]`` or use the
+native desktop app (``xpst app``).
+
+Endpoints:
+    GET /health   — aggregated platform health check
+    GET /metrics  — Prometheus text-format metrics
+    GET /state    — current xPST state summary
+    GET /api/*    — web-UI JSON API (see xpst.dashboard.api; read-only routes
+                    are Basic-auth protected when a dashboard login is
+                    configured and never require the API token)
+    POST /api/*   — mutating routes (post / connect / onboarding / preflight):
+                    ALWAYS require the xPST API token or the dashboard Basic
+                    login (see xpst.dashboard.auth) — loopback is not an
+                    authorisation boundary
+    GET /bio      — public, mobile-first link-in-bio page
+    GET/POST /bio/edit — admin link-in-bio editor (Basic auth, or ?token= when
+                    no dashboard login is configured)
+    POST /oauth/callback — xpst:// deep-link OAuth redirect intake (Tauri
+        shell forwarding; auth-exempt like /health)
+
+When ``ui/dist`` (the built Vite+Svelte web UI) exists it is served as
+static files at ``/``; otherwise the server falls back to the built-in
+string index below so the Tauri shell still boots without a UI build.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import importlib.metadata
+import json
+import logging
+import os
+import urllib.parse
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import uvicorn
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+logger = logging.getLogger(__name__)
+
+#: Where a wheel-installed bundle lives (packaging/hatch_ui.py embeds ui/dist
+#: here). A source tree never has this directory; tests monkeypatch it.
+_PACKAGED_UI_DIR = Path(__file__).resolve().parent / "webui"
+
+# POST /oauth/callback body cap (~8 KiB): the route is auth-exempt (public)
+# and only ever receives one tiny JSON object from the Tauri shell.
+_OAUTH_CALLBACK_MAX_BODY = 8 * 1024
+
+_DASHBOARD_INDEX_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xPST Dashboard</title>
+<style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI",
+                     Roboto, Helvetica, Arial, sans-serif;
+        background: linear-gradient(180deg, #f5f5f7 0%, #ececf0 100%);
+        color: #1d1d1f;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px 16px;
+        -webkit-font-smoothing: antialiased;
+    }
+    @media (prefers-color-scheme: dark) {
+        body { background: linear-gradient(180deg, #161617 0%, #1d1d1f 100%);
+               color: #f5f5f7; }
+        .card { background: #242426; box-shadow: 0 8px 32px rgba(0,0,0,.5); }
+        .btn { background: #343437; color: #f5f5f7; }
+        .btn:hover { background: #3d3d41; }
+        .subtitle { color: #a1a1a6; }
+        .note { color: #a1a1a6; }
+        footer { color: #86868b; }
+    }
+    .card {
+        background: #ffffff;
+        border-radius: 24px;
+        box-shadow: 0 8px 32px rgba(0,0,0,.08);
+        padding: 40px 24px 28px;
+        width: 100%;
+        max-width: 420px;
+        text-align: center;
+    }
+    h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
+    .subtitle { font-size: 14px; color: #6e6e73; margin: 6px 0 24px; }
+    .links { display: flex; flex-direction: column; gap: 12px; }
+    .note {
+        margin-top: 20px;
+        font-size: 12px;
+        line-height: 1.5;
+        color: #6e6e73;
+        text-align: left;
+    }
+    .note code { font-size: 11px; }
+    .btn {
+        display: block;
+        padding: 14px 20px;
+        border-radius: 14px;
+        background: #f2f2f4;
+        color: #1d1d1f;
+        text-decoration: none;
+        font-size: 15px;
+        font-weight: 600;
+        transition: background .15s ease, transform .1s ease;
+    }
+    .btn:hover { background: #e8e8ec; transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    footer { margin-top: 28px; font-size: 12px; color: #86868b; }
+</style>
+</head>
+<body>
+<main class="card">
+  <h1>xPST Dashboard</h1>
+  <p class="subtitle">Cross-posting control plane</p>
+  <div class="links">
+    <a class="btn" href="/health">Health</a>
+    <a class="btn" href="/state">State</a>
+    <a class="btn" href="/metrics">Metrics</a>
+    <a class="btn" href="/bio">Link in Bio</a>
+    <a class="btn" href="/bio/edit">Edit Link in Bio</a>
+  </div>
+  <p class="note">Web UI bundle not found: this engine serves the JSON API only, so the
+  phone screen (<code>#/phone</code>) is unavailable. The published wheel includes the
+  UI; from a source checkout run <code>cd ui &amp;&amp; npm install &amp;&amp; npm run build</code>,
+  or point <code>XPST_UI_DIST</code> at a build directory.</p>
+  <footer>Powered by xPST</footer>
+</main>
+</body>
+</html>
+"""
+
+
+def _load_dashboard_auth(config_dir: str) -> tuple[str, str]:
+    """Load dashboard credentials from config.
+
+    Returns:
+        Tuple of (username, password_hash). Both empty strings if not configured
+        OR if the config could not be read — callers that must distinguish those
+        two cases use :func:`_auth_config_unreadable`.
+    """
+    try:
+        from xpst.config import XPSTConfig
+
+        config_path = str(Path(config_dir).expanduser() / "config.yaml")
+        config = XPSTConfig.load(config_path)
+        return config.monitoring.dashboard_username, config.monitoring.dashboard_password_hash
+    except Exception:
+        return "", ""
+
+
+def _auth_config_unreadable(config_dir: str) -> bool:
+    """Whether an existing config file could not be read.
+
+    This is the fail-open hole this helper closes: when ``config.yaml`` exists
+    but raises on load, ``_load_dashboard_auth`` returns ``("", "")`` and the
+    dashboard would treat that as "auth not configured" and serve every route
+    publicly. An unreadable config means we *do not know* whether auth is
+    required, so the answer must be to refuse, not to open up.
+
+    A *missing* config file (fresh install, auth genuinely unconfigured) is not
+    an error and returns ``False``.
+    """
+    config_path = Path(config_dir).expanduser() / "config.yaml"
+    try:
+        if not config_path.is_file():
+            return False
+    except OSError:  # pragma: no cover - defensive
+        return True
+    try:
+        from xpst.config import XPSTConfig
+
+        XPSTConfig.load(str(config_path))
+    except Exception:
+        return True
+    return False
+
+
+def _ui_dist_dir() -> Path | None:
+    """Locate the built web UI, if one is available.
+
+    Search order:
+
+    1. ``XPST_UI_DIST`` — an explicit build directory (packaged installs, a
+       checkout of another build, the Tauri shell's bundled ``ui`` resource).
+    2. :data:`_PACKAGED_UI_DIR` — a Vite build embedded in the wheel by
+       ``packaging/hatch_ui.py``. This is what makes a plain ``pip install``
+       serve the real UI (including ``#/phone``) instead of the placeholder.
+    3. ``<repo>/ui/dist`` — a source checkout that ran ``npm run build``.
+
+    Returns ``None`` when no build exists; callers must fall back to the string
+    index (and say so) rather than pretending the app shell is there.
+    """
+    import os
+
+    override = os.environ.get("XPST_UI_DIST")
+    if override:
+        candidate = Path(override).expanduser()
+        if (candidate / "index.html").is_file():
+            return candidate
+        return None
+    for candidate in (
+        _PACKAGED_UI_DIR,  # wheel install: the bundle ships inside the package
+        Path(__file__).resolve().parents[3] / "ui" / "dist",  # source checkout with a build
+    ):
+        if (candidate / "index.html").is_file():
+            return candidate
+    return None
+
+
+#: Stated on the placeholder page and by ``xpst ui`` when no bundle exists.
+UI_BUILD_HINT = (
+    "the web UI bundle was not found, so this server serves the placeholder page "
+    "and the JSON API only — #/phone is unreachable. The published wheel includes "
+    "the UI; from a source checkout run `cd ui && npm install && npm run build`, "
+    "or point XPST_UI_DIST at a build directory."
+)
+
+
+def _create_app(
+    config_dir: str = "~/.xpst",
+    *,
+    ui_token: str | None = None,
+    require_read_auth: bool = False,
+) -> FastAPI:
+    """Create the FastAPI application with all endpoints.
+
+    Args:
+        config_dir: Path to xPST config directory for reading state.
+        ui_token: Optional per-launch token accepted in addition to the
+            persisted API token (``xpst ui`` hands its browser session one so
+            mutating routes work without ever writing the token to the URL of a
+            shared server). The desktop shell passes the same value through
+            ``XPST_UI_TOKEN``.
+        require_read_auth: Require a credential (Basic auth, the API token or a
+            paired device token) for read routes too. Callers pass ``True`` when
+            binding a non-loopback address: on loopback the shipped UI stays
+            frictionless, but a phone on the tailnet must not be served an
+            anonymous view of the operator's accounts.
+
+    Returns:
+        Configured FastAPI app instance.
+    """
+    app = FastAPI(
+        title="xPST Dashboard",
+        description="xPST cross-posting analytics and health API",
+        version=importlib.metadata.version("xpst"),
+    )
+
+    # Prime the live-auth cache in the background so the Home screen's first
+    # render does not wait on platform probes (measured ~5.6s cold). Disabled by
+    # XPST_DISABLE_AUTH_WARM=1, which the test suite sets to stay offline.
+    if not os.environ.get("XPST_DISABLE_AUTH_WARM"):
+        try:
+            from xpst.config import XPSTConfig
+            from xpst.dashboard.api import warm_auth_status_cache
+
+            warm_auth_status_cache(config_dir, XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml")))
+        except Exception as exc:  # noqa: BLE001 - warming is best-effort only
+            logger.debug("Auth cache warm-up skipped: %s", exc)
+
+    # ── Health endpoint ─────────────────────────────────────────────────
+    @app.get("/health")
+    def health_check():
+        """Return aggregated platform health status."""
+        try:
+            from xpst.dashboard.analytics import load_state
+
+            state = load_state(config_dir)
+            health = state.get("health", {})
+            platforms = health.get("platforms", {})
+
+            status = "healthy" if all(p.get("status") == "ok" for p in platforms.values()) else "degraded"
+
+            return {
+                "status": status,
+                "platforms": platforms,
+                "total_processed": health.get("total_processed", 0),
+            }
+        except Exception as exc:
+            logger.warning("Health check failed: %s", exc)
+            return {"status": "error", "detail": str(exc)}
+
+    # ── OAuth callback (Tauri deep-link forwarding) ──────────────────────
+    @app.post("/oauth/callback", name="oauth_callback", response_model=None)
+    async def oauth_callback(request: Request) -> JSONResponse | dict:
+        """Receive an ``xpst://`` OAuth redirect forwarded by the Tauri shell.
+
+        The shell is a local dumb pipe: it POSTs ``{"source": "tauri-deep-link",
+        "url": "xpst://callback?code=...&state=..."}``. Auth-exempt like
+        /health — OAuth browser redirects cannot attach Basic auth, and the
+        body is hard-capped and scheme-validated because the route is public.
+        On code+state the authorization code is stashed into the engine-level
+        external-code slot (xpst.utils.oauth_local.receive_external_code) for
+        a sidecar-mode ``xpst connect`` consumer to pick up.
+        """
+        # Size limit first: never buffer an oversized public payload.
+        content_length = request.headers.get("content-length")
+        if content_length and content_length.isdigit() and int(content_length) > _OAUTH_CALLBACK_MAX_BODY:
+            return JSONResponse({"detail": "Payload too large"}, status_code=413)
+        body = bytearray()
+        async for chunk in request.stream():
+            if len(body) + len(chunk) > _OAUTH_CALLBACK_MAX_BODY:
+                return JSONResponse({"detail": "Payload too large"}, status_code=413)
+            body.extend(chunk)
+        body = bytes(body)
+        try:
+            payload = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+        if not isinstance(payload, dict):
+            return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+
+        url = payload.get("url")
+        source = payload.get("source", "unknown")
+        if not isinstance(url, str) or not url.lower().startswith("xpst://"):
+            logger.warning("OAuth callback rejected: non-xpst URL from source=%s", source)
+            return JSONResponse({"detail": "Expected an xpst:// callback URL"}, status_code=400)
+
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        code = query.get("code", [None])[0]
+        state = query.get("state", [None])[0]
+        error = query.get("error", [None])[0]
+        error_description = query.get("error_description", [None])[0]
+
+        if code or error:
+            # An in-app sign-in session (the UI's Sign in control) owns this
+            # callback when its expected state matches — it redeems the code on
+            # its own thread of control. Only when no session is waiting does
+            # the code stay in the legacy FIFO slot for a console
+            # `xpst connect` consumer to pick up.
+            consumed = False
+            try:
+                from xpst.auth_flow import get_auth_flow_manager
+
+                delivery = get_auth_flow_manager(str(Path(config_dir).expanduser())).deliver(url)
+                consumed = bool(delivery.get("delivered"))
+            except Exception as exc:  # noqa: BLE001 - deep-link intake must not fail the route
+                logger.debug("In-app sign-in delivery skipped: %s", exc)
+
+            if not consumed:
+                from xpst.utils.oauth_local import receive_external_code
+
+                receive_external_code(code=code, state=state, error=error, error_description=error_description)
+        logger.info(
+            "OAUTH_CALLBACK_RECEIVED source=%s code_present=%s state=%s error=%s",
+            source,
+            code is not None,
+            state,
+            error,
+        )
+        return {"received": True, "code_present": code is not None, "state": state}
+
+    # ── Metrics endpoint ────────────────────────────────────────────────
+    @app.get("/metrics")
+    def metrics():
+        """Return Prometheus text-format metrics."""
+        try:
+            from xpst.utils.metrics import metrics_text
+
+            return PlainTextResponse(
+                metrics_text(),
+                media_type="text/plain; version=0.0.4; charset=utf-8",
+            )
+        except ImportError:
+            return PlainTextResponse(
+                "# prometheus_client not available\n",
+                media_type="text/plain; version=0.0.4; charset=utf-8",
+            )
+
+    # ── State endpoint ────────────────────────────────────────────────
+    @app.get("/state")
+    def state():
+        """Return current xPST state summary."""
+        try:
+            from xpst.dashboard.analytics import cached_summary_stats
+
+            stats = cached_summary_stats(config_dir)
+            return stats
+        except Exception as exc:
+            logger.warning("State query failed: %s", exc)
+            return JSONResponse(
+                {"error": str(exc)},
+                status_code=500,
+            )
+
+    # ── Web UI JSON API (Basic-auth protected like /state) ─────────────
+    from xpst.dashboard.api import create_api_router
+
+    app.include_router(create_api_router(config_dir))
+
+    # ── Dashboard index ─────────────────────────────────────────────────
+    ui_dist = _ui_dist_dir()
+
+    if ui_dist is None:
+        # No UI build → the string page IS the index (graceful fallback
+        # that keeps the Tauri shell booting without ui/dist).
+        @app.get("/", name="dashboard_index", include_in_schema=False, response_model=None)
+        def dashboard_index() -> HTMLResponse:
+            """Serve the fallback dashboard landing page."""
+            return HTMLResponse(_DASHBOARD_INDEX_HTML)
+
+    # ── CSP header middleware ───────────────────────────────────────────
+    # The Tauri CSP in tauri.conf.json only applies to tauri://-served
+    # content. The webview navigates to http://127.0.0.1:<port> (an
+    # http:// origin), so THIS server must ship its own CSP or the
+    # webview's engine pages run with no script restrictions at all
+    # (QA adversarial 2026-08). The dashboard uses inline <style> and no
+    # client scripts, so 'unsafe-inline' for styles is sufficient and
+    # script execution (e.g. a caption payload that ever reaches HTML
+    # unescaped) is blocked at the browser level.
+    from starlette.middleware.base import BaseHTTPMiddleware as _CSPBase
+
+    class CSPHeaderMiddleware(_CSPBase):
+        async def dispatch(self, request: Request, call_next):
+            response = await call_next(request)
+            if ui_dist is not None:
+                # Built web UI: external hashed JS bundles, no inline scripts.
+                response.headers.setdefault(
+                    "Content-Security-Policy",
+                    "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+                    "img-src 'self' data:; script-src 'self'; "
+                    "connect-src 'self'; font-src 'self' data:",
+                )
+            else:
+                response.headers.setdefault(
+                    "Content-Security-Policy",
+                    "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+                    "img-src 'self' data:; script-src 'none'; connect-src 'self'",
+                )
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            return response
+
+    class DenyAllMiddleware(_CSPBase):
+        """Fail-closed middleware: refuse every request with 503.
+
+        Installed only when the dashboard auth config exists but cannot be read,
+        so xPST cannot tell whether auth is required. Serving nothing is the
+        only safe answer.
+        """
+
+        async def dispatch(self, request: Request, call_next):
+            return JSONResponse(
+                {"detail": "Dashboard authentication configuration is unreadable; refusing requests."},
+                status_code=503,
+            )
+
+    # NOTE: the CSP / security-header middleware is registered at the END of
+    # this function, i.e. OUTERMOST in Starlette's middleware stack. The auth
+    # middleware below short-circuits unauthenticated requests with a bare 401,
+    # and only an outer layer can add security headers to that response.
+
+    username, password_hash = _load_dashboard_auth(config_dir)
+    basic_configured = bool(username and password_hash)
+
+    # ── Auth middleware ─────────────────────────────────────────────────
+    # Reads keep their previous behaviour (Basic auth when configured, open
+    # otherwise, with the documented exempt set). Mutations ALWAYS require a
+    # credential: loopback is not an authorisation boundary, so an
+    # unauthenticated POST /api/post, /api/connect/{platform} or /api/onboarding*
+    # from any process on the machine (or any page in the user's browser) must
+    # 401. The API token is generated on first run and stored in the encrypted
+    # credential store; see xpst.dashboard.auth for the full model.
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    from xpst.dashboard.auth import (
+        MUTATING_METHODS,
+        READ_EXEMPT_PATHS,
+        TOKEN_READ_PATHS,
+        accepted_tokens,
+        basic_is_valid,
+        mutation_authorized,
+        path_is_public_mutation,
+        read_authorized,
+        token_from_request,
+        token_is_valid,
+        unauthorized_response,
+    )
+
+    try:
+        api_tokens = accepted_tokens(config_dir, extra=[ui_token] if ui_token else [])
+    except Exception as exc:  # noqa: BLE001 - never leave mutations open
+        api_tokens = set()
+        logger.error("Dashboard API token unavailable (%s); mutations will 401.", exc)
+    app.state.xpst_api_tokens = api_tokens
+    app.state.xpst_dashboard_auth = (username, password_hash)
+    # The router's defence-in-depth guard needs the config dir to reach the
+    # per-device tokens a paired phone presents (see
+    # xpst.dashboard.api.require_api_token).
+    app.state.xpst_config_dir = str(Path(config_dir).expanduser())
+    app.state.xpst_require_read_auth = bool(require_read_auth)
+    # uvicorn logs the raw request path; the editor form's ?token= must not
+    # reach the console/CI log.
+    from xpst.dashboard.auth import install_access_log_redaction
+
+    install_access_log_redaction()
+
+    class AuthMiddleware(BaseHTTPMiddleware):
+        """Basic auth for reads (when configured) plus a token for mutations."""
+
+        async def dispatch(self, request: Request, call_next):
+            path = request.url.path
+            if request.method.upper() in MUTATING_METHODS:
+                # Public-by-design mutations (OAuth deep-link redirect, device
+                # pairing, Messenger webhook intake) carry their own validation.
+                if path_is_public_mutation(path):
+                    return await call_next(request)
+                if mutation_authorized(
+                    request,
+                    accepted=api_tokens,
+                    username=username,
+                    password_hash=password_hash,
+                    config_dir=config_dir,
+                ):
+                    return await call_next(request)
+                return unauthorized_response(request, basic_configured=basic_configured)
+
+            # Read-only traffic: unchanged from the pre-token behaviour, except
+            # for the admin form at /bio/edit, which requires the token when no
+            # dashboard login is configured (its save route is a mutation), and
+            # for a non-loopback bind, where reads require a credential too.
+            if path in READ_EXEMPT_PATHS:
+                return await call_next(request)
+            if basic_configured:
+                if basic_is_valid(request.headers.get("Authorization", ""), username, password_hash):
+                    return await call_next(request)
+                if path in TOKEN_READ_PATHS and token_is_valid(token_from_request(request), api_tokens):
+                    return await call_next(request)
+                return unauthorized_response(request, basic_configured=True)
+            if path in TOKEN_READ_PATHS:
+                if token_is_valid(token_from_request(request), api_tokens):
+                    return await call_next(request)
+                return unauthorized_response(request, basic_configured=False)
+            if require_read_auth and path.startswith("/api") and not read_authorized(
+                request,
+                accepted=api_tokens,
+                username=username,
+                password_hash=password_hash,
+                config_dir=config_dir,
+            ):
+                # Only the data surface is gated. The app SHELL must stay public
+                # or an unpaired phone cannot load the page it types its pairing
+                # code into: measured on a non-loopback bind, `/` answered 401
+                # and the pairing screen was unreachable. The shell is static
+                # (no account data), and every value it renders comes from /api.
+                return unauthorized_response(request, basic_configured=False)
+            return await call_next(request)
+
+    app.add_middleware(AuthMiddleware)
+    if basic_configured:
+        logger.info("Dashboard auth enabled for user: %s", username)
+    elif _auth_config_unreadable(config_dir):
+        # FAIL CLOSED. config.yaml exists but raised on load, so we cannot know
+        # whether dashboard auth is configured. The previous behaviour treated
+        # that as "auth not configured" and served every route; now it refuses
+        # everything until the config is fixed or removed.
+        logger.error(
+            "Dashboard config could not be read; refusing all requests (fail closed) "
+            "until %s is fixed or removed.",
+            Path(config_dir).expanduser() / "config.yaml",
+        )
+        app.add_middleware(DenyAllMiddleware)
+    logger.info("Mutating routes require the API token (%d credential(s) accepted).", len(api_tokens))
+
+    # Registered last → outermost, so the security headers land on the 401/503
+    # short-circuits produced by the middleware above as well.
+    app.add_middleware(CSPHeaderMiddleware)
+
+    _setup_messenger_webhook(app, config_dir)
+    _setup_bio_routes(app, config_dir)
+
+    # ── Built web UI (mount LAST so JSON/HTML routes above win) ────────
+    # Serves ui/dist at "/" when a build exists; registered after every
+    # other route, so /health, /state, /api/*, /bio, /metrics keep
+    # precedence. Without ui/dist nothing is mounted and the string
+    # index registered above remains the graceful fallback.
+    if ui_dist is not None:
+        from fastapi.staticfiles import StaticFiles
+
+        app.mount("/", StaticFiles(directory=str(ui_dist), html=True), name="ui")
+        logger.info("Serving web UI from %s", ui_dist)
+
+    return app
+
+
+def bio_url(host: str = "127.0.0.1", port: int = 8080) -> str:
+    """Return the public URL of the link-in-bio page."""
+    return f"http://{host}:{port}/bio"
+
+
+def bio_edit_url(host: str = "127.0.0.1", port: int = 8080, token: str | None = None) -> str:
+    """Return the link-in-bio editor URL, carrying the API token when given.
+
+    The editor form is a plain HTML form: when no dashboard login is configured
+    the only way it can authenticate is a token in the query string, so the URL
+    handed to a human (``xpst bio``) includes it. Anyone who can run the CLI as
+    this user already has the credential.
+    """
+    base = f"http://{host}:{port}/bio/edit"
+    if not token:
+        return base
+    return f"{base}?token={urllib.parse.quote(token, safe='')}"
+
+
+def _bio_edit_redirect(request: Request, *, saved: bool) -> str:
+    """Return the post-save redirect target, preserving a query-string token."""
+    params = []
+    token = (request.query_params.get("token") or "").strip()
+    if token:
+        params.append(f"token={urllib.parse.quote(token, safe='')}")
+    if saved:
+        params.append("saved=1")
+    return "/bio/edit" + (f"?{'&'.join(params)}" if params else "")
+
+
+def _setup_bio_routes(app: FastAPI, config_dir: str) -> None:
+    """Register the link-in-bio page and its auth-protected editor.
+
+    - GET  /bio       → public HTML page (no auth; meant to be shared)
+    - GET  /bio/edit  → admin form (protected by the dashboard Basic auth)
+    - POST /bio/edit  → persist handle + custom links to config.yaml
+    """
+
+    def _load_config():
+        from xpst.config import XPSTConfig
+
+        return XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+
+    @app.get("/bio", name="bio_page", include_in_schema=False, response_model=None)
+    def bio_page() -> HTMLResponse:
+        """Serve the public link-in-bio page."""
+        try:
+            from xpst.dashboard.bio import render_bio_page
+
+            config = _load_config()
+            return HTMLResponse(render_bio_page(config))
+        except Exception as exc:
+            logger.warning("Bio page render failed: %s", exc)
+            return HTMLResponse(
+                f"<p>Error rendering bio page: {exc}</p>",
+                status_code=500,
+            )
+
+    @app.get("/bio/edit", name="bio_edit_form", include_in_schema=False, response_model=None)
+    def bio_edit_form(request: Request) -> HTMLResponse:
+        """Serve the auth-protected link-in-bio editor form.
+
+        When the caller authenticated with the API token in the query string
+        (the browser path used when no dashboard login is configured) the token
+        is threaded through the form action and the post-save redirect, because
+        a plain HTML form cannot carry a request header.
+        """
+        query_token = (request.query_params.get("token") or "").strip()
+        action = "/bio/edit" + (f"?token={urllib.parse.quote(query_token, safe='')}" if query_token else "")
+        try:
+            from xpst.dashboard.bio import render_bio_edit_page
+
+            config = _load_config()
+            return HTMLResponse(render_bio_edit_page(config, form_action=action))
+        except Exception as exc:
+            logger.warning("Bio edit form render failed: %s", exc)
+            return HTMLResponse(
+                f"<p>Error rendering bio editor: {exc}</p>",
+                status_code=500,
+            )
+
+    @app.post("/bio/edit", name="bio_edit_save", include_in_schema=False, response_model=None)
+    async def bio_edit_save(request: Request) -> RedirectResponse:
+        """Persist handle + custom links from the editor form."""
+        form = await request.form()
+
+        links: list[dict] = []
+        i = 0
+        while f"label_{i}" in form:
+            if str(form.get(f"remove_{i}", "")) not in ("1", "on", "true"):
+                label = str(form.get(f"label_{i}", "") or "").strip()
+                url = str(form.get(f"url_{i}", "") or "").strip()
+                if label and url:
+                    links.append({"label": label, "url": url})
+            i += 1
+        new_label = str(form.get("new_label", "") or "").strip()
+        new_url = str(form.get("new_url", "") or "").strip()
+        if new_label and new_url:
+            links.append({"label": new_label, "url": new_url})
+
+        try:
+            config = _load_config()
+            config.bio.handle = str(form.get("handle", "") or "").strip()
+            config.bio.links = links
+            config.save()
+        except Exception as exc:
+            logger.warning("Bio save failed: %s", exc)
+            return RedirectResponse(_bio_edit_redirect(request, saved=False), status_code=303)
+        return RedirectResponse(_bio_edit_redirect(request, saved=True), status_code=303)
+
+
+def _safe_webhook_path(raw: str) -> str | None:
+    """Validate a config-supplied webhook path before registering it as a route.
+
+    ``messenger.webhook_path`` comes from config and is used verbatim as a
+    FastAPI route path. A value like ``"/"`` would shadow the mounted web UI
+    (registered later, so it loses), and a value containing ``..`` or a scheme
+    is not a path at all. Only a simple absolute path segment list is allowed.
+
+    Returns the path, or ``None`` when it must be refused (caller falls back to
+    the default and logs).
+    """
+    if not isinstance(raw, str):
+        return None
+    candidate = raw.strip()
+    if not candidate or len(candidate) > 200:
+        return None
+    if not candidate.startswith("/") or candidate == "/":
+        return None
+    if any(ch.isspace() for ch in candidate):
+        return None
+    if ".." in candidate or "?" in candidate or "#" in candidate or "\\" in candidate:
+        return None
+    if "://" in candidate:
+        return None
+    # Reserved: registering a handler here would shadow a real route.
+    if candidate in ("/", "/health", "/metrics", "/state", "/bio", "/oauth/callback"):
+        return None
+    if candidate.startswith("/api") or candidate.startswith("/bio"):
+        return None
+    return candidate
+
+
+def _setup_messenger_webhook(app: FastAPI, config_dir: str) -> None:
+    """Register the opt-in Messenger webhook routes.
+
+    Two handlers on the (configurable) webhook path:
+      - GET  /webhook/messenger  → hub.verify_token handshake, echoes challenge
+      - POST /webhook/messenger  → X-Hub-Signature-256 verified event dispatch
+
+    Both degrade gracefully when the Messenger account is disabled (default);
+    nothing is registered that can fail for users who never opt in.
+    """
+    path = "/webhook/messenger"
+    try:
+        from xpst.config import XPSTConfig
+
+        config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+        configured = config.messenger.webhook_path or path
+        if configured != path:
+            safe = _safe_webhook_path(configured)
+            if safe is None:
+                logger.warning(
+                    "Refusing unsafe messenger.webhook_path %r; using %s instead",
+                    configured,
+                    path,
+                )
+            else:
+                path = safe
+    except Exception:
+        pass
+
+    def _verify_token() -> str:
+        try:
+            from xpst.config import XPSTConfig
+
+            config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+            return config.messenger.verify_token or ""
+        except Exception:
+            return ""
+
+    def _app_secrets() -> list[str]:
+        """Candidate app secrets (config + CredentialStore), deduped."""
+        secrets: list[str] = []
+        try:
+            from xpst.config import XPSTConfig
+
+            config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+            if config.messenger.app_secret:
+                secrets.append(config.messenger.app_secret)
+        except Exception:
+            pass
+        try:
+            from xpst.utils.sessions import SessionManager
+
+            session_manager = SessionManager(config_dir)
+            stored = session_manager.credentials.retrieve("messenger_app_secret")
+            if stored:
+                secrets.append(stored)
+        except Exception:
+            pass
+        return list(dict.fromkeys(secrets))
+
+    @app.get(path, name="messenger_webhook_verify", include_in_schema=False, response_model=None)
+    async def _messenger_verify(request: Request) -> PlainTextResponse | JSONResponse:
+        """Handle Meta's webhook subscription verification (GET).
+
+        Fails closed when no ``verify_token`` is configured: without one there is
+        nothing to verify a subscription against, and the previous behaviour
+        (accept any token when unconfigured) let a stray caller complete the
+        handshake on an install that never opted in.
+        """
+        params = request.query_params
+        if params.get("hub.mode") != "subscribe":
+            return JSONResponse({"detail": "hub.mode must be 'subscribe'"}, status_code=403)
+        expected = _verify_token()
+        if not expected:
+            logger.warning("Messenger webhook verification refused: no verify_token configured")
+            return JSONResponse(
+                {
+                    "detail": (
+                        "Messenger webhook is not configured: set "
+                        "accounts.messenger.verify_token (and app_secret) to enable it"
+                    )
+                },
+                status_code=403,
+            )
+        token = params.get("hub.verify_token", "")
+        if not token or not hmac.compare_digest(token, expected):
+            return JSONResponse({"detail": "Invalid hub.verify_token"}, status_code=403)
+        return PlainTextResponse(params.get("hub.challenge", ""))
+
+    @app.post(path, name="messenger_webhook", include_in_schema=False, response_model=None)
+    async def _messenger_webhook(request: Request) -> JSONResponse:
+        """Handle a Messenger webhook event (POST).
+
+        Every payload must carry a verifiable ``X-Hub-Signature-256``: Meta always
+        signs its deliveries, so an unsigned request is not a Meta delivery, and
+        accepting one let an unauthenticated caller reach the adapter (a no-op
+        only for as long as messenger stayed disabled and secret-less).
+        """
+        raw = await request.body()
+        signature = request.headers.get("X-Hub-Signature-256", "")
+        secrets = _app_secrets()
+        if not signature:
+            logger.warning("Messenger webhook missing X-Hub-Signature-256 header")
+            return JSONResponse(
+                {
+                    "detail": (
+                        "Missing X-Hub-Signature-256: every Messenger delivery is signed, "
+                        "so this request cannot be verified"
+                    )
+                },
+                status_code=403,
+            )
+        matched = False
+        for secret in secrets:
+            expected = "sha256=" + hmac.new(secret.encode("utf-8"), raw or b"", hashlib.sha256).hexdigest()
+            if hmac.compare_digest(expected, signature):
+                matched = True
+                break
+        if not matched:
+            if secrets:
+                logger.warning("Messenger webhook signature mismatch")
+                return JSONResponse({"detail": "Invalid signature"}, status_code=403)
+            # FAIL CLOSED. A signed payload with no configured app secret
+            # cannot be verified, and accepting it unverified would let an
+            # unauthenticated caller drive the adapter.
+            logger.error(
+                "Messenger webhook carries X-Hub-Signature-256 but no app secret is "
+                "configured; rejecting the payload (cannot verify it)."
+            )
+            return JSONResponse(
+                {"detail": "Signature present but no app secret is configured to verify it"},
+                status_code=403,
+            )
+        try:
+            payload = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+        await _dispatch_messenger_payload(payload, config_dir)
+        return JSONResponse({"status": "ok"})
+
+
+async def _dispatch_messenger_payload(payload: dict, config_dir: str) -> None:
+    """Dispatch a verified webhook payload to the Messenger adapter.
+
+    Never raises: webhook failures are logged so Meta's retry policy is not
+    triggered by adapter-side errors. No-op while messenger is disabled.
+    """
+    try:
+        from typing import cast
+
+        from xpst.config import XPSTConfig
+        from xpst.platforms.base import PlatformRegistry
+        from xpst.platforms.messenger import MessengerAdapter  # noqa: TC001
+        from xpst.utils.sessions import SessionManager
+
+        cfg = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+        if not cfg.messenger.enabled:
+            return
+        adapter = cast("MessengerAdapter", PlatformRegistry.get("messenger", cfg))
+    except Exception as e:
+        logger.error("Messenger webhook dispatch aborted before handling: %s", e)
+        return
+
+    try:
+        adapter._session_manager = SessionManager(config_dir)
+        await adapter.handle_webhook_payload(payload)
+    except Exception as e:
+        logger.error("Messenger webhook dispatch failed: %s", e)
+
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+#: The host the dashboard LAST bound in this process (either entry point), or
+#: None when no dashboard has bound yet. The security audit reports this as
+#: OBSERVED evidence instead of asserting the default.
+_LAST_BOUND_HOST: str | None = None
+
+
+def last_bound_host() -> str | None:
+    """Host of the most recent dashboard bind in this process (None = never)."""
+    return _LAST_BOUND_HOST
+
+
+def _record_bind(host: str) -> None:
+    global _LAST_BOUND_HOST
+    _LAST_BOUND_HOST = host
+
+
+def start_dashboard(
+    port: int = 8080,
+    host: str = "127.0.0.1",
+    config_dir: str = "~/.xpst",
+    ui_token: str | None = None,
+) -> None:
+    """Start the xPST dashboard API server.
+
+    Launches a FastAPI/uvicorn server with health, metrics, and state
+    endpoints.  No NiceGUI or graphical UI required.
+
+    The dashboard is self-contained pure FastAPI (the ``dashboard`` extra is a
+    no-op since the NiceGUI fallback UI was removed). For a GUI, use
+    ``xpst app`` for the native desktop shell.
+
+    Args:
+        port: HTTP port to listen on. Defaults to 8080.
+        host: Bind address. Defaults to ``127.0.0.1`` (loopback only).
+            Pass a non-loopback address (e.g. ``0.0.0.0``) to expose the
+            dashboard on the network; a warning is logged when doing so
+            without configured authentication.
+        config_dir: Path to xPST config directory for reading state.
+        ui_token: Optional per-launch token accepted in addition to the
+            persisted API token (the desktop shell's ``XPST_UI_TOKEN`` is
+            picked up automatically; this argument covers direct callers).
+    """
+    logger.info("Starting xPST API Dashboard on http://%s:%d", host, port)
+
+    if host not in _LOOPBACK_HOSTS:
+        username, password_hash = _load_dashboard_auth(config_dir)
+        logger.info(
+            "Dashboard is binding to a non-loopback address (%s). Read AND write "
+            "routes now require a credential: Basic auth when configured, the API "
+            "token, or a paired device token (`xpst pair`).",
+            host,
+        )
+        if not (username and password_hash):
+            logger.warning(
+                "Dashboard is binding to a non-loopback address (%s) without Basic "
+                "auth configured. Read and write routes require the API token or a "
+                "paired device token (`xpst pair`); an unpaired phone gets 401 "
+                "instead of an anonymous view.",
+                host,
+            )
+
+    require_read_auth = host not in _LOOPBACK_HOSTS
+    app = _create_app(config_dir, ui_token=ui_token, require_read_auth=require_read_auth)
+    _record_bind(host)
+    uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+def ui_url(base_url: str, ui_token: str | None = None) -> str:
+    """Return the web-UI URL, optionally carrying a token in the fragment.
+
+    The token goes in the URL *fragment* for two reasons: a fragment is never
+    sent to the server (so it cannot reach an access log, unlike ``?token=``),
+    and the SPA strips it from the address bar as soon as it boots. This is the
+    only place the token is handed to a browser session; nothing is ever
+    embedded in a served page.
+    """
+    base = base_url.rstrip("/")
+    if not ui_token:
+        return base + "/"
+    return f"{base}/#xpst_token={urllib.parse.quote(ui_token, safe='')}"
+
+
+def serve_ui(
+    port: int = 8080,
+    host: str = "127.0.0.1",
+    config_dir: str = "~/.xpst",
+    open_browser: bool = True,
+    on_started: Callable[[str], None] | None = None,
+    ui_token: str | None = None,
+) -> None:
+    """Start the local web UI: dashboard server + optional default-browser launch.
+
+    This is the Phase-1 product-UI entry point (arch decision D1): the same
+    FastAPI app as :func:`start_dashboard` -- every existing JSON endpoint is
+    served unchanged -- but run programmatically so the caller learns the
+    exact moment the server is accepting connections and SIGINT/SIGTERM
+    trigger uvicorn's graceful shutdown instead of an abrupt process exit
+    (which would leave the port in a half-open state and confuse scripts).
+
+    Args:
+        port: HTTP port to listen on. Defaults to 8080.
+        host: Bind address. Defaults to ``127.0.0.1`` (loopback only).
+        config_dir: Path to xPST config directory for reading state.
+        open_browser: If ``True``, open the user's default browser to the UI
+            URL once the server is ready. Pass ``False`` for server/agent
+            mode (``xpst ui --no-browser``).
+        on_started: Optional callback invoked with the UI URL after the
+            server has bound its socket and is accepting connections. It is
+            used to print the machine-readable readiness line (URL + PID)
+            for scripts/MCP and is never invoked if startup fails. The URL it
+            receives carries no token (mutating-route clients use
+            ``xpst auth api-token``); the browser is opened separately with a
+            per-launch fragment token.
+        ui_token: Optional per-launch token for the browser session. A fresh
+            one is minted when omitted.
+    """
+    import threading
+    import webbrowser
+
+    from xpst.dashboard.auth import generate_token
+
+    ui_token = ui_token or generate_token()
+    app = _create_app(
+        config_dir,
+        ui_token=ui_token,
+        require_read_auth=host not in _LOOPBACK_HOSTS,
+    )
+    # Readiness/log URL: unchanged shape (scripts and the Tauri smoke harness
+    # parse it) and never carrying the token. Only the browser gets the
+    # tokenised fragment URL.
+    url = f"http://{host}:{port}"
+
+    if open_browser:
+
+        def _open_browser() -> None:
+            try:
+                webbrowser.open(ui_url(url, ui_token))
+            except Exception as exc:
+                logger.warning("Failed to open browser at %s: %s", url, exc)
+
+        # webbrowser.open can block (LaunchServices round-trip on macOS);
+        # never stall the event loop or the readiness callback.
+        threading.Thread(target=_open_browser, daemon=True).start()
+
+    class _ReadyServer(uvicorn.Server):
+        """uvicorn.Server that fires ``on_started`` once it is listening."""
+
+        def __init__(self, config: uvicorn.Config, started: Callable[[str], None] | None):
+            super().__init__(config)
+            self._started_cb = started
+
+        async def startup(self, sockets=None):
+            await super().startup(sockets)
+            if self._started_cb is not None and self.started:
+                try:
+                    self._started_cb(url)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning("UI readiness callback failed: %s", exc)
+
+    server = _ReadyServer(
+        uvicorn.Config(app, host=host, port=port, log_level="info"),
+        started=on_started,
+    )
+    _record_bind(host)
+    server.run()

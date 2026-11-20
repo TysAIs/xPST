@@ -1,0 +1,156 @@
+/*
+ * xPST semantic design tokens.
+ *
+ * Components consume roles rather than raw palette values. The light ramp is
+ * the default; data-theme can be set by a host shell and the OS preference is
+ * used when no explicit theme is supplied. Values are intentionally neutral:
+ * clarity and hierarchy come from type, space, and state—not visual copying.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Semantic color roles — light */
+  --xpst-color-background: #f5f7fa;
+  --xpst-color-surface: #ffffff;
+  --xpst-color-surface-raised: #ffffff;
+  --xpst-color-text-primary: #1b1d21;
+  --xpst-color-text-secondary: #525866;
+  --xpst-color-text-muted: #667085;
+  --xpst-color-border: #d9dee7;
+  --xpst-color-border-strong: #aeb7c5;
+  --xpst-color-primary: #0066cc;
+  --xpst-color-primary-hover: #0052a3;
+  --xpst-color-on-primary: #ffffff;
+  --xpst-color-primary-soft: #e6f0fb;
+  --xpst-color-success: #197a43;
+  --xpst-color-success-surface: #eaf7ef;
+  --xpst-color-warning: #8a5a00;
+  --xpst-color-warning-surface: #fff7df;
+  --xpst-color-danger: #b42318;
+  --xpst-color-danger-surface: #fdecec;
+  --xpst-color-focus: #005fcc;
+
+  /* Platform identity is used only to identify a platform, never health. */
+  --xpst-color-platform-youtube: #b91c1c;
+  --xpst-color-platform-instagram: #b42366;
+  --xpst-color-platform-x: #1d4ed8;
+  --xpst-color-platform-tiktok: #0f766e;
+  --xpst-color-platform-threads: #344054;
+  --xpst-color-platform-other: #475467;
+
+  /* Spacing — a 4px base scale */
+  --xpst-space-0: 0;
+  --xpst-space-1: 4px;
+  --xpst-space-2: 8px;
+  --xpst-space-3: 12px;
+  --xpst-space-4: 16px;
+  --xpst-space-5: 20px;
+  --xpst-space-6: 24px;
+  --xpst-space-8: 32px;
+  --xpst-space-10: 40px;
+  --xpst-space-12: 48px;
+
+  /* Type roles */
+  --xpst-type-font-family: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --xpst-type-display: 700 2.25rem/1.15 var(--xpst-type-font-family);
+  --xpst-type-heading: 700 1.5rem/1.25 var(--xpst-type-font-family);
+  --xpst-type-body: 400 1rem/1.5 var(--xpst-type-font-family);
+  --xpst-type-label: 600 0.875rem/1.25 var(--xpst-type-font-family);
+  --xpst-type-caption: 400 0.75rem/1.35 var(--xpst-type-font-family);
+
+  /* Shape, depth, motion, and focus */
+  --xpst-radius-sm: 6px;
+  --xpst-radius-md: 10px;
+  --xpst-radius-lg: 14px;
+  --xpst-radius-pill: 999px;
+  --xpst-elevation-card: 0 1px 2px rgb(16 24 40 / 6%);
+  --xpst-elevation-raised: 0 8px 24px rgb(16 24 40 / 10%);
+  --xpst-elevation-overlay: 0 16px 40px rgb(16 24 40 / 16%);
+  --xpst-motion-standard: 180ms;
+  --xpst-motion-emphasis: 240ms;
+  --xpst-motion-easing: cubic-bezier(0.2, 0, 0, 1);
+  --xpst-focus-ring: 0 0 0 3px var(--xpst-color-focus);
+  --xpst-focus-offset: 2px;
+
+  /* Compatibility aliases for existing API-facing page code. */
+  --xpst-bg: var(--xpst-color-background);
+  --xpst-bg-elevated: var(--xpst-color-surface-raised);
+  --xpst-surface: var(--xpst-color-surface);
+  --xpst-surface-raised: var(--xpst-color-surface-raised);
+  --xpst-text: var(--xpst-color-text-primary);
+  --xpst-text-secondary: var(--xpst-color-text-secondary);
+  --xpst-text-muted: var(--xpst-color-text-muted);
+  --xpst-border: var(--xpst-color-border);
+  --xpst-border-strong: var(--xpst-color-border-strong);
+  --xpst-accent: var(--xpst-color-primary);
+  --xpst-accent-hover: var(--xpst-color-primary-hover);
+  --xpst-success-text: var(--xpst-color-success);
+  --xpst-warning-text: var(--xpst-color-warning);
+  --xpst-danger-text: var(--xpst-color-danger);
+  --xpst-danger-bg: var(--xpst-color-danger-surface);
+  --xpst-shadow: var(--xpst-elevation-card);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --xpst-color-background: #111318;
+  --xpst-color-surface: #1b1e25;
+  --xpst-color-surface-raised: #242832;
+  --xpst-color-text-primary: #f5f7fa;
+  --xpst-color-text-secondary: #b7bfcc;
+  --xpst-color-text-muted: #98a2b3;
+  --xpst-color-border: #3a414d;
+  --xpst-color-border-strong: #566170;
+  --xpst-color-primary: #66b3ff;
+  --xpst-color-primary-hover: #8ac7ff;
+  --xpst-color-on-primary: #111318;
+  --xpst-color-primary-soft: #1c2b3d;
+  --xpst-color-success: #5bd18a;
+  --xpst-color-success-surface: #173425;
+  --xpst-color-warning: #f5c45e;
+  --xpst-color-warning-surface: #3a2f16;
+  --xpst-color-danger: #ff8a80;
+  --xpst-color-danger-surface: #3d2222;
+  --xpst-color-focus: #8ac7ff;
+  --xpst-color-platform-threads: #c5cbd3;
+  --xpst-elevation-card: 0 1px 2px rgb(0 0 0 / 28%);
+  --xpst-elevation-raised: 0 8px 24px rgb(0 0 0 / 35%);
+  --xpst-elevation-overlay: 0 16px 40px rgb(0 0 0 / 48%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --xpst-color-background: #111318;
+    --xpst-color-surface: #1b1e25;
+    --xpst-color-surface-raised: #242832;
+    --xpst-color-text-primary: #f5f7fa;
+    --xpst-color-text-secondary: #b7bfcc;
+    --xpst-color-text-muted: #98a2b3;
+    --xpst-color-border: #3a414d;
+    --xpst-color-border-strong: #566170;
+    --xpst-color-primary: #66b3ff;
+    --xpst-color-primary-hover: #8ac7ff;
+    --xpst-color-on-primary: #111318;
+    --xpst-color-primary-soft: #1c2b3d;
+    --xpst-color-success: #5bd18a;
+    --xpst-color-success-surface: #173425;
+    --xpst-color-warning: #f5c45e;
+    --xpst-color-warning-surface: #3a2f16;
+    --xpst-color-danger: #ff8a80;
+    --xpst-color-danger-surface: #3d2222;
+    --xpst-color-focus: #8ac7ff;
+    --xpst-color-platform-threads: #c5cbd3;
+    --xpst-elevation-card: 0 1px 2px rgb(0 0 0 / 28%);
+    --xpst-elevation-raised: 0 8px 24px rgb(0 0 0 / 35%);
+    --xpst-elevation-overlay: 0 16px 40px rgb(0 0 0 / 48%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --xpst-motion-standard: 1ms;
+    --xpst-motion-emphasis: 1ms;
+  }
+}

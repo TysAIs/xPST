@@ -1,0 +1,135 @@
+{
+  "escalation_s": [
+    60,
+    120,
+    240,
+    480,
+    960,
+    1920,
+    3840,
+    7680,
+    15360,
+    34560,
+    86400
+  ],
+  "family_by_platform": {
+    "facebook": "meta",
+    "instagram": "meta",
+    "messenger": "meta",
+    "threads": "meta"
+  },
+  "family_for": {
+    "facebook": "meta",
+    "instagram": "meta",
+    "messenger": "meta",
+    "threads": "meta",
+    "tiktok": "tiktok",
+    "x": "x",
+    "youtube": "youtube"
+  },
+  "family_members": {
+    "meta": [
+      "facebook",
+      "instagram",
+      "messenger",
+      "threads"
+    ]
+  },
+  "hits": [
+    {
+      "applied_pause_s": 60,
+      "family_remaining_s": {
+        "facebook": 60.0,
+        "instagram": 60.0,
+        "messenger": 60.0,
+        "threads": 60.0
+      },
+      "platform": "instagram",
+      "retry_after_s": null,
+      "strikes": 1,
+      "until_minus_now_s": 60.0
+    },
+    {
+      "applied_pause_s": 120,
+      "family_remaining_s": {
+        "facebook": 120.0,
+        "instagram": 120.0,
+        "messenger": 120.0,
+        "threads": 120.0
+      },
+      "platform": "instagram",
+      "retry_after_s": null,
+      "strikes": 2,
+      "until_minus_now_s": 120.0
+    },
+    {
+      "applied_pause_s": 900,
+      "family_remaining_s": {
+        "facebook": 900.0,
+        "instagram": 900.0,
+        "messenger": 900.0,
+        "threads": 900.0
+      },
+      "platform": "instagram",
+      "retry_after_s": 900,
+      "strikes": 3,
+      "until_minus_now_s": 900.0
+    },
+    {
+      "applied_pause_s": 480,
+      "family_remaining_s": {
+        "facebook": 890.0,
+        "instagram": 890.0,
+        "messenger": 890.0,
+        "threads": 890.0
+      },
+      "platform": "instagram",
+      "retry_after_s": null,
+      "strikes": 4,
+      "until_minus_now_s": 480.0
+    },
+    {
+      "applied_pause_s": 3600,
+      "family_remaining_s": {
+        "facebook": 3600.0,
+        "instagram": 3600.0,
+        "messenger": 3600.0,
+        "threads": 3600.0
+      },
+      "platform": "facebook",
+      "retry_after_s": 3600,
+      "strikes": 1,
+      "until_minus_now_s": 3600.0
+    },
+    {
+      "applied_pause_s": 60,
+      "family_remaining_s": {
+        "facebook": 3590.0,
+        "instagram": 3590.0,
+        "messenger": 3590.0,
+        "threads": 3590.0
+      },
+      "platform": "threads",
+      "retry_after_s": null,
+      "strikes": 1,
+      "until_minus_now_s": 60.0
+    }
+  ],
+  "pause_for_strikes": {
+    "0": 60,
+    "1": 60,
+    "10": 34560,
+    "11": 86400,
+    "12": 86400,
+    "13": 86400,
+    "2": 120,
+    "3": 240,
+    "4": 480,
+    "5": 960,
+    "6": 1920,
+    "7": 3840,
+    "8": 7680,
+    "9": 15360
+  },
+  "source": "src/xpst/utils/cooldown_store.py"
+}

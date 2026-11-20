@@ -1,0 +1,340 @@
+﻿# Download and install xPST
+
+This guide covers the standalone desktop artifacts published on the
+[GitHub Releases page](https://github.com/TysAIs/xPST/releases). Do not construct
+asset download URLs: open the release, expand **Assets**, and download the exact
+filename shown there.
+
+## Read this before downloading
+
+The latest published release is **v1.2.1**. Its desktop artifacts are the
+current Tauri shell installers (`.dmg`, NSIS `.exe`/`.msi`, `.deb`/`.AppImage`).
+Older v1.1.x releases carried the retired PySide6/QML app; prefer the newest
+release. The macOS build is ad-hoc signed and not notarized, so a browser
+download will trigger a Gatekeeper approval on first launch — see
+[Gatekeeper and an unsigned build](#gatekeeper-and-an-unsigned-build). Verify
+the checksum before opening any downloaded artifact.
+
+Automatic updates through the Tauri updater manifest (`latest.json`) are wired
+for the macOS `.app.tar.gz` channel. v1.2.1 predates the in-app update control:
+from the next release the app checks once at launch, shows a banner when a newer
+release exists, and About → Updates carries "Check for updates". Installing is
+always your choice — nothing replaces the app on its own. On v1.2.1, use the
+Releases page to install a newer build manually.
+
+## Choose the release asset
+
+These are the v1.2.1 asset names verified on the Releases page:
+
+| Operating system | Download this asset | Verify against | Notes |
+|---|---|---|---|
+| macOS (Apple Silicon) | `xPST_1.2.1_aarch64.dmg` | `SHA256SUMS` (aggregate) | Tauri desktop build. An Intel x86_64 macOS build is not published. |
+| Windows (x64) | `xPST_1.2.1_x64-setup.exe` or `xPST_1.2.1_x64_en-US.msi` | `SHA256SUMS` (aggregate) | NSIS installer and Windows Installer package. |
+| Linux (x64) | `xPST_1.2.1_amd64.deb` or `xPST_1.2.1_amd64.AppImage` | `SHA256SUMS` (aggregate) | Debian package or portable AppImage. |
+
+Checksum manifests on the release page are named per lane, not per operating
+system: the aggregate `SHA256SUMS`/`SHA512SUMS` cover the desktop installers,
+and `python-SHA256SUMS`/`python-SHA512SUMS` cover the Python wheel and sdist
+(`xpst-1.2.1-py3-none-any.whl`, `xpst-1.2.1.tar.gz`). The manifest is the
+source of truth; never substitute a hash copied from a third-party page.
+
+If you downloaded a Python artifact instead, verify it against
+`python-SHA256SUMS` the same way as below, substituting the wheel or sdist
+filename.
+
+## Verify SHA256
+
+From the directory containing the downloaded artifact, download the
+aggregate `SHA256SUMS` from the same release. The commands below select the
+named asset from that manifest, so they do not fail because other release
+assets are not present locally.
+
+### macOS
+
+```bash
+cd ~/Downloads
+DMG_FILE='xPST_1.2.1_aarch64.dmg'   # the exact filename you downloaded
+expected="$(awk -v f="$DMG_FILE" '$2 == f { print $1 }' SHA256SUMS)"
+actual="$(shasum -a 256 "$DMG_FILE" | awk '{ print $1 }')"
+if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
+  printf '%s\n' "SHA256 mismatch — do not open $DMG_FILE." >&2
+  exit 1
+fi
+printf 'SHA256 OK: %s\n' "$actual"
+```
+
+### Windows PowerShell
+
+```powershell
+$installerFile = "xPST_1.2.1_x64-setup.exe"   # the exact filename you downloaded
+$line = Get-Content .\SHA256SUMS | Where-Object { $_ -match "(?s)\s$([regex]::Escape($installerFile))$" }
+$expected = ($line -split '\s+')[0].ToLowerInvariant()
+$actual = (Get-FileHash ".\$installerFile" -Algorithm SHA256).Hash.ToLowerInvariant()
+if ([string]::IsNullOrEmpty($expected) -or $actual -ne $expected) {
+    throw "SHA256 mismatch — do not run $installerFile."
+}
+"SHA256 OK: $actual"
+```
+
+### Linux
+
+Use the same target-only selection so a partial download set does not fail the
+check:
+
+```bash
+FILE='xPST_1.2.1_amd64.deb'   # or xPST_1.2.1_amd64.AppImage
+expected="$(awk -v f="$FILE" '$2 == f { print $1 }' SHA256SUMS)"
+actual="$(sha256sum "$FILE" | awk '{ print $1 }')"
+if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
+  printf '%s\n' "SHA256 mismatch — do not run $FILE." >&2
+  exit 1
+fi
+printf 'SHA256 OK: %s\n' "$actual"
+```
+
+`sha256sum -c SHA256SUMS` works only when every file named by the manifest was
+downloaded; the target-only commands above are safer.
+
+## FFmpeg prerequisite
+
+The standalone app opens without FFmpeg, and xPST's video processing and
+encoding paths resolve an external `ffmpeg` executable. FFmpeg is **not**
+bundled inside the app (it was 87 MB of a 192 MB bundle).
+
+xPST looks for, in order: `XPST_FFMPEG_PATH` (an explicit override), an FFmpeg
+already installed on your machine, and finally a copy it downloads and
+checksum-verifies itself on first use. The desktop app does that download
+automatically when no FFmpeg is present; from the CLI:
+
+```bash
+xpst media status      # which ffmpeg/ffprobe xPST will use, and from where
+xpst media fetch       # download a verified static build into ~/.xpst/bin
+```
+
+Installing FFmpeg with your OS package manager remains the best option when you
+want to control the build:
+
+- macOS: `brew install ffmpeg`
+- Windows: install an FFmpeg build and add its directory containing
+  `ffmpeg.exe` to `PATH`
+- Debian/Ubuntu: `sudo apt install ffmpeg`
+
+If your distribution uses another package manager, use its FFmpeg package.
+
+## Install on macOS
+
+1. Download `xPST_1.2.1_aarch64.dmg` and `SHA256SUMS` from the same release.
+2. Verify the DMG using the macOS command above.
+3. Double-click the DMG in Finder.
+4. Drag `xPST.app` into the **Applications** folder.
+5. Eject the mounted DMG.
+
+### Gatekeeper and an unsigned build
+
+The public macOS signing and notarization status is not proven. Gatekeeper checks
+an app downloaded from the internet; an unsigned or unnotarized build may warn
+that macOS cannot verify the developer or may prevent the first launch. Approve
+this one application; do **not** disable Gatekeeper globally:
+
+1. In Finder, open **Applications**.
+2. Control-click (or right-click) `xPST.app` and choose **Open**.
+3. Read the warning and choose **Open** in that dialog.
+4. If macOS still blocks the launch, try opening the app once, then open
+   **System Settings → Privacy & Security**, find the blocked xPST notice, click
+   **Open Anyway**, and confirm **Open**.
+
+Only use this approval after verifying the checksum and only for the copy you
+intend to run. Do not use a global Gatekeeper bypass.
+
+### Uninstall on macOS
+
+1. Quit xPST.
+2. In Finder, move `/Applications/xPST.app` to the Trash. If you ran the app
+   from another folder, remove that copy instead.
+3. Empty the Trash if you want the application binary removed immediately.
+
+Removing the app does not remove your xPST data. See [Configuration and
+state](#configuration-and-state) if you also want to remove credentials and
+local history.
+
+## Install on Windows
+
+1. Download `xPST_1.2.1_x64-setup.exe` (NSIS installer) or
+   `xPST_1.2.1_x64_en-US.msi` (Windows Installer) and `SHA256SUMS` from the
+   same release.
+2. Verify the file with the PowerShell command above.
+3. Run the installer and follow its prompts. The `.exe` registers an
+   uninstall entry; the `.msi` is managed by Windows Installer.
+
+### Uninstall on Windows
+
+1. Quit xPST.
+2. Remove it from **Settings → Apps → Installed apps** (both the NSIS and MSI
+   packages register there).
+
+Uninstalling does not remove `%USERPROFILE%\.xpst`. See
+[Configuration and state](#configuration-and-state) before deleting that data.
+
+## Install on Linux
+
+### Debian package (`xPST_1.2.1_amd64.deb`)
+
+Verify the file against `SHA256SUMS`, then install it with `apt`:
+
+```bash
+sudo apt install ./xPST_1.2.1_amd64.deb
+```
+
+To uninstall without guessing the package name, read it from the same file:
+
+```bash
+PACKAGE_NAME="$(dpkg-deb -f ./xPST_1.2.1_amd64.deb Package)"
+sudo apt remove "$PACKAGE_NAME"
+```
+
+### AppImage (`xPST_1.2.1_amd64.AppImage`)
+
+Verify the file against `SHA256SUMS`, then:
+
+```bash
+chmod +x ./xPST_1.2.1_amd64.AppImage
+./xPST_1.2.1_amd64.AppImage
+```
+
+On some distros an AppImage needs FUSE 2; if it refuses to start, extract it
+with `--appimage-extract` and run the inner binary instead.
+
+An AppImage is portable. Uninstalling it normally means quitting xPST and
+deleting that AppImage file (plus any shortcut you created).
+
+## Configuration and state
+
+xPST keeps its local configuration and state below `~/.xpst/` on macOS and
+Linux. On Windows, `~` means the current user's home directory, so the
+corresponding path is `%USERPROFILE%\.xpst`. Depending on what you use, this
+directory can contain:
+
+- `config.yaml` — configuration;
+- `state.json` — posting state;
+- `analytics.db` — local analytics history; and
+- `credentials/` — credential-store data and platform-specific session files.
+
+The `CredentialStore` uses an OS keychain when explicitly enabled with
+`XPST_USE_KEYRING=1`, or a Fernet-encrypted `.enc` file fallback by default.
+The fallback refuses to write a credential as plaintext if the cryptography
+dependency is unavailable. Some platform flows also write owner-only token,
+cookie, or session files and configuration fields under this directory; those
+files are not all encrypted by the repository. Treat the entire directory as
+sensitive, do not share it, and do not assume that an `.enc` copy makes every
+other file encrypted.
+
+To remove all local configuration, credentials, state, and analytics, first
+make any backup you need, then delete `~/.xpst` (on Windows,
+`%USERPROFILE%\.xpst`) using your file manager or OS-appropriate command. This
+is destructive and is separate from uninstalling the application.
+
+## First launch and CLI verification
+
+The standalone desktop assets launch the graphical app. A source installation
+can be checked without posting anything by running the module help command
+from the repository or installed environment:
+
+```bash
+python -m xpst --help
+```
+
+The CLI's non-mutating health check is also available after a source install:
+
+```bash
+python -m xpst health --json
+```
+
+A successful help command proves that the Python package is importable; it does
+not authenticate accounts or prove that a social-platform upload will work.
+See the capability table below for the current verified scope.
+
+## Publishing from a phone
+
+The engine is a local service; the phone screen is the same web UI at the
+`#/phone` route. Two steps are required, and both are deliberate:
+
+```bash
+# 1. Bind an address the phone can reach (0.0.0.0 on a trusted network/tunnel).
+python -m xpst ui --host 0.0.0.0 --port 8080 --no-browser
+
+# 2. On the engine machine, issue a one-time pairing code.
+python -m xpst pair --label phone --host <the address the phone will use> --port 8080
+```
+
+Enter that code on the `#/phone` screen. The phone exchanges it for its own
+device token (shown once, stored hashed on the engine) and keeps it; `xpst
+devices` lists paired devices and `xpst devices --revoke <device_id>` cuts one
+off immediately. A non-loopback bind requires a credential for reads on `/api`
+as well as writes — the app shell itself stays public so an unpaired phone can
+still reach the pairing screen.
+
+`#/phone` is a route in the built web UI (`ui/dist`), which the desktop app
+ships and the engine serves when present. The published wheel and sdist both
+carry that build (`xpst/dashboard/webui`, embedded by `packaging/hatch_ui.py`),
+so a plain `pip install xpst` serves the real UI — including `#/phone` — with no
+extra step. A source checkout is the one case that needs its own build: run
+`cd ui && npm install && npm run build` once before `xpst ui`, or point
+`XPST_UI_DIST` at a build directory. When no bundle is found the engine serves a
+placeholder page that says so, prints the same instructions from `xpst ui`, and
+reports `"ui_built": false` in its `--json` readiness line; only the JSON API is
+reachable then.
+
+The flow is compose → destinations → preview → confirm → publish → readback. The
+preview is local (`network_calls: false`) and a dry run uploads nothing, so you
+can rehearse a post without publishing. A destination in a rate-limit cooldown is
+reported as **deferred with its window**, the plan stays retryable, and the retry
+publishes only what was deferred.
+
+## Capability truth table
+
+This is an honest status snapshot, not a guarantee that a platform will keep
+its API or session behavior unchanged. Platform authentication and health are
+account-dependent; use the non-mutating health check after your own setup.
+
+Scope note: this table answers *"is it authenticated on this account today?"*.
+What the platform itself allows (public API, gated API, browser-assisted, manual
+handoff) and what the engine actually ships per destination are in
+[PLATFORM-CAPABILITY-MATRIX.md](PLATFORM-CAPABILITY-MATRIX.md) — generated from
+`xpst capabilities` and enforced by `tests/test_platform_capability_matrix.py`.
+
+| Capability | Status | What that means today |
+|---|---|---|
+| YouTube | **Live-verified** | Current account authentication and live health were verified. Publishing still requires your own Google OAuth project/account and remains subject to YouTube limits. |
+| X | **Live-verified** | Current account authentication and live health were verified. The path depends on your own account and chosen API/session method and remains subject to X enforcement and limits. |
+| Instagram | **Live-verified** | Current account authentication and live health were verified. The official Graph API path requires your own Meta app and an eligible Creator/Business account; session-based modes have separate risks. |
+| TikTok as a source | **Source-only (live-verified)** | TikTok source fetching through the downloader/cookie path was live-checked. Use it to source content for other destinations. |
+| TikTok as a destination | **Browser-native publisher (opt-in, unofficial) + Draft mode fallback** | Public posting without a developer-app audit is possible through the opt-in browser-native publisher: set `publish_mode: browser` (or `browser_only`) and xPST publishes through your logged-in TikTok Studio web session (labelled *browser-native publisher (unofficial)*, same same-origin pattern as Instagram's session mode; needs `pip install 'xpst[browser]'` + `python -m playwright install chromium`; PR t_a56a0fdf). Route preference: official Direct Post (if audited) > browser-native > inbox-draft. Draft mode (`draft_mode: auto`/`always`; PR #266) remains the no-browser fallback: uploads land in your TikTok inbox as drafts you finish in the app and report PENDING, never as published posts. Official public Direct Post still awaits TikTok's developer-app audit. |
+| Threads | **Disabled / unauthenticated** | Threads is an opt-in integration and is currently disabled. It is not a live-verified destination. |
+| Facebook Page | **Unauthenticated** | Page-scoped destination via a BYO Meta app (Facebook Login for Business). Implemented and unit-tested; no Meta app is configured in the current live environment. Personal profiles cannot publish. |
+| Messenger | **Disabled / unauthenticated** | Messenger is an opt-in messaging/auto-reply integration and is currently disabled. It is not a video-posting destination. |
+| Bluesky | **Unauthenticated** | Opt-in destination for text, image and multi-image posts over the open AT Protocol (`com.atproto.repo.createRecord`). No app review and no fee: connecting is a handle plus an app password, stored encrypted. Implemented and unit-tested against a mocked PDS; no Bluesky account is connected in the current live environment, so no post has been made. Video is **not** supported. |
+| `pip install xpst` | **Not yet** | The PyPI JSON endpoint currently returns HTTP 404, so the package is not published on PyPI. Use a GitHub release desktop asset or install from source instead. |
+
+The repository also contains setup guides for integrations that are not in the
+live-verified state above. Their existence documents code paths, not current
+availability.
+
+### Opt-in targets and format routing (contract)
+
+No platform is connected by default and no post targets an implied "all":
+
+- `xpst post` / `xpst_post` target an explicit destination set, or — when none is
+  given — the **format route ∩ connected accounts**. `--all` (MCP `all: true`)
+  exists and means every connected account that accepts this format; it is never
+  the default.
+- `xpst preflight --format auto` (MCP `xpst_preflight`, `POST /api/preflight`)
+  prints the resolved plan before anything publishes: `posted`,
+  `skipped_unconnected` (with the `xpst connect` command), `unsupported_format`,
+  `refused_by_community` or `failed` per destination, plus that destination's
+  envelope (duration, container, codec, byte and caption ceilings).
+- `skipped_unconnected` is **not** a failure. Zero connected accounts is one
+  actionable error naming `xpst connect`.
+- Content that does not fit is **refused, never truncated**; the refusal message
+  carries the envelope.
+- The envelope and format routes come from the same registry `xpst capabilities`
+  emits (`GET /api/capabilities`). Do not hand-maintain a second table.

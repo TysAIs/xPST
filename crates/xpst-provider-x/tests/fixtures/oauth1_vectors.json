@@ -1,0 +1,101 @@
+{
+  "cases": [
+    {
+      "body_params": [],
+      "credentials": {
+        "access_token": "at-test-0001",
+        "access_token_secret": "as-test-0001",
+        "consumer_key": "ck-test-0001",
+        "consumer_secret": "cs-test-0001"
+      },
+      "expected_header": "OAuth \"oauth_consumer_key\"=\"ck-test-0001\", \"oauth_nonce\"=\"nonce-create-0001\", \"oauth_signature\"=\"Az0XVmBkzGkdCqqTcne0bEoiWq8%3D\", \"oauth_signature_method\"=\"HMAC-SHA1\", \"oauth_timestamp\"=\"1780000000\", \"oauth_token\"=\"at-test-0001\", \"oauth_version\"=\"1.0\"",
+      "expected_signature": "Az0XVmBkzGkdCqqTcne0bEoiWq8=",
+      "method": "POST",
+      "name": "create_post_json_body_signs_oauth_only",
+      "nonce": "nonce-create-0001",
+      "timestamp": 1780000000,
+      "url": "https://api.twitter.com/2/tweets"
+    },
+    {
+      "body_params": [
+        [
+          "command",
+          "INIT"
+        ],
+        [
+          "media_type",
+          "video/mp4"
+        ],
+        [
+          "total_bytes",
+          "10485760"
+        ]
+      ],
+      "credentials": {
+        "access_token": "at-test-0001",
+        "access_token_secret": "as-test-0001",
+        "consumer_key": "ck-test-0001",
+        "consumer_secret": "cs-test-0001"
+      },
+      "expected_header": "OAuth \"oauth_consumer_key\"=\"ck-test-0001\", \"oauth_nonce\"=\"nonce-init-0001\", \"oauth_signature\"=\"OInD2w4kKY9cxs2pzPnKr8s8KGg%3D\", \"oauth_signature_method\"=\"HMAC-SHA1\", \"oauth_timestamp\"=\"1780000001\", \"oauth_token\"=\"at-test-0001\", \"oauth_version\"=\"1.0\"",
+      "expected_signature": "OInD2w4kKY9cxs2pzPnKr8s8KGg=",
+      "method": "POST",
+      "name": "upload_init_form_params_are_signed",
+      "nonce": "nonce-init-0001",
+      "timestamp": 1780000001,
+      "url": "https://upload.twitter.com/1.1/media/upload.json"
+    },
+    {
+      "body_params": [
+        [
+          "command",
+          "APPEND"
+        ],
+        [
+          "media_id",
+          "1234567890123456789"
+        ],
+        [
+          "segment_index",
+          "0"
+        ]
+      ],
+      "credentials": {
+        "access_token": "at-test-0001",
+        "access_token_secret": "as-test-0001",
+        "consumer_key": "ck-test-0001",
+        "consumer_secret": "cs-test-0001"
+      },
+      "expected_header": "OAuth \"oauth_consumer_key\"=\"ck-test-0001\", \"oauth_nonce\"=\"nonce-append-0001\", \"oauth_signature\"=\"ytHodGEGVzGZ7G7Yj67w9MuKMcw%3D\", \"oauth_signature_method\"=\"HMAC-SHA1\", \"oauth_timestamp\"=\"1780000002\", \"oauth_token\"=\"at-test-0001\", \"oauth_version\"=\"1.0\"",
+      "expected_signature": "ytHodGEGVzGZ7G7Yj67w9MuKMcw=",
+      "method": "POST",
+      "name": "upload_append_form_params_are_signed",
+      "nonce": "nonce-append-0001",
+      "timestamp": 1780000002,
+      "url": "https://upload.twitter.com/1.1/media/upload.json"
+    },
+    {
+      "body_params": [
+        [
+          "note",
+          "a b+c/d~\u00e9&x=1"
+        ]
+      ],
+      "credentials": {
+        "access_token": "at-test-0001",
+        "access_token_secret": "as-test-0001",
+        "consumer_key": "ck-test-0001",
+        "consumer_secret": "cs-test-0001"
+      },
+      "expected_header": "OAuth \"oauth_consumer_key\"=\"ck-test-0001\", \"oauth_nonce\"=\"nonce-encode-0001\", \"oauth_signature\"=\"ulpSK%2FQuaEtcoOs4c%2FS1jIdKxzw%3D\", \"oauth_signature_method\"=\"HMAC-SHA1\", \"oauth_timestamp\"=\"1780000003\", \"oauth_token\"=\"at-test-0001\", \"oauth_version\"=\"1.0\"",
+      "expected_signature": "ulpSK/QuaEtcoOs4c/S1jIdKxzw=",
+      "method": "POST",
+      "name": "encoding_of_reserved_and_unicode_values",
+      "nonce": "nonce-encode-0001",
+      "timestamp": 1780000003,
+      "url": "https://api.twitter.com/2/tweets"
+    }
+  ],
+  "generated_by": "scripts/capture_x_oauth1_vectors.py",
+  "reference": "RFC 5849 section 3.4, HMAC-SHA1"
+}

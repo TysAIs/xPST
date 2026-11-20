@@ -1,0 +1,283 @@
+"""Focused tests for the Tauri updater manifest generator."""
+
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location("gen_updater_manifest", ROOT / "scripts/gen-updater-manifest.py")
+assert SPEC and SPEC.loader
+manifest_module = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(manifest_module)
+
+PLATFORMS = (
+    "darwin-aarch64",
+    "darwin-x86_64",
+    "windows-x86_64",
+    "linux-x86_64",
+)
+FILENAMES = {
+    "darwin-aarch64": "xPST.app.tar.gz",
+    "darwin-x86_64": "xPST-intel.app.tar.gz",
+    "windows-x86_64": "xPST-setup.exe",
+    "linux-x86_64": "xPST.AppImage",
+}
+SHA512 = {
+    "darwin-aarch64": "3786f5c89dd59448209665a080bebc4446b9c57c7f5067fa9b690ece8e7c0b82c8149d77522b91f943b82823d3ae7de3bf766f7316de029dc436a17bc1c83758",
+    "darwin-x86_64": "377658e536ad89be70b0225791527527ab39c41e6d70073b0e38426bdd7a4ec81ca89a73edae9296393669eb249a04c49a96db8273aa42778e71a868bb11a970",
+    "windows-x86_64": "321b4c02d8d36878672cb66c84d7c4f307a81f640135ee8923abdf8c23c0a10b2b626482c61f9f267cd4c453585d37e8325dadccd1cb3f355aa44e573bc04903",
+    "linux-x86_64": "2741e2c52588a897a3ad5e8942648bc86df09eb8b548799eaf11ae998a6332f49ddbd6e05b0a878f2d6de851d3ff3fcc37c00b4c4f2426ad96134156bca69748",
+}
+
+
+def _fixtures(tmp_path: Path) -> dict[str, Path]:
+    artifacts: dict[str, Path] = {}
+    for platform in PLATFORMS:
+        artifact = tmp_path / FILENAMES[platform]
+        artifact.write_bytes(f"{platform} fixture\n".encode())
+        artifact.with_name(artifact.name + ".sig").write_text(
+            f"untrusted comment: fixture signature for {platform}\n"
+            f"signature-{platform}\n",
+            encoding="utf-8",
+        )
+        artifacts[platform] = artifact
+    return artifacts
+
+
+def test_generate_manifest_is_deterministic_and_contains_sha512(tmp_path: Path) -> None:
+    artifacts = _fixtures(tmp_path)
+
+    manifest = manifest_module.generate_manifest(
+        version="1.2.3",
+        notes="Updater fixture release",
+        artifacts=artifacts,
+        base_url="https://downloads.example.test/v1.2.3",
+        pubkey="fixture-public-key",
+    )
+
+    assert manifest == {
+        "version": "1.2.3",
+        "notes": "Updater fixture release",
+        "platforms": {
+            platform: {
+                "signature": f"untrusted comment: fixture signature for {platform}\nsignature-{platform}",
+                "sha512": SHA512[platform],
+                "url": f"https://downloads.example.test/v1.2.3/{FILENAMES[platform]}",
+            }
+            for platform in PLATFORMS
+        },
+    }
+
+
+def test_generate_manifest_fails_when_signature_is_missing(tmp_path: Path) -> None:
+    artifacts = _fixtures(tmp_path)
+    (artifacts["linux-x86_64"].with_name("xPST.AppImage.sig")).unlink()
+
+    with pytest.raises(FileNotFoundError, match="signature for linux-x86_64"):
+        manifest_module.generate_manifest(
+            version="1.2.3",
+            notes="Updater fixture release",
+            artifacts=artifacts,
+            base_url="https://downloads.example.test/v1.2.3",
+            pubkey="fixture-public-key",
+        )
+
+
+def test_generate_manifest_fails_when_signature_is_empty(tmp_path: Path) -> None:
+    """An empty .sig must abort, never become an empty manifest signature."""
+    artifacts = _fixtures(tmp_path)
+    (artifacts["darwin-aarch64"].with_name("xPST.app.tar.gz.sig")).write_text("\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="empty updater signature for darwin-aarch64"):
+        manifest_module.generate_manifest(
+            version="1.2.3",
+            notes="Updater fixture release",
+            artifacts=artifacts,
+            base_url="https://downloads.example.test/v1.2.3",
+            pubkey="fixture-public-key",
+        )
+
+
+def test_generate_manifest_rejects_an_unknown_platform_key(tmp_path: Path) -> None:
+    """A platform key that is not a Tauri target triple must fail loudly."""
+    artifacts = _fixtures(tmp_path)
+    artifacts["windows-arm64"] = artifacts["windows-x86_64"]
+
+    with pytest.raises(ValueError, match="unsupported updater platform"):
+        manifest_module.generate_manifest(
+            version="1.2.3",
+            notes="Updater fixture release",
+            artifacts=artifacts,
+            base_url="https://downloads.example.test/v1.2.3",
+            pubkey="fixture-public-key",
+            platforms=(*PLATFORMS, "windows-arm64"),
+        )
+
+
+def test_generate_manifest_covers_exactly_the_built_platforms(tmp_path: Path) -> None:
+    """A release that built only macOS must not advertise the other platforms."""
+    artifacts = _fixtures(tmp_path)
+
+    manifest = manifest_module.generate_manifest(
+        version="1.2.3",
+        notes="Updater fixture release",
+        artifacts=artifacts,
+        base_url="https://downloads.example.test/v1.2.3",
+        pubkey="fixture-public-key",
+        platforms=("darwin-aarch64",),
+        pub_date="2026-09-14T00:00:00Z",
+    )
+
+    assert manifest["platforms"] == {
+        "darwin-aarch64": {
+            "signature": "untrusted comment: fixture signature for darwin-aarch64\nsignature-darwin-aarch64",
+            "sha512": SHA512["darwin-aarch64"],
+            "url": "https://downloads.example.test/v1.2.3/xPST.app.tar.gz",
+        }
+    }
+    assert manifest["pub_date"] == "2026-09-14T00:00:00Z"
+
+
+def test_cli_exits_non_zero_when_a_signature_is_missing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """The CLI must fail loudly (exit 2) rather than write an unsigned entry."""
+    artifacts = _fixtures(tmp_path)
+    output = tmp_path / "latest.json"
+    args = [
+        "--version",
+        "1.2.3",
+        "--notes",
+        "Updater fixture release",
+        "--base-url",
+        "https://downloads.example.test/v1.2.3",
+        "--output",
+        str(output),
+        "--config",
+        str(tmp_path / "config.json"),
+    ]
+    for platform, artifact in artifacts.items():
+        args += ["--artifact", f"{platform}={artifact}"]
+    (tmp_path / "config.json").write_text(
+        '{"plugins": {"updater": {"pubkey": "fixture-public-key"}}}', encoding="utf-8"
+    )
+    # Break one signature AFTER the fixtures are in place.
+    (artifacts["linux-x86_64"].with_name("xPST.AppImage.sig")).unlink()
+
+    rc = manifest_module.main(args)
+
+    assert rc == 2
+    assert "missing updater signature for linux-x86_64" in capsys.readouterr().err
+    assert not output.exists(), "a failed run must not leave a manifest behind"
+
+
+def test_cli_rejects_a_platform_outside_the_supported_set(tmp_path: Path) -> None:
+    """The closed platform set is enforced before any file is written.
+
+    argparse's ``choices`` rejects an unknown ``--platform`` outright, and an
+    unknown key inside ``--artifact`` makes the generator exit 2.
+    """
+    base = ["--version", "1.2.3", "--notes", "n", "--base-url", "https://x.test",
+            "--output", str(tmp_path / "latest.json")]
+
+    with pytest.raises(SystemExit):
+        manifest_module.main([*base, "--platform", "darwin-arm64", "--artifact", "darwin-arm64=x.tar.gz"])
+
+    assert manifest_module.main([*base, "--artifact", "darwin-arm64=x.tar.gz"]) == 2
+    assert not (tmp_path / "latest.json").exists()
+
+
+def test_generate_manifest_rejects_two_files_with_one_digest(tmp_path: Path) -> None:
+    """The v1.2.1 Intel entry: two platform keys, one digest, two files.
+
+    The manifest advertised the arm64 sha512/signature for ``darwin-x86_64``
+    while pointing at a different payload, so an Intel Mac downloaded a file
+    whose digest and signature could never verify.
+    """
+    artifacts = _fixtures(tmp_path)
+    arm = artifacts["darwin-aarch64"]
+    intel = artifacts["darwin-x86_64"]
+    intel.write_bytes(arm.read_bytes())  # same bytes, different file name
+    (intel.with_name(intel.name + ".sig")).write_text(
+        "untrusted comment: fixture signature for darwin-aarch64\nsignature-darwin-aarch64\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="different files with the same sha512"):
+        manifest_module.generate_manifest(
+            version="1.2.3",
+            notes="Updater fixture release",
+            artifacts=artifacts,
+            base_url="https://downloads.example.test/v1.2.3",
+            pubkey="fixture-public-key",
+        )
+
+
+def test_generate_manifest_allows_one_payload_under_two_keys(tmp_path: Path) -> None:
+    """A universal macOS build is legitimately one file for both darwin keys."""
+    artifacts = _fixtures(tmp_path)
+    universal = artifacts["darwin-aarch64"]
+    artifacts["darwin-x86_64"] = universal
+
+    manifest = manifest_module.generate_manifest(
+        version="1.2.3",
+        notes="Updater fixture release",
+        artifacts=artifacts,
+        base_url="https://downloads.example.test/v1.2.3",
+        pubkey="fixture-public-key",
+        platforms=("darwin-aarch64", "darwin-x86_64"),
+    )
+
+    entries = manifest["platforms"]
+    assert entries["darwin-aarch64"]["url"] == entries["darwin-x86_64"]["url"]
+    assert entries["darwin-aarch64"]["sha512"] == entries["darwin-x86_64"]["sha512"]
+
+
+def test_generate_manifest_rejects_a_payload_that_cannot_install(tmp_path: Path) -> None:
+    """A macOS archive must never be advertised as the Windows payload."""
+    artifacts = _fixtures(tmp_path)
+    artifacts["windows-x86_64"] = artifacts["darwin-aarch64"]
+
+    with pytest.raises(ValueError, match="windows-x86_64 cannot be updated from"):
+        manifest_module.generate_manifest(
+            version="1.2.3",
+            notes="Updater fixture release",
+            artifacts=artifacts,
+            base_url="https://downloads.example.test/v1.2.3",
+            pubkey="fixture-public-key",
+        )
+
+
+def test_there_is_exactly_one_manifest_generator() -> None:
+    """Two generators writing latest.json is the defect this consolidates away.
+
+    A release must have ONE authority for the manifest: the merged
+    scripts/gen-updater-manifest.py. A second, differently named generator
+    (e.g. scripts/generate_update_manifest.py) must never come back.
+    """
+    generators = sorted(
+        path.name
+        for path in (ROOT / "scripts").glob("*.py")
+        if "manifest" in path.name.lower()
+    )
+
+    assert generators == ["gen-updater-manifest.py"]
+    assert not (ROOT / "scripts/generate_update_manifest.py").exists()
+    assert not (ROOT / "tests/test_update_manifest.py").exists()
+
+
+def test_both_pipelines_run_that_one_generator() -> None:
+    """The survivor is wired into the publish workflow AND the release lane."""
+    publish = (ROOT / ".github/workflows/publish-updater.yml").read_text(encoding="utf-8")
+    release = (ROOT / ".github/workflows/tauri-release.yml").read_text(encoding="utf-8")
+
+    for workflow in (publish, release):
+        assert "scripts/gen-updater-manifest.py" in workflow
+        assert "scripts/select-updater-artifacts.py" in workflow
+        assert "scripts/publish-updater.sh" in workflow
+        assert "generate_update_manifest.py" not in workflow
+
+    # The release lane's manifest job must not race the publish workflow for the
+    # Pages commit: only publish-updater.yml owns updates/latest.json on main.
+    assert "HEAD:refs/heads/main" not in release

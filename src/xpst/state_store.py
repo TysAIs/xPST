@@ -1,0 +1,527 @@
+"""State storage layer for xPST.
+
+Handles atomic writes, backup rotation, corruption recovery, and
+cross-process file locking. No business logic - pure storage operations.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import tempfile
+import threading
+import time
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
+
+from xpst.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+try:
+    import fcntl  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - exercised on Windows
+    fcntl = None  # type: ignore[assignment]
+
+try:
+    import msvcrt  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - exercised on POSIX
+    msvcrt = None  # type: ignore[assignment]
+
+
+class StateStore:
+    """Low-level state storage with atomic operations and locking.
+
+    Separated from StateManager to follow single responsibility principle.
+    Handles only file I/O, locking, and corruption recovery.
+    """
+
+    SCHEMA_VERSION = 2
+    MAX_BACKUPS = 5
+
+    def __init__(self, config_dir: str | Path):
+        """Initialize state store.
+
+        Args:
+            config_dir: Directory containing state.json
+        """
+        self.path = Path(config_dir) / "state.json"
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Create backups directory (for test compatibility)
+        backup_dir = self.path.parent / "backups"
+        backup_dir.mkdir(exist_ok=True)
+
+        # Lock file for cross-process synchronization (test compatibility: .state.lock)
+        self.lock_path = self.path.parent / ".state.lock"
+
+        # Thread lock for in-process synchronization
+        self._thread_lock = threading.RLock()
+
+        # Lock file descriptor for test compatibility (-der)
+        self._lock_fd = None
+
+        # Initialization must be serialized with writers: loading state and
+        # taking its freshness signature separately allowed another process to
+        # replace state.json between those operations, pairing stale memory with
+        # a current signature and losing the first update.
+        with self._file_lock():
+            self._sweep_orphan_tmp_files()
+            self._state = self._load()
+            self._disk_state_sig = self._disk_signature()
+
+    # Temp files older than this are considered orphans from a crashed writer.
+    _ORPHAN_TMP_MAX_AGE_S = 600
+
+    def _disk_signature(self) -> tuple[int, int, str] | None:
+        """Return metadata plus content hash for change detection.
+
+        mtime/size alone can collide for same-sized writes within filesystem
+        timestamp granularity. The digest keeps the in-memory fast path while
+        making cross-process freshness detection content-accurate.
+        """
+        try:
+            st = self.path.stat()
+            digest = hashlib.sha256(self.path.read_bytes()).hexdigest()
+            return (st.st_mtime_ns, st.st_size, digest)
+        except OSError:
+            return None
+
+    def _sweep_orphan_tmp_files(self) -> None:
+        """Delete stale state.json.tmp.* files left by crashed writers."""
+        cutoff = time.time() - self._ORPHAN_TMP_MAX_AGE_S
+        for tmp in self.path.parent.glob("state.json.tmp.*"):
+            try:
+                if tmp.stat().st_mtime < cutoff:
+                    tmp.unlink()
+            except OSError:
+                pass
+
+    def _read_fresh_state(self) -> dict[str, Any] | None:
+        """Best-effort read of state.json for cross-process freshness.
+
+        Must be called while holding the cross-process file lock. Returns
+        ``None`` when the file is missing or unreadable so the caller can
+        fall back to the in-memory copy instead of losing data.
+        """
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+            pass
+        return None
+
+    @contextmanager
+    def _file_lock(self):
+        """Cross-process file lock context manager."""
+        self.lock_path.touch(exist_ok=True)
+        # Never truncate the shared lock inode while another process may hold
+        # it. Opening with ``w`` was unnecessary and can undermine advisory
+        # locking on some filesystems; append/update preserves the inode.
+        with open(self.lock_path, "a+") as lock_file:
+            try:
+                self._lock_file(lock_file, blocking=True)
+                yield
+            finally:
+                self._unlock_file(lock_file)
+
+    def _lock_file(self, lock_file, blocking: bool) -> bool:
+        """Acquire a cross-platform exclusive file lock."""
+        if fcntl is not None:
+            flags = fcntl.LOCK_EX
+            if not blocking:
+                flags |= fcntl.LOCK_NB
+            try:
+                fcntl.flock(lock_file.fileno(), flags)
+                return True
+            except BlockingIOError:
+                return False
+
+        if msvcrt is not None:
+            lock_file.seek(0)
+            mode = msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK
+            try:
+                msvcrt.locking(lock_file.fileno(), mode, 1)
+                return True
+            except OSError:
+                return False
+
+        return True
+
+    def _unlock_file(self, lock_file) -> None:
+        """Release a cross-platform file lock."""
+        if fcntl is not None:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        elif msvcrt is not None:
+            lock_file.seek(0)
+            try:
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+
+    def _load(self) -> dict[str, Any]:
+        """Load state from file with corruption recovery and migration."""
+        # Try main file
+        state = self._try_load_file(self.path)
+        if state is not None:
+            # Migrate if needed
+            if state.get("version") != self.SCHEMA_VERSION:
+                state = self._migrate_state(state)
+                self._atomic_write(state)
+            return self._ensure_state_keys(state)
+
+        # Main file failed - try loading directly with corruption detection
+        if self.path.exists():
+            try:
+                with open(self.path, "rb") as f:
+                    data = f.read()
+                # Save corrupted file as forensic evidence in backups
+                import hashlib
+                import time
+                h = hashlib.md5(data, usedforsecurity=False).hexdigest()[:8]
+                corrupted_path = self.path.parent / "backups" / f"corrupted_{int(time.time())}_{h}.json"
+                corrupted_path.write_bytes(data)
+            except Exception:
+                pass
+
+            # Also save forensic copy with fixed name for compatibility
+            forensic_path = self.path.with_suffix(".json.forensic")
+            try:
+                shutil.copy2(self.path, forensic_path)
+            except Exception:
+                pass
+
+        # Try backups in reverse chronological order
+        backups = sorted((self.path.parent / "backups").glob("state_*.json"), reverse=True)
+        for backup in backups:
+            state = self._try_load_file(backup)
+            if state is not None:
+                logger.warning(f"Recovered state from backup: {backup}")
+                # Migrate if needed
+                if state.get("version") != self.SCHEMA_VERSION:
+                    state = self._migrate_state(state)
+                state = self._ensure_state_keys(state)
+                # Restore main file from backup
+                self._atomic_write(state)
+                return state
+
+        # Return empty state
+        return self._empty_state()
+
+    def _try_load_file(self, path: Path) -> dict[str, Any] | None:
+        """Try to load and validate a state file."""
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return None
+            return data
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+            logger.debug(f"Failed to load {path}: {e}")
+            return None
+
+    def _migrate_state(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Migrate state from older schema versions to current."""
+        version = state.get("version")
+        if version is None or version == 1:
+            logger.info(f"Migrating state from v{version or 1} to v{self.SCHEMA_VERSION}")
+
+            # Ensure all required keys exist
+            state = self._ensure_state_keys(state)
+
+            if "posted_video_ids" in state and "posted_to" in state:
+                posted_to_by_platform = state.get("posted_to", {})
+                for video_id in state.get("posted_video_ids", []):
+                    posted_to = {}
+                    for platform, video_ids in posted_to_by_platform.items():
+                        if video_id in video_ids:
+                            posted_to[platform] = {
+                                "id": "",
+                                "url": "",
+                                "timestamp": "",
+                            }
+                    state["posted_videos"][video_id] = {
+                        "source_url": "",
+                        "source_platform": "unknown",
+                        "caption": "",
+                        "posted_to": posted_to,
+                        "downloaded_at": "",
+                        "last_attempt": "",
+                        "content_hash": None,
+                    }
+
+            # Migrate old cross_posted format to posted_videos
+            if "cross_posted" in state and not state.get("posted_videos"):
+                for composite_key, platforms in state["cross_posted"].items():
+                    # Parse composite key (e.g., "tiktok:vid1")
+                    if ":" in composite_key:
+                        source_platform, video_id = composite_key.split(":", 1)
+                    else:
+                        video_id = composite_key
+                        source_platform = "unknown"
+
+                    posted_to = {}
+                    first_timestamp = ""
+                    for platform, info in platforms.items():
+                        posted_to[platform] = {
+                            "id": info.get("post_id", ""),
+                            "url": info.get("url", ""),
+                            "timestamp": info.get("timestamp", ""),
+                        }
+                        if not first_timestamp:
+                            first_timestamp = info.get("timestamp", "")
+
+                    state["posted_videos"][video_id] = {
+                        "source_url": "",
+                        "source_platform": source_platform,
+                        "caption": "",
+                        "posted_to": posted_to,
+                        "downloaded_at": first_timestamp,
+                        "last_attempt": "",
+                        "content_hash": None,
+                    }
+
+            state["version"] = self.SCHEMA_VERSION
+            return state
+
+        return state
+
+    def _ensure_state_keys(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Ensure all required state keys exist."""
+        state.setdefault("version", self.SCHEMA_VERSION)
+        state.setdefault("posted_videos", {})
+        state.setdefault("content_hashes", {})
+        if isinstance(state.get("health"), dict):
+            # Issue #296: per-source fetch health lives beside the platform
+            # health. Older state files never wrote this key — create it
+            # lazily rather than failing on legacy state.
+            state["health"].setdefault("sources", {})
+        state.setdefault("health", {
+            "platforms": {
+                "youtube": {"status": "ok", "last_success": None, "failures": 0, "last_error": None},
+                "x": {"status": "ok", "last_success": None, "failures": 0, "last_error": None},
+                "instagram": {"status": "ok", "last_success": None, "failures": 0, "last_error": None},
+                "tiktok": {"status": "ok", "last_success": None, "failures": 0, "last_error": None},
+                "threads": {"status": "ok", "last_success": None, "failures": 0, "last_error": None},
+            },
+            "sources": {},
+            "total_processed": 0,
+            "last_check": None,
+            "last_wake_check": None,
+        })
+        return state
+
+    def _empty_state(self) -> dict[str, Any]:
+        """Return empty state structure."""
+        return {
+            "version": self.SCHEMA_VERSION,
+            "posted_videos": {},
+            "content_hashes": {},
+            "health": {
+                "platforms": {
+                    "youtube": {"status": "ok", "last_success": None, "failures": 0},
+                    "x": {"status": "ok", "last_success": None, "failures": 0},
+                    "instagram": {"status": "ok", "last_success": None, "failures": 0},
+                    "tiktok": {"status": "ok", "last_success": None, "failures": 0},
+                    "threads": {"status": "ok", "last_success": None, "failures": 0},
+                },
+                "sources": {},
+                "total_processed": 0,
+                "last_check": None,
+                "last_wake_check": None,
+            },
+        }
+
+    def _atomic_write(self, state: dict[str, Any]) -> None:
+        """Write state atomically using temp file + rename.
+
+        Also creates a backup of the current state before overwriting.
+        """
+        # Create backup of current state before overwriting
+        if self.path.exists():
+            backup_dir = self.path.parent / "backups"
+            backup_dir.mkdir(exist_ok=True)
+            backup_path = backup_dir / f"state_{time.time_ns()}.json"
+            try:
+                shutil.copy2(self.path, backup_path)
+                # Rotate old backups after creating new one
+                self._rotate_backups()
+            except Exception:
+                pass
+
+        # Save forensic copy before overwriting (for corruption recovery tests)
+        if self.path.exists():
+            forensic_path = self.path.with_suffix(".json.forensic")
+            try:
+                shutil.copy2(self.path, forensic_path)
+            except Exception:
+                pass  # Forensic copy is best-effort
+
+        # Create temp file in same directory (for atomic rename)
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                dir=self.path.parent,
+                prefix="state.json.tmp.",
+                delete=False,
+                encoding="utf-8",
+            ) as tmp:
+                # Assign BEFORE writing so a mid-dump failure (e.g. disk-full)
+                # still gets cleaned up in the except block below.
+                tmp_path = Path(tmp.name)
+                json.dump(state, tmp, default=str, ensure_ascii=False)
+                tmp.flush()
+                # fsync so the payload survives a crash/power loss after rename
+                os.fsync(tmp.fileno())
+
+            # Atomic rename (POSIX). On Windows the destination can be briefly
+            # locked by a concurrent reader (antivirus, another process holding
+            # the file open), surfacing as PermissionError (WinError 5). Retry
+            # a bounded number of times with a small backoff before giving up
+            # — see HANDOFF-2026-08-29
+            # (test_concurrent_processes_zero_lost_updates hit this once
+            # under Windows stress).
+            replace_backoff_s = (0.05, 0.1, 0.2)
+            _last_replace_error: PermissionError | None = None
+            for _attempt in range(len(replace_backoff_s) + 1):
+                try:
+                    os.replace(tmp_path, self.path)
+                    _last_replace_error = None
+                    break
+                except PermissionError as exc:
+                    _last_replace_error = exc
+                    if _attempt < len(replace_backoff_s):
+                        time.sleep(replace_backoff_s[_attempt])
+            if _last_replace_error is not None:
+                raise _last_replace_error
+            # Best-effort directory fsync so the rename itself is durable
+            try:
+                dir_fd = os.open(self.path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except OSError:
+                pass
+        except Exception:
+            # Cleanup on failure — never leave a partial temp file behind to
+            # accumulate (disk-full during json.dump previously leaked tmps).
+            if tmp_path is not None and tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
+            raise
+
+    def _rotate_backups(self) -> None:
+        """Rotate backup files, keeping only MAX_BACKUPS."""
+        backups = sorted(
+            (self.path.parent / "backups").glob("state_*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True
+        )
+        for old in backups[self.MAX_BACKUPS:]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
+    # ── File lock compatibility (tests expect these) ──
+
+    def _acquire_file_lock(self, blocking=True):
+        """Acquire file lock for state operations (test compatibility)."""
+        self.lock_path.touch(exist_ok=True)
+        self._lock_fd = open(self.lock_path, "w")  # noqa: SIM115 - intentionally held until release
+        return self._lock_file(self._lock_fd, blocking=blocking)
+
+    def _release_file_lock(self):
+        """Release file lock (test compatibility)."""
+        if hasattr(self, '_lock_fd') and self._lock_fd:
+            try:
+                self._unlock_file(self._lock_fd)
+            except Exception:
+                pass
+            self._lock_fd.close()
+            self._lock_fd = None
+
+    # ── Public API ──
+
+    def get(self) -> dict[str, Any]:
+        """Get current state (thread-safe)."""
+        with self._thread_lock:
+            return self._state.copy()
+
+    def get_raw(self) -> dict[str, Any]:
+        """Get raw state reference (for internal use only)."""
+        return self._state
+
+    def set(self, state: dict[str, Any]) -> None:
+        """Set state and persist atomically (thread-safe)."""
+        with self._thread_lock:
+            with self._file_lock():
+                self._state = state
+                self._atomic_write(state)
+                self._disk_state_sig = self._disk_signature()
+                self._rotate_backups()
+
+    def update(self, updater: callable) -> None:
+        """Atomically update state with a function.
+
+        The updater is applied to the FRESHEST state: if state.json was
+        written by ANOTHER process since we last read/wrote it (detected via
+        a stat signature checked under the cross-process file lock), the
+        on-disk state is re-read first. Without this, multiple processes
+        (engine, dashboard, CLI) would each apply their change to a stale
+        snapshot and silently drop the other writers' data (verified: 67%
+        update loss with 3 concurrent writers).
+
+        If the on-disk file is exactly what we last wrote, the in-memory
+        state is used directly — it is a superset of the on-disk state and
+        may hold additional not-yet-persisted mutations from throttled-save
+        flows (e.g. bulk ingestion) which must not be discarded.
+
+        Args:
+            updater: Function taking state dict, returning new state dict
+        """
+        with self._thread_lock:
+            with self._file_lock():
+                if self._disk_signature() != self._disk_state_sig:
+                    # Another process wrote since we last read/wrote.
+                    fresh = self._read_fresh_state()
+                    if fresh is not None:
+                        if fresh.get("version") == self.SCHEMA_VERSION:
+                            base = self._ensure_state_keys(fresh)
+                        else:
+                            # Older schema on disk — full recovery/migration path
+                            base = self._load()
+                    else:
+                        # Missing or unreadable file: keep in-memory state
+                        base = self._state
+                else:
+                    # On-disk state is exactly what we last wrote/read.
+                    base = self._state
+                self._state = updater(base)
+                self._atomic_write(self._state)
+                self._disk_state_sig = self._disk_signature()
+                self._rotate_backups()
+
+    def save(self) -> None:
+        """Persist current state to disk (thread-safe)."""
+        with self._thread_lock:
+            with self._file_lock():
+                self._atomic_write(self._state)
+                self._disk_state_sig = self._disk_signature()
+                self._rotate_backups()
+
+    def load_fresh(self) -> dict[str, Any]:
+        """Reload state from disk, discarding in-memory changes."""
+        with self._thread_lock:
+            self._state = self._load()
+            self._disk_state_sig = self._disk_signature()
+            return self._state.copy()

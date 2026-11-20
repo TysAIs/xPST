@@ -1,0 +1,4007 @@
+{
+  "captured_from": "src/xpst/dashboard/",
+  "samples": {
+    "api.capabilities": {
+      "body": {
+        "content_types": [
+          "video",
+          "image",
+          "carousel",
+          "text",
+          "thread"
+        ],
+        "contract_version": 2,
+        "declared_but_unimplemented": {},
+        "envelopes": {
+          "bluesky": {
+            "caption": {
+              "max_characters": 300
+            },
+            "content_types": {
+              "declared": [
+                "carousel",
+                "image",
+                "text"
+              ],
+              "implemented": [
+                "carousel",
+                "image",
+                "text"
+              ]
+            },
+            "display_name": "Bluesky",
+            "image": {
+              "aspect_max": null,
+              "aspect_min": null,
+              "containers": [
+                ".jpg",
+                ".jpeg",
+                ".png",
+                ".webp",
+                ".gif"
+              ],
+              "max_bytes": 0.0
+            },
+            "media_transport": "local_upload",
+            "media_transport_requirement": null,
+            "platform": "bluesky",
+            "publishing": true,
+            "video": null
+          },
+          "facebook": {
+            "caption": {
+              "max_characters": null
+            },
+            "content_types": {
+              "declared": [
+                "video"
+              ],
+              "implemented": [
+                "video"
+              ]
+            },
+            "display_name": "Facebook Page",
+            "image": null,
+            "media_transport": "local_upload",
+            "media_transport_requirement": null,
+            "platform": "facebook",
+            "publishing": true,
+            "video": {
+              "audio_codec": "aac",
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "fps_cap": 60,
+              "max_bytes": 10737418240,
+              "max_duration_seconds": 14400,
+              "max_long_edge": 1920,
+              "pix_fmt": "yuv420p",
+              "video_codec": "h264"
+            }
+          },
+          "instagram": {
+            "caption": {
+              "max_characters": 2200
+            },
+            "content_types": {
+              "declared": [
+                "carousel",
+                "image",
+                "video"
+              ],
+              "implemented": [
+                "carousel",
+                "image",
+                "video"
+              ]
+            },
+            "display_name": "Instagram Reels",
+            "image": {
+              "aspect_max": 1.91,
+              "aspect_min": 0.8,
+              "containers": [
+                ".jpg",
+                ".jpeg"
+              ],
+              "max_bytes": 8388608
+            },
+            "media_transport": "local_upload",
+            "media_transport_requirement": null,
+            "platform": "instagram",
+            "publishing": true,
+            "video": {
+              "audio_codec": "aac",
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "fps_cap": 60,
+              "max_bytes": 4294967296,
+              "max_duration_seconds": 900,
+              "max_long_edge": 1920,
+              "pix_fmt": "yuv420p",
+              "video_codec": "h264"
+            }
+          },
+          "messenger": {
+            "caption": {
+              "max_characters": 640
+            },
+            "content_types": {
+              "declared": [
+                "text"
+              ],
+              "implemented": [
+                "text"
+              ]
+            },
+            "display_name": "Messenger",
+            "image": null,
+            "media_transport": "local_upload",
+            "media_transport_requirement": null,
+            "platform": "messenger",
+            "publishing": false,
+            "video": null
+          },
+          "rumble": {
+            "caption": {
+              "max_characters": null
+            },
+            "content_types": {
+              "declared": [
+                "video"
+              ],
+              "implemented": [
+                "video"
+              ]
+            },
+            "display_name": "Rumble",
+            "image": null,
+            "media_transport": "local_upload",
+            "media_transport_requirement": null,
+            "platform": "rumble",
+            "publishing": true,
+            "video": {
+              "audio_codec": "aac",
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "fps_cap": 60,
+              "max_bytes": null,
+              "max_duration_seconds": null,
+              "max_long_edge": 1920,
+              "pix_fmt": "yuv420p",
+              "video_codec": "h264"
+            }
+          },
+          "threads": {
+            "caption": {
+              "max_characters": 500
+            },
+            "content_types": {
+              "declared": [
+                "text",
+                "video"
+              ],
+              "implemented": [
+                "text",
+                "video"
+              ]
+            },
+            "display_name": "Threads",
+            "image": null,
+            "media_transport": "public_url",
+            "media_transport_requirement": "Threads has no upload endpoint: its API fetches your media from a public server, and xPST is a local tool with no server to host a file for it. A local file cannot be published to Threads, and xPST cannot deliver a media URL either yet \u2014 post this content from the Threads app instead.",
+            "platform": "threads",
+            "publishing": true,
+            "video": {
+              "audio_codec": "aac",
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "fps_cap": 60,
+              "max_bytes": 4294967296,
+              "max_duration_seconds": 300,
+              "max_long_edge": 1920,
+              "pix_fmt": "yuv420p",
+              "video_codec": "h264"
+            }
+          },
+          "tiktok": {
+            "caption": {
+              "max_characters": 2200
+            },
+            "content_types": {
+              "declared": [
+                "video"
+              ],
+              "implemented": [
+                "video"
+              ]
+            },
+            "display_name": "TikTok",
+            "image": null,
+            "media_transport": "local_upload",
+            "media_transport_requirement": null,
+            "platform": "tiktok",
+            "publishing": true,
+            "video": {
+              "audio_codec": "aac",
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "fps_cap": 60,
+              "max_bytes": 1073741824,
+              "max_duration_seconds": 600,
+              "max_long_edge": 1920,
+              "pix_fmt": "yuv420p",
+              "video_codec": "h264"
+            }
+          },
+          "x": {
+            "caption": {
+              "max_characters": 280
+            },
+            "content_types": {
+              "declared": [
+                "carousel",
+                "image",
+                "text",
+                "video"
+              ],
+              "implemented": [
+                "carousel",
+                "image",
+                "text",
+                "video"
+              ]
+            },
+            "display_name": "X",
+            "image": {
+              "aspect_max": 3.0,
+              "aspect_min": 0.3333333333333333,
+              "containers": [
+                ".jpg",
+                ".jpeg",
+                ".png",
+                ".webp"
+              ],
+              "max_bytes": 5242880
+            },
+            "media_transport": "local_upload",
+            "media_transport_requirement": null,
+            "platform": "x",
+            "publishing": true,
+            "video": {
+              "audio_codec": "aac",
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "fps_cap": 60,
+              "max_bytes": 536870912,
+              "max_duration_seconds": 140,
+              "max_long_edge": 1920,
+              "pix_fmt": "yuv420p",
+              "video_codec": "h264"
+            }
+          },
+          "youtube": {
+            "caption": {
+              "max_characters": null
+            },
+            "content_types": {
+              "declared": [
+                "video"
+              ],
+              "implemented": [
+                "video"
+              ]
+            },
+            "display_name": "YouTube",
+            "image": null,
+            "media_transport": "local_upload",
+            "media_transport_requirement": null,
+            "platform": "youtube",
+            "publishing": true,
+            "video": {
+              "audio_codec": "aac",
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "fps_cap": 60,
+              "max_bytes": 274877906944,
+              "max_duration_seconds": 43200,
+              "max_long_edge": 1920,
+              "pix_fmt": "yuv420p",
+              "video_codec": "h264"
+            }
+          }
+        },
+        "format_routes": {
+          "carousel": [
+            "x",
+            "instagram",
+            "bluesky"
+          ],
+          "image": [
+            "x",
+            "instagram",
+            "bluesky"
+          ],
+          "text": [
+            "x",
+            "threads",
+            "bluesky"
+          ],
+          "thread": [],
+          "video": [
+            "youtube",
+            "x",
+            "instagram",
+            "tiktok",
+            "threads",
+            "facebook",
+            "rumble"
+          ]
+        },
+        "platforms": {
+          "bluesky": {
+            "accepts_local_media": true,
+            "content": [
+              {
+                "content_type": "video",
+                "declared": false,
+                "implemented": false,
+                "note": "no video path: Bluesky serves video from a separate service (video.bsky.app) with an asynchronous upload job, and xPST will not claim it until a live upload proves it \u2014 a video request is refused by name",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "image",
+                "declared": true,
+                "implemented": true,
+                "note": "single image post (upload_image): JPG/PNG/WEBP/GIF, \u2264 2,000,000 bytes, uploaded as a PDS blob and embedded in the post record",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "carousel",
+                "declared": true,
+                "implemented": true,
+                "note": "native multi-image post (upload_carousel): 2-4 images in one app.bsky.embed.images embed, order preserved; over 4 is refused with the number, never cut down",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "text",
+                "declared": true,
+                "implemented": true,
+                "note": "one post (300 characters max) via post_text; links are faceted so they are clickable",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              }
+            ],
+            "declared": [
+              "carousel",
+              "image",
+              "text"
+            ],
+            "declared_but_unimplemented": [],
+            "declared_labels": [
+              "text",
+              "image",
+              "carousel"
+            ],
+            "display_name": "Bluesky",
+            "implemented": [
+              "carousel",
+              "image",
+              "text"
+            ],
+            "implemented_but_undeclared": [],
+            "integration": "ready",
+            "media_transport": "local_upload",
+            "media_transport_error_code": null,
+            "media_transport_requirement": "",
+            "note": "Open posting API (AT Protocol): an app password or OAuth session is the whole gate \u2014 no review, no fee, no developer console. Text, image and multi-image posts only.",
+            "platform": "bluesky",
+            "publishing": true,
+            "role": "video_destination",
+            "video_envelope": null
+          },
+          "facebook": {
+            "accepts_local_media": true,
+            "content": [
+              {
+                "content_type": "video",
+                "declared": true,
+                "implemented": true,
+                "note": "",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "image",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "carousel",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "text",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              }
+            ],
+            "declared": [
+              "video"
+            ],
+            "declared_but_unimplemented": [],
+            "declared_labels": [
+              "video"
+            ],
+            "display_name": "Facebook Page",
+            "implemented": [
+              "video"
+            ],
+            "implemented_but_undeclared": [],
+            "integration": "ready",
+            "media_transport": "local_upload",
+            "media_transport_error_code": null,
+            "media_transport_requirement": "",
+            "note": "Page-scoped: publishes as a Facebook Page, never as a personal profile (there is no API for that). Feed video today; Reels / photo / text are the follow-up that extends this row.",
+            "platform": "facebook",
+            "publishing": true,
+            "role": "video_destination",
+            "video_envelope": {
+              "aspect_max": null,
+              "aspect_min": null,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "display_name": "Facebook Page",
+              "long_form": false,
+              "max_bytes": 10737418240,
+              "max_duration_seconds": 14400,
+              "modes": [
+                "shorts"
+              ],
+              "note": "",
+              "platform": "facebook",
+              "shorts_max_aspect_ratio": null,
+              "shorts_max_duration_seconds": null,
+              "source": "Graph API /{page-id}/videos: up to 4 hours, 10 GB",
+              "video_codec": "h264"
+            }
+          },
+          "instagram": {
+            "accepts_local_media": true,
+            "content": [
+              {
+                "content_type": "video",
+                "declared": true,
+                "implemented": true,
+                "note": "",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "image",
+                "declared": true,
+                "implemented": true,
+                "note": "feed photo (upload_image): JPEG only, \u2264 8 MB, aspect within 4:5\u20131.91:1; the Graph API path needs a public image URL and refuses a local file explicitly",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "carousel",
+                "declared": true,
+                "implemented": true,
+                "note": "native album upload (2-10 items, order preserved); image items are checked against Instagram's image contract before the album call; over 10 items or under 2 is refused, never truncated",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "text",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              }
+            ],
+            "declared": [
+              "carousel",
+              "image",
+              "video"
+            ],
+            "declared_but_unimplemented": [],
+            "declared_labels": [
+              "video",
+              "image",
+              "carousel"
+            ],
+            "display_name": "Instagram Reels",
+            "implemented": [
+              "carousel",
+              "image",
+              "video"
+            ],
+            "implemented_but_undeclared": [],
+            "integration": "ready",
+            "media_transport": "local_upload",
+            "media_transport_error_code": null,
+            "media_transport_requirement": "",
+            "note": "",
+            "platform": "instagram",
+            "publishing": true,
+            "role": "video_destination",
+            "video_envelope": {
+              "aspect_max": null,
+              "aspect_min": null,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "display_name": "Instagram Reels",
+              "long_form": false,
+              "max_bytes": 4294967296,
+              "max_duration_seconds": 900,
+              "modes": [
+                "shorts"
+              ],
+              "note": "",
+              "platform": "instagram",
+              "shorts_max_aspect_ratio": null,
+              "shorts_max_duration_seconds": null,
+              "source": "Meta Reels API: Reels up to 15 minutes, 4 GB",
+              "video_codec": "h264"
+            }
+          },
+          "messenger": {
+            "accepts_local_media": true,
+            "content": [
+              {
+                "content_type": "video",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "image",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "carousel",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "text",
+                "declared": true,
+                "implemented": true,
+                "note": "send_text delivers a direct message, not a public post",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              }
+            ],
+            "declared": [
+              "text"
+            ],
+            "declared_but_unimplemented": [],
+            "declared_labels": [
+              "text"
+            ],
+            "display_name": "Messenger",
+            "implemented": [
+              "text"
+            ],
+            "implemented_but_undeclared": [],
+            "integration": "ready",
+            "media_transport": "local_upload",
+            "media_transport_error_code": null,
+            "media_transport_requirement": "",
+            "note": "messaging destination: DMs only, never a publishing target. Its upload() is a text-DM shim (the abstract upload contract reused to deliver a message), not a video publish.",
+            "platform": "messenger",
+            "publishing": false,
+            "role": "messaging",
+            "video_envelope": null
+          },
+          "rumble": {
+            "accepts_local_media": true,
+            "content": [
+              {
+                "content_type": "video",
+                "declared": true,
+                "implemented": true,
+                "note": "long-form only (Rumble is a video platform, not a Shorts surface). Two paths: the partner upload API when an API key is configured, and a MANUAL HANDOFF otherwise \u2014 the rendition and a caption file are written to a directory you choose, and the adapter reports the handoff instead of pretending it uploaded.",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "image",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "carousel",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "text",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              }
+            ],
+            "declared": [
+              "video"
+            ],
+            "declared_but_unimplemented": [],
+            "declared_labels": [
+              "video"
+            ],
+            "display_name": "Rumble",
+            "implemented": [
+              "video"
+            ],
+            "implemented_but_undeclared": [],
+            "integration": "integration_uncertain",
+            "media_transport": "local_upload",
+            "media_transport_error_code": null,
+            "media_transport_requirement": "",
+            "note": "integration-uncertain: Rumble's upload API is partner-gated with no self-serve developer console comparable to Meta/Google. xPST declares the capability and both paths, but does not advertise Rumble as ready until one live upload succeeds.",
+            "platform": "rumble",
+            "publishing": true,
+            "role": "video_destination",
+            "video_envelope": {
+              "aspect_max": null,
+              "aspect_min": null,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "display_name": "Rumble",
+              "long_form": true,
+              "max_bytes": null,
+              "max_duration_seconds": null,
+              "modes": [
+                "long"
+              ],
+              "note": "Integration-uncertain: no self-serve developer console, so the manual handoff is the reliable path.",
+              "platform": "rumble",
+              "shorts_max_aspect_ratio": null,
+              "shorts_max_duration_seconds": null,
+              "source": "Rumble video upload API is partner-gated; limits are reported by the service per plan",
+              "video_codec": "h264"
+            }
+          },
+          "threads": {
+            "accepts_local_media": false,
+            "content": [
+              {
+                "content_type": "video",
+                "declared": true,
+                "implemented": true,
+                "note": "published only from media that is already hosted at a public URL: the Threads API retrieves the URL itself and has no binary upload, so a local file is refused before any network call (see media_transport). xPST cannot deliver a media URL to any uploader yet either, so no media publishing path reaches Threads today",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "image",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "carousel",
+                "declared": false,
+                "implemented": false,
+                "note": "no carousel path: a carousel request is refused by name, and nothing is stitched into a video",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "text",
+                "declared": true,
+                "implemented": true,
+                "note": "one text post (500 characters max) via the TEXT container, no media needed",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              }
+            ],
+            "declared": [
+              "text",
+              "video"
+            ],
+            "declared_but_unimplemented": [],
+            "declared_labels": [
+              "video",
+              "text"
+            ],
+            "display_name": "Threads",
+            "implemented": [
+              "text",
+              "video"
+            ],
+            "implemented_but_undeclared": [],
+            "integration": "ready",
+            "media_transport": "public_url",
+            "media_transport_error_code": "THREADS_NEEDS_URL",
+            "media_transport_requirement": "Threads has no upload endpoint: its API fetches your media from a public server, and xPST is a local tool with no server to host a file for it. A local file cannot be published to Threads, and xPST cannot deliver a media URL either yet \u2014 post this content from the Threads app instead.",
+            "note": "Threads is a URL-fetch destination for media: it publishes what it can download from a public URL, never a local file \u2014 and xPST cannot hand it a URL yet, so media publishing is refused today. Text posts need no URL and are published verbatim through a media_type TEXT container.",
+            "platform": "threads",
+            "publishing": true,
+            "role": "video_destination",
+            "video_envelope": {
+              "aspect_max": null,
+              "aspect_min": null,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "display_name": "Threads",
+              "long_form": false,
+              "max_bytes": 1073741824,
+              "max_duration_seconds": 300,
+              "modes": [
+                "shorts"
+              ],
+              "note": "",
+              "platform": "threads",
+              "shorts_max_aspect_ratio": null,
+              "shorts_max_duration_seconds": null,
+              "source": "Threads API: video up to 5 minutes (the container fetches it from a public URL)",
+              "video_codec": "h264"
+            }
+          },
+          "tiktok": {
+            "accepts_local_media": true,
+            "content": [
+              {
+                "content_type": "video",
+                "declared": true,
+                "implemented": true,
+                "note": "",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "image",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "carousel",
+                "declared": false,
+                "implemented": false,
+                "note": "no carousel path: a carousel request is refused by name, and nothing is stitched into a video",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "text",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              }
+            ],
+            "declared": [
+              "video"
+            ],
+            "declared_but_unimplemented": [],
+            "declared_labels": [
+              "video"
+            ],
+            "display_name": "TikTok",
+            "implemented": [
+              "video"
+            ],
+            "implemented_but_undeclared": [],
+            "integration": "ready",
+            "media_transport": "local_upload",
+            "media_transport_error_code": null,
+            "media_transport_requirement": "",
+            "note": "video path exists but publishing is blocked by TikTok app review; the connection is source-only",
+            "platform": "tiktok",
+            "publishing": true,
+            "role": "video_destination",
+            "video_envelope": {
+              "aspect_max": null,
+              "aspect_min": null,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "display_name": "TikTok",
+              "long_form": false,
+              "max_bytes": 1073741824,
+              "max_duration_seconds": 600,
+              "modes": [
+                "shorts"
+              ],
+              "note": "",
+              "platform": "tiktok",
+              "shorts_max_aspect_ratio": null,
+              "shorts_max_duration_seconds": null,
+              "source": "TikTok Content Posting API: video up to 10 minutes, 1 GB",
+              "video_codec": "h264"
+            }
+          },
+          "x": {
+            "accepts_local_media": true,
+            "content": [
+              {
+                "content_type": "video",
+                "declared": true,
+                "implemented": true,
+                "note": "",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "image",
+                "declared": true,
+                "implemented": true,
+                "note": "single image post (upload_image): JPG/PNG/WEBP, \u2264 5 MB, aspect 1:3\u20133:1",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "carousel",
+                "declared": true,
+                "implemented": true,
+                "note": "published as a tweet thread, one media item per tweet (upload_carousel), in the given order; image items are checked against X's image contract before upload",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "text",
+                "declared": true,
+                "implemented": true,
+                "note": "one text post (280 characters max); no media, published via post_text",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "note": "not declared: a text-only thread has no sender. Multi-media posting works as a tweet thread and is reported as carousel.",
+                "status": "undeclared",
+                "supported": false
+              }
+            ],
+            "declared": [
+              "carousel",
+              "image",
+              "text",
+              "video"
+            ],
+            "declared_but_unimplemented": [],
+            "declared_labels": [
+              "video",
+              "carousel",
+              "text",
+              "image"
+            ],
+            "display_name": "X",
+            "implemented": [
+              "carousel",
+              "image",
+              "text",
+              "video"
+            ],
+            "implemented_but_undeclared": [],
+            "integration": "ready",
+            "media_transport": "local_upload",
+            "media_transport_error_code": null,
+            "media_transport_requirement": "",
+            "note": "",
+            "platform": "x",
+            "publishing": true,
+            "role": "video_destination",
+            "video_envelope": {
+              "aspect_max": 2.39,
+              "aspect_min": 0.41841004184100417,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "display_name": "X",
+              "long_form": false,
+              "max_bytes": 536870912,
+              "max_duration_seconds": 140,
+              "modes": [
+                "shorts"
+              ],
+              "note": "No long-form path until the account's real cap is raised; over 140 s is refused, never truncated.",
+              "platform": "x",
+              "shorts_max_aspect_ratio": null,
+              "shorts_max_duration_seconds": null,
+              "source": "X media upload limits: 140 s of video for standard accounts, 512 MB, 1:2.39-2.39:1; Premium accounts allow longer videos (raise it with x.max_video_duration_seconds)",
+              "video_codec": "h264"
+            }
+          },
+          "youtube": {
+            "accepts_local_media": true,
+            "content": [
+              {
+                "content_type": "video",
+                "declared": true,
+                "implemented": true,
+                "note": "two real modes: short-form (Shorts, \u2264 60 s, square-or-vertical, '#Shorts' tag, /shorts/ URL) and long-form (resumable videos.insert, watch URL, up to 12 h / 256 GB). The mode is explicit (--shorts/--long) or derived from the media probe; a video that fits neither is refused with both ceilings in the message.",
+                "status": "supported",
+                "supported": true
+              },
+              {
+                "content_type": "image",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "carousel",
+                "declared": false,
+                "implemented": false,
+                "note": "no carousel path: a carousel request is refused by name, and nothing is stitched into a video",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "text",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "note": "",
+                "status": "undeclared",
+                "supported": false
+              }
+            ],
+            "declared": [
+              "video"
+            ],
+            "declared_but_unimplemented": [],
+            "declared_labels": [
+              "video"
+            ],
+            "display_name": "YouTube",
+            "implemented": [
+              "video"
+            ],
+            "implemented_but_undeclared": [],
+            "integration": "ready",
+            "media_transport": "local_upload",
+            "media_transport_error_code": null,
+            "media_transport_requirement": "",
+            "note": "",
+            "platform": "youtube",
+            "publishing": true,
+            "role": "video_destination",
+            "video_envelope": {
+              "aspect_max": null,
+              "aspect_min": null,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "display_name": "YouTube",
+              "long_form": true,
+              "max_bytes": 274877906944,
+              "max_duration_seconds": 43200,
+              "modes": [
+                "shorts",
+                "long"
+              ],
+              "note": "Both modes use the same resumable videos.insert call; the mode decides the title tag, the returned URL, and which ceiling is enforced.",
+              "platform": "youtube",
+              "shorts_max_aspect_ratio": 1.0,
+              "shorts_max_duration_seconds": 60,
+              "source": "YouTube Data API v3 videos.insert (resumable upload); YouTube upload limits: 12 hours / 256 GB; Shorts: \u2264 60 s, square or taller than wide",
+              "video_codec": "h264"
+            }
+          }
+        },
+        "publish_destinations": [
+          "youtube",
+          "x",
+          "instagram",
+          "tiktok",
+          "threads",
+          "facebook",
+          "rumble",
+          "bluesky"
+        ],
+        "publish_routes": {
+          "carousel": "carousel",
+          "image": "image",
+          "text": "text",
+          "thread": "unimplemented",
+          "video": "video"
+        }
+      },
+      "status": 200
+    },
+    "api.devices": {
+      "body": {
+        "devices": [],
+        "ok": true
+      },
+      "status": 200
+    },
+    "api.health_status": {
+      "body": {
+        "auth": {},
+        "auth_age_seconds": "<volatile>",
+        "auth_cached": false,
+        "auth_checked_at": "<volatile>",
+        "auth_checked_at_iso": "<volatile>",
+        "auth_error": "XPST config file not found: <config-dir>/config.yaml (expected /home/<user>/.hermes/profiles/swe/cache/scratch/schema-demo/config/config.yaml or ",
+        "auth_stale": false,
+        "badges": {},
+        "can_create_post": false,
+        "canonical": {
+          "platforms": {},
+          "providers": {},
+          "roles": []
+        },
+        "credential_health": {
+          "attention_count": 0,
+          "disabled_but_dead": [],
+          "entries": [],
+          "generated_at": "<volatile>",
+          "generated_at_iso": "<volatile>",
+          "needs_attention": [],
+          "not_applicable": [],
+          "ok": [],
+          "ok_count": 0,
+          "reauth_horizon_days": 7,
+          "summary_line": "no credential needs attention",
+          "unverifiable": []
+        },
+        "engine_version": "1.3.0",
+        "next_action": {
+          "kind": "review",
+          "label": "Review readiness",
+          "role": "video_destination"
+        },
+        "platforms": {},
+        "providers": {},
+        "readiness": {
+          "blockers": [],
+          "blocking": [
+            {
+              "action": "Run xpst setup or create the missing folders.",
+              "details": {
+                "config_dir": "<volatile>",
+                "missing": [
+                  "downloads",
+                  "logs",
+                  "backups"
+                ]
+              },
+              "id": "directories",
+              "label": "Local folders",
+              "message": "Some local folders are missing.",
+              "ok": false,
+              "severity": "error"
+            },
+            {
+              "action": "Add a TikTok username or choose an existing local source folder.",
+              "details": {
+                "local_path": "",
+                "local_path_exists": false,
+                "ready_sources": [],
+                "tiktok_username": false
+              },
+              "id": "source",
+              "label": "Content source",
+              "message": "No usable content source is configured.",
+              "ok": false,
+              "severity": "error"
+            },
+            {
+              "action": "Enable and connect at least one destination platform.",
+              "details": {
+                "destinations": [
+                  "youtube",
+                  "x",
+                  "instagram",
+                  "bluesky",
+                  "tiktok",
+                  "threads",
+                  "facebook",
+                  "rumble"
+                ],
+                "ready_count": 0
+              },
+              "id": "destinations",
+              "label": "Destinations",
+              "message": "No posting destinations are ready.",
+              "ok": false,
+              "severity": "error"
+            }
+          ],
+          "checks": [
+            {
+              "action": "",
+              "details": {
+                "required": ">=3.10",
+                "version": "3.13.16"
+              },
+              "id": "python",
+              "label": "Python",
+              "message": "Python 3.13.16",
+              "ok": true,
+              "severity": "error"
+            },
+            {
+              "action": "Run xpst setup or create the missing folders.",
+              "details": {
+                "config_dir": "<volatile>",
+                "missing": [
+                  "downloads",
+                  "logs",
+                  "backups"
+                ]
+              },
+              "id": "directories",
+              "label": "Local folders",
+              "message": "Some local folders are missing.",
+              "ok": false,
+              "severity": "error"
+            },
+            {
+              "action": "",
+              "details": {
+                "binary": "ffmpeg",
+                "path": "/home/<user>/bin/ffmpeg"
+              },
+              "id": "ffmpeg",
+              "label": "FFmpeg",
+              "message": "FFmpeg is available.",
+              "ok": true,
+              "severity": "error"
+            },
+            {
+              "action": "",
+              "details": {
+                "version": "2026.10.26"
+              },
+              "id": "yt_dlp",
+              "label": "yt-dlp",
+              "message": "yt-dlp 2026.10.26 is available.",
+              "ok": true,
+              "severity": "error"
+            },
+            {
+              "action": "Add a TikTok username or choose an existing local source folder.",
+              "details": {
+                "local_path": "",
+                "local_path_exists": false,
+                "ready_sources": [],
+                "tiktok_username": false
+              },
+              "id": "source",
+              "label": "Content source",
+              "message": "No usable content source is configured.",
+              "ok": false,
+              "severity": "error"
+            },
+            {
+              "action": "Enable and connect at least one destination platform.",
+              "details": {
+                "destinations": [
+                  "youtube",
+                  "x",
+                  "instagram",
+                  "bluesky",
+                  "tiktok",
+                  "threads",
+                  "facebook",
+                  "rumble"
+                ],
+                "ready_count": 0
+              },
+              "id": "destinations",
+              "label": "Destinations",
+              "message": "No posting destinations are ready.",
+              "ok": false,
+              "severity": "error"
+            },
+            {
+              "action": "Connect Youtube or disable youtube.",
+              "details": {
+                "can_post": false,
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "posting_state": "unconfigured",
+                "role": "video_destination",
+                "session_valid": null,
+                "source_only": false,
+                "state": "unconfigured"
+              },
+              "id": "youtube_connection",
+              "label": "Youtube connection",
+              "message": "Youtube is enabled but not configured.",
+              "ok": false,
+              "severity": "warning"
+            },
+            {
+              "action": "Connect X or disable x.",
+              "details": {
+                "can_post": false,
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "posting_state": "unconfigured",
+                "role": "video_destination",
+                "session_valid": null,
+                "source_only": false,
+                "state": "unconfigured"
+              },
+              "id": "x_connection",
+              "label": "X connection",
+              "message": "X is enabled but not configured.",
+              "ok": false,
+              "severity": "warning"
+            },
+            {
+              "action": "Connect Instagram or disable instagram.",
+              "details": {
+                "can_post": false,
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "posting_state": "unconfigured",
+                "role": "video_destination",
+                "session_valid": null,
+                "source_only": false,
+                "state": "unconfigured"
+              },
+              "id": "instagram_connection",
+              "label": "Instagram connection",
+              "message": "Instagram is enabled but not configured.",
+              "ok": false,
+              "severity": "warning"
+            },
+            {
+              "action": "",
+              "details": {
+                "enabled": false,
+                "error": null,
+                "live_checked": null,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "disabled"
+              },
+              "id": "bluesky_connection",
+              "label": "Bluesky connection",
+              "message": "Bluesky is disabled.",
+              "ok": true,
+              "severity": "info"
+            },
+            {
+              "action": "Posting to Tiktok requires an approved provider upload app. Keep using it as a source, or connect another destination.",
+              "details": {
+                "can_post": false,
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "posting_state": "unconfigured",
+                "role": "video_destination",
+                "session_valid": null,
+                "source_only": true,
+                "state": "unconfigured"
+              },
+              "id": "tiktok_connection",
+              "label": "Tiktok connection",
+              "message": "TikTok is a source only: xPST downloads from it, and it cannot be used as a posting destination.",
+              "ok": false,
+              "severity": "info"
+            },
+            {
+              "action": "Connect Threads or disable threads.",
+              "details": {
+                "can_post": false,
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "posting_state": "unconfigured",
+                "role": "video_destination",
+                "session_valid": null,
+                "source_only": false,
+                "state": "unconfigured"
+              },
+              "id": "threads_connection",
+              "label": "Threads connection",
+              "message": "Threads is enabled but not configured.",
+              "ok": false,
+              "severity": "warning"
+            },
+            {
+              "action": "",
+              "details": {
+                "enabled": false,
+                "error": null,
+                "live_checked": null,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "disabled"
+              },
+              "id": "facebook_connection",
+              "label": "Facebook connection",
+              "message": "Facebook is disabled.",
+              "ok": true,
+              "severity": "info"
+            },
+            {
+              "action": "",
+              "details": {
+                "enabled": false,
+                "error": null,
+                "live_checked": null,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "disabled"
+              },
+              "id": "rumble_connection",
+              "label": "Rumble connection",
+              "message": "Rumble is disabled.",
+              "ok": true,
+              "severity": "info"
+            },
+            {
+              "action": "Move to X API v2 with `xpst connect x` \u2014 it needs X API v2 access (free tier: 17 posts/day). Staying is allowed; the risk keeps being reported.",
+              "details": {
+                "acknowledged": false,
+                "acknowledgement": null,
+                "auth_mode": "cookies",
+                "ban_risk": "unofficial_web_client",
+                "docs_url": "docs/setup-x.md",
+                "official_mode": "api_v2",
+                "platform": "x",
+                "role": "video_destination",
+                "severity": "advisory",
+                "switch_command": "xpst connect x"
+              },
+              "id": "x_ban_risk",
+              "label": "X auth path",
+              "message": "X uses its unofficial auth path (auth_mode 'cookies', ban_risk: unofficial_web_client; not acknowledged).",
+              "ok": true,
+              "severity": "info"
+            },
+            {
+              "action": "",
+              "details": {
+                "helpers": [
+                  {
+                    "action": "Run xpst update --components --check to check latest versions.",
+                    "component_type": "helper",
+                    "current_version": "2026.10.26",
+                    "error": null,
+                    "installed": true,
+                    "latest_version": null,
+                    "name": "yt-dlp",
+                    "required": true,
+                    "status": "unknown",
+                    "updatable": false,
+                    "update_command": "xpst update --components --check",
+                    "update_mode": "pip"
+                  },
+                  {
+                    "action": "FFmpeg is installed; update it with your operating system package manager when needed.",
+                    "component_type": "helper",
+                    "current_version": "n9.0.1-11-ge47273f4d9-20260831",
+                    "error": null,
+                    "installed": true,
+                    "latest_version": null,
+                    "name": "FFmpeg",
+                    "required": true,
+                    "status": "manual",
+                    "updatable": false,
+                    "update_command": null,
+                    "update_mode": "external"
+                  }
+                ],
+                "missing": []
+              },
+              "id": "helper_tools",
+              "label": "Helper tools",
+              "message": "Required helper tools are installed.",
+              "ok": true,
+              "severity": "error"
+            }
+          ],
+          "pending": true,
+          "ready": false,
+          "roles": [],
+          "summary": "Live account checks are still running. Nothing is claimed until they answer.",
+          "verdict": {
+            "detail": "Live account checks are still running. Nothing is claimed until they answer.",
+            "label": "Checking\u2026",
+            "status": "unknown"
+          },
+          "warnings": [
+            {
+              "action": "Connect Youtube or disable youtube.",
+              "details": {
+                "can_post": false,
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "posting_state": "unconfigured",
+                "role": "video_destination",
+                "session_valid": null,
+                "source_only": false,
+                "state": "unconfigured"
+              },
+              "id": "youtube_connection",
+              "label": "Youtube connection",
+              "message": "Youtube is enabled but not configured.",
+              "ok": false,
+              "severity": "warning"
+            },
+            {
+              "action": "Connect X or disable x.",
+              "details": {
+                "can_post": false,
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "posting_state": "unconfigured",
+                "role": "video_destination",
+                "session_valid": null,
+                "source_only": false,
+                "state": "unconfigured"
+              },
+              "id": "x_connection",
+              "label": "X connection",
+              "message": "X is enabled but not configured.",
+              "ok": false,
+              "severity": "warning"
+            },
+            {
+              "action": "Connect Instagram or disable instagram.",
+              "details": {
+                "can_post": false,
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "posting_state": "unconfigured",
+                "role": "video_destination",
+                "session_valid": null,
+                "source_only": false,
+                "state": "unconfigured"
+              },
+              "id": "instagram_connection",
+              "label": "Instagram connection",
+              "message": "Instagram is enabled but not configured.",
+              "ok": false,
+              "severity": "warning"
+            },
+            {
+              "action": "Connect Threads or disable threads.",
+              "details": {
+                "can_post": false,
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "posting_state": "unconfigured",
+                "role": "video_destination",
+                "session_valid": null,
+                "source_only": false,
+                "state": "unconfigured"
+              },
+              "id": "threads_connection",
+              "label": "Threads connection",
+              "message": "Threads is enabled but not configured.",
+              "ok": false,
+              "severity": "warning"
+            }
+          ]
+        },
+        "readiness_pending": false,
+        "status": "unknown",
+        "total_processed": 0
+      },
+      "status": 200
+    },
+    "api.pair.missing_code": {
+      "body": {
+        "code": "PAIR_CODE_MISSING",
+        "error": {
+          "code": "PAIR_CODE_MISSING",
+          "message": "Send the pairing code: {\"code\": \"ABCD-2345\"}."
+        },
+        "message": "Send the pairing code: {\"code\": \"ABCD-2345\"}.",
+        "ok": false
+      },
+      "status": 400
+    },
+    "api.plans.create_error": {
+      "body": {
+        "blocked": true,
+        "code": "PLAN_NO_MEDIA",
+        "error": {
+          "code": "PLAN_NO_MEDIA",
+          "message": "This plan has no media. Upload a file first (POST /api/media) and pass its media id."
+        },
+        "message": "This plan has no media. Upload a file first (POST /api/media) and pass its media id.",
+        "ok": false
+      },
+      "status": 400
+    },
+    "api.plans.get_error": {
+      "body": {
+        "blocked": true,
+        "code": "PLAN_UNKNOWN",
+        "error": {
+          "code": "PLAN_UNKNOWN",
+          "message": "No plan with that id. It may have been created on another engine or removed."
+        },
+        "message": "No plan with that id. It may have been created on another engine or removed.",
+        "ok": false
+      },
+      "status": 404
+    },
+    "api.preflight": {
+      "body": {
+        "blockers": [
+          "YouTube OAuth token file is missing.",
+          "At least one media path is required.",
+          "youtube does not support text posts. Supported content types for youtube: video."
+        ],
+        "caption": {
+          "length": 2,
+          "overrides": {},
+          "per_platform": {
+            "youtube": "hi"
+          }
+        },
+        "content": {
+          "blockers": [
+            "youtube does not support text posts. Supported content types for youtube: video."
+          ],
+          "content_issues": [
+            {
+              "code": "content_type.unsupported",
+              "message": "youtube does not support text posts. Supported content types for youtube: video.",
+              "platform": "youtube",
+              "severity": "error"
+            }
+          ],
+          "content_type": null,
+          "effective_content_type": "text",
+          "ok": false,
+          "overrides": {},
+          "route": "text",
+          "warnings": []
+        },
+        "content_type": "text",
+        "effective_content_type": "text",
+        "error": {
+          "code": "AUTH_NOT_READY",
+          "message": "YouTube OAuth token file is missing."
+        },
+        "media": {
+          "exists": false,
+          "is_file": false,
+          "path": "",
+          "paths": []
+        },
+        "network_calls": false,
+        "ok": false,
+        "plan": {
+          "error": {
+            "code": "AUTH_NOT_READY",
+            "message": "YouTube OAuth token file is missing."
+          },
+          "hard_blockers": [
+            {
+              "code": "AUTH_NOT_READY",
+              "media_path": null,
+              "message": "YouTube OAuth token file is missing.",
+              "severity": "blocker"
+            },
+            {
+              "code": "MEDIA_REQUIRED",
+              "media_path": null,
+              "message": "At least one media path is required.",
+              "severity": "blocker"
+            }
+          ],
+          "ok": false,
+          "platforms": {
+            "youtube": {
+              "auth_ready": false,
+              "caption": "hi",
+              "constraints": {
+                "aspect": {
+                  "constraint": "orientation-preserving; no fixed aspect ratio",
+                  "max_long_edge": 1920,
+                  "observed_ratio": null
+                },
+                "caption": {
+                  "max_characters": null,
+                  "observed_characters": 2
+                },
+                "containers": [
+                  ".mp4",
+                  ".mov"
+                ],
+                "duration": {
+                  "max_seconds": 43200,
+                  "observed_seconds": null
+                },
+                "size": {
+                  "max_bytes": 274877906944,
+                  "observed_bytes": null
+                }
+              },
+              "effective_caption": "hi",
+              "enabled": true,
+              "hard_blockers": [
+                {
+                  "code": "AUTH_NOT_READY",
+                  "media_path": null,
+                  "message": "YouTube OAuth token file is missing.",
+                  "severity": "blocker"
+                },
+                {
+                  "code": "MEDIA_REQUIRED",
+                  "media_path": null,
+                  "message": "At least one media path is required.",
+                  "severity": "blocker"
+                }
+              ],
+              "media": [],
+              "ok": false,
+              "platform": "youtube",
+              "quota_ready": true,
+              "readiness": {
+                "auth": {
+                  "auth_mode": "oauth",
+                  "detail": "YouTube OAuth token file is missing.",
+                  "ready": false,
+                  "status": "missing"
+                },
+                "enabled": true,
+                "quota": {
+                  "detail": "Quota available.",
+                  "ready": true,
+                  "remaining": {
+                    "daily": 5,
+                    "hourly": null
+                  }
+                },
+                "ready": false
+              },
+              "ready": false,
+              "transform": null,
+              "transforms": [],
+              "warnings": []
+            }
+          },
+          "ready": false,
+          "request_blockers": [],
+          "warnings": []
+        },
+        "platforms": [
+          "youtube"
+        ],
+        "ready": false,
+        "route": "text",
+        "route_plan": {
+          "content_type": "text",
+          "destinations": [
+            {
+              "blockers": [],
+              "caption": "hi",
+              "caption_length": 2,
+              "connect_command": null,
+              "connected": true,
+              "constraints": {
+                "aspect": {
+                  "constraint": "orientation-preserving; no fixed aspect ratio",
+                  "max_long_edge": 1920,
+                  "observed_ratio": null
+                },
+                "caption": {
+                  "max_characters": null,
+                  "observed_characters": 2
+                },
+                "containers": [
+                  ".mp4",
+                  ".mov"
+                ],
+                "duration": {
+                  "max_seconds": 43200,
+                  "observed_seconds": null
+                },
+                "size": {
+                  "max_bytes": 274877906944,
+                  "observed_bytes": null
+                }
+              },
+              "content_type": "text",
+              "envelope": {
+                "caption": {
+                  "max_characters": null
+                },
+                "content_types": {
+                  "declared": [
+                    "video"
+                  ],
+                  "implemented": [
+                    "video"
+                  ]
+                },
+                "display_name": "YouTube",
+                "image": null,
+                "media_transport": "local_upload",
+                "media_transport_requirement": null,
+                "platform": "youtube",
+                "publishing": true,
+                "video": {
+                  "audio_codec": "aac",
+                  "containers": [
+                    ".mp4",
+                    ".mov"
+                  ],
+                  "fps_cap": 60,
+                  "max_bytes": 274877906944,
+                  "max_duration_seconds": 43200,
+                  "max_long_edge": 1920,
+                  "pix_fmt": "yuv420p",
+                  "video_codec": "h264"
+                }
+              },
+              "is_failure": false,
+              "platform": "youtube",
+              "reason": "youtube cannot publish text posts (supports: video). Envelope \u2014 youtube: video \u226443200s, MP4/MOV, h264, \u2264256 GB.",
+              "state": "unsupported_format",
+              "transform": null,
+              "transforms": [],
+              "warnings": [
+                {
+                  "code": "AUTH_NOT_READY",
+                  "message": "YouTube OAuth token file is missing."
+                }
+              ],
+              "will_post": false
+            }
+          ],
+          "error": null,
+          "errors": [],
+          "failed": [],
+          "network_calls": false,
+          "ok": false,
+          "posting_destinations": [],
+          "ready": false,
+          "request_blockers": [],
+          "skipped_unconnected": [],
+          "source": "explicit",
+          "unsupported_format": [
+            "youtube"
+          ]
+        },
+        "warnings": []
+      },
+      "status": 200
+    },
+    "api.providers": {
+      "body": {
+        "by_name": {
+          "bluesky": {
+            "auth_mode": "app_password",
+            "authenticated": null,
+            "byo_app": null,
+            "can_post": false,
+            "capabilities": [
+              "upload",
+              "delete",
+              "carousel",
+              "health",
+              "official_api",
+              "rate_limits"
+            ],
+            "details": {},
+            "display_name": "Bluesky",
+            "docs_url": "https://docs.bsky.app/",
+            "enabled": false,
+            "error": null,
+            "is_official_api": true,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "video_destination",
+              "destination"
+            ],
+            "live_checked": null,
+            "name": "bluesky",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": "video_destination",
+            "posting_state": "disabled",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "video_destination"
+            ],
+            "role_states": {
+              "video_destination": "disabled"
+            },
+            "role_status": {
+              "video_destination": {
+                "auth_mode": "app_password",
+                "authenticated": null,
+                "details": {},
+                "enabled": false,
+                "error": null,
+                "live_checked": null,
+                "platform": "bluesky",
+                "ready": false,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "disabled"
+              }
+            },
+            "roles": [
+              "video_destination"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "disabled",
+            "state_value": "disabled"
+          },
+          "facebook": {
+            "auth_mode": "oauth",
+            "authenticated": null,
+            "byo_app": {
+              "app_id_masked": "",
+              "configurable": false,
+              "configured": false,
+              "create_url": "https://developers.facebook.com/apps",
+              "display_name": "Facebook Page",
+              "docs_url": "https://developers.facebook.com/docs/facebook-login",
+              "enables": "Page-scoped publishing through the Graph API. Facebook keeps its own ``xpst auth facebook`` flow; this status line shows its stored app.",
+              "env_vars": [
+                "XPST_FACEBOOK_APP_ID",
+                "XPST_FACEBOOK_APP_SECRET"
+              ],
+              "half_configured": false,
+              "id_label": "Meta App ID",
+              "platform": "facebook",
+              "redirect_uri": "https://localhost/",
+              "scopes": [
+                "pages_show_list",
+                "pages_read_engagement",
+                "pages_manage_posts"
+              ],
+              "secret_label": "Meta App Secret",
+              "sign_in_available": false,
+              "source": ""
+            },
+            "can_post": false,
+            "capabilities": [
+              "upload",
+              "delete",
+              "health",
+              "official_api",
+              "oauth",
+              "rate_limits"
+            ],
+            "details": {},
+            "display_name": "Facebook Page",
+            "docs_url": "https://developers.facebook.com/docs/pages-api",
+            "enabled": false,
+            "error": null,
+            "is_official_api": true,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "video_destination"
+            ],
+            "live_checked": null,
+            "name": "facebook",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": "video_destination",
+            "posting_state": "disabled",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "video_destination"
+            ],
+            "role_states": {
+              "video_destination": "disabled"
+            },
+            "role_status": {
+              "video_destination": {
+                "auth_mode": "oauth",
+                "authenticated": null,
+                "details": {},
+                "enabled": false,
+                "error": null,
+                "live_checked": null,
+                "platform": "facebook",
+                "ready": false,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "disabled"
+              }
+            },
+            "roles": [
+              "video_destination"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "disabled",
+            "state_value": "disabled"
+          },
+          "instagram": {
+            "account_type": "",
+            "account_type_source": "",
+            "auth_mode": "graph_api",
+            "authenticated": null,
+            "byo_app": {
+              "app_id_masked": "",
+              "configurable": true,
+              "configured": false,
+              "create_url": "https://developers.facebook.com/apps",
+              "display_name": "Instagram Reels",
+              "docs_url": "https://developers.facebook.com/docs/graph-api/get-started/getting-access-tokens/about-user-access-tokens#standard-access",
+              "enables": "Publishing Reels to your own account through the official Instagram Platform API. As the app owner you stay in Meta's Standard Access: no App Review and no Business Verification.",
+              "env_vars": [
+                "XPST_INSTAGRAM_APP_ID",
+                "XPST_INSTAGRAM_APP_SECRET"
+              ],
+              "half_configured": false,
+              "id_label": "Meta App ID",
+              "platform": "instagram",
+              "redirect_uri": "http://localhost:8888/callback",
+              "scopes": [
+                "instagram_basic",
+                "instagram_content_publish",
+                "pages_show_list",
+                "pages_read_engagement"
+              ],
+              "secret_label": "Meta App Secret",
+              "sign_in_available": false,
+              "source": ""
+            },
+            "can_post": false,
+            "capabilities": [
+              "upload",
+              "delete",
+              "carousel",
+              "health",
+              "cookie_auth",
+              "rate_limits"
+            ],
+            "details": {},
+            "display_name": "Instagram Reels",
+            "docs_url": "https://developers.facebook.com/docs/instagram-api",
+            "enabled": true,
+            "error": null,
+            "is_official_api": false,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "video_destination",
+              "destination"
+            ],
+            "live_checked": null,
+            "name": "instagram",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": "video_destination",
+            "posting_state": "unconfigured",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "source",
+              "video_destination",
+              "analytics"
+            ],
+            "role_states": {
+              "analytics": "unconfigured",
+              "source": "unconfigured",
+              "video_destination": "unconfigured"
+            },
+            "role_status": {
+              "analytics": {
+                "auth_mode": "graph_api",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "instagram",
+                "ready": false,
+                "role": "analytics",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "source": {
+                "auth_mode": "graph_api",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "instagram",
+                "ready": false,
+                "role": "source",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "video_destination": {
+                "auth_mode": "graph_api",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "instagram",
+                "ready": false,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "unconfigured"
+              }
+            },
+            "roles": [
+              "source",
+              "video_destination",
+              "analytics"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "unconfigured",
+            "state_value": "unconfigured"
+          },
+          "local": {
+            "auth_mode": "local",
+            "authenticated": null,
+            "byo_app": null,
+            "can_post": false,
+            "capabilities": [
+              "list",
+              "download",
+              "carousel",
+              "health",
+              "local_only"
+            ],
+            "details": {},
+            "display_name": "Local files",
+            "docs_url": null,
+            "enabled": true,
+            "error": null,
+            "is_official_api": false,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "source"
+            ],
+            "live_checked": null,
+            "name": "local",
+            "posting_destination": false,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": null,
+            "posting_state": null,
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "source"
+            ],
+            "role_states": {
+              "source": "unconfigured"
+            },
+            "role_status": {
+              "source": {
+                "auth_mode": "local",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "local",
+                "ready": false,
+                "role": "source",
+                "session_valid": null,
+                "state": "unconfigured"
+              }
+            },
+            "roles": [
+              "source"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "unconfigured",
+            "state_value": "unconfigured"
+          },
+          "messenger": {
+            "auth_mode": "oauth",
+            "authenticated": null,
+            "byo_app": {
+              "app_id_masked": "",
+              "configurable": false,
+              "configured": false,
+              "create_url": "https://developers.facebook.com/apps",
+              "display_name": "Messenger",
+              "docs_url": "https://developers.facebook.com/docs/messenger-platform/get-started",
+              "enables": "Messenger auto-reply and DM features on your Page. Messenger keeps its own connect flow; this status line shows the same Meta app.",
+              "env_vars": [
+                "XPST_MESSENGER_APP_ID",
+                "XPST_MESSENGER_APP_SECRET"
+              ],
+              "half_configured": false,
+              "id_label": "Meta App ID",
+              "platform": "messenger",
+              "redirect_uri": "",
+              "scopes": [],
+              "secret_label": "Meta App Secret",
+              "sign_in_available": false,
+              "source": ""
+            },
+            "can_post": false,
+            "capabilities": [
+              "health",
+              "official_api",
+              "rate_limits"
+            ],
+            "details": {},
+            "display_name": "Messenger",
+            "docs_url": "https://developers.facebook.com/docs/messenger-platform",
+            "enabled": false,
+            "error": null,
+            "is_official_api": true,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "messaging",
+              "destination"
+            ],
+            "live_checked": null,
+            "name": "messenger",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": "messaging",
+            "posting_state": "disabled",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "messaging"
+            ],
+            "role_states": {
+              "messaging": "disabled"
+            },
+            "role_status": {
+              "messaging": {
+                "auth_mode": "oauth",
+                "authenticated": null,
+                "details": {},
+                "enabled": false,
+                "error": null,
+                "live_checked": null,
+                "platform": "messenger",
+                "ready": false,
+                "role": "messaging",
+                "session_valid": null,
+                "state": "disabled"
+              }
+            },
+            "roles": [
+              "messaging"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "disabled",
+            "state_value": "disabled"
+          },
+          "rumble": {
+            "auth_mode": "api_key",
+            "authenticated": null,
+            "byo_app": null,
+            "can_post": false,
+            "capabilities": [
+              "upload",
+              "health"
+            ],
+            "details": {},
+            "display_name": "Rumble",
+            "docs_url": "https://rumble.com/",
+            "enabled": false,
+            "error": null,
+            "is_official_api": true,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "video_destination"
+            ],
+            "live_checked": null,
+            "name": "rumble",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": "video_destination",
+            "posting_state": "disabled",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "video_destination"
+            ],
+            "role_states": {
+              "video_destination": "disabled"
+            },
+            "role_status": {
+              "video_destination": {
+                "auth_mode": "api_key",
+                "authenticated": null,
+                "details": {},
+                "enabled": false,
+                "error": null,
+                "live_checked": null,
+                "platform": "rumble",
+                "ready": false,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "disabled"
+              }
+            },
+            "roles": [
+              "video_destination"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "disabled",
+            "state_value": "disabled"
+          },
+          "threads": {
+            "auth_mode": "oauth",
+            "authenticated": null,
+            "byo_app": {
+              "app_id_masked": "",
+              "configurable": true,
+              "configured": false,
+              "create_url": "https://developers.facebook.com/apps",
+              "display_name": "Threads",
+              "docs_url": "https://developers.facebook.com/docs/threads/get-started/getting-started#auth",
+              "enables": "Publishing posts to your own Threads account through the official Threads API. Same Meta app as Instagram; owner use is Standard Access: no App Review, no Business Verification.",
+              "env_vars": [
+                "XPST_THREADS_APP_ID",
+                "XPST_THREADS_APP_SECRET"
+              ],
+              "half_configured": false,
+              "id_label": "Meta App ID",
+              "platform": "threads",
+              "redirect_uri": "http://localhost:8888/callback",
+              "scopes": [
+                "threads_basic",
+                "threads_content_publish"
+              ],
+              "secret_label": "Meta App Secret",
+              "sign_in_available": false,
+              "source": ""
+            },
+            "can_post": false,
+            "capabilities": [
+              "upload",
+              "health",
+              "official_api",
+              "oauth",
+              "rate_limits"
+            ],
+            "details": {},
+            "display_name": "Threads",
+            "docs_url": "https://developers.facebook.com/docs/threads",
+            "enabled": true,
+            "error": null,
+            "is_official_api": true,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "video_destination",
+              "destination"
+            ],
+            "live_checked": null,
+            "name": "threads",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": "video_destination",
+            "posting_state": "unconfigured",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "video_destination",
+              "analytics"
+            ],
+            "role_states": {
+              "analytics": "unconfigured",
+              "video_destination": "unconfigured"
+            },
+            "role_status": {
+              "analytics": {
+                "auth_mode": "oauth",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "threads",
+                "ready": false,
+                "role": "analytics",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "video_destination": {
+                "auth_mode": "oauth",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "threads",
+                "ready": false,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "unconfigured"
+              }
+            },
+            "roles": [
+              "video_destination",
+              "analytics"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "unconfigured",
+            "state_value": "unconfigured"
+          },
+          "tiktok": {
+            "auth_mode": "source_only",
+            "authenticated": null,
+            "byo_app": {
+              "app_id_masked": "",
+              "configurable": true,
+              "configured": false,
+              "create_url": "https://developers.tiktok.com/manage/apps",
+              "display_name": "TikTok",
+              "docs_url": "https://developers.tiktok.com/doc/content-posting-api-get-started",
+              "enables": "Direct-posting to your own TikTok account through the official Content Posting API. Unaudited apps post SELF_ONLY (private) until TikTok audits the app \u2014 xPST never claims public reach it does not have.",
+              "env_vars": [
+                "XPST_TIKTOK_CLIENT_KEY",
+                "XPST_TIKTOK_CLIENT_SECRET"
+              ],
+              "half_configured": false,
+              "id_label": "Client Key",
+              "platform": "tiktok",
+              "redirect_uri": "http://localhost:8085/callback",
+              "scopes": [
+                "video.publish",
+                "video.upload",
+                "user.info.stats"
+              ],
+              "secret_label": "Client Secret",
+              "sign_in_available": false,
+              "source": ""
+            },
+            "can_post": false,
+            "capabilities": [
+              "upload",
+              "delete",
+              "health",
+              "official_api",
+              "oauth",
+              "rate_limits"
+            ],
+            "details": {},
+            "display_name": "TikTok",
+            "docs_url": "https://developers.tiktok.com/doc/content-posting-api",
+            "enabled": true,
+            "error": null,
+            "is_official_api": true,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "video_destination",
+              "destination"
+            ],
+            "live_checked": null,
+            "name": "tiktok",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": "TikTok is a source only: xPST downloads from it, and it cannot be used as a posting destination.",
+            "posting_role": "video_destination",
+            "posting_state": "unconfigured",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "source",
+              "video_destination",
+              "analytics"
+            ],
+            "role_states": {
+              "analytics": "unconfigured",
+              "source": "unconfigured",
+              "video_destination": "unconfigured"
+            },
+            "role_status": {
+              "analytics": {
+                "auth_mode": "source_only",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "tiktok",
+                "ready": false,
+                "role": "analytics",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "source": {
+                "auth_mode": "source_only",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "tiktok",
+                "ready": false,
+                "role": "source",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "video_destination": {
+                "auth_mode": "source_only",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "tiktok",
+                "ready": false,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "unconfigured"
+              }
+            },
+            "roles": [
+              "source",
+              "video_destination",
+              "analytics"
+            ],
+            "session_valid": null,
+            "source_only": true,
+            "state": "unconfigured",
+            "state_value": "unconfigured"
+          },
+          "x": {
+            "auth_mode": "cookies",
+            "authenticated": null,
+            "byo_app": null,
+            "can_post": false,
+            "capabilities": [
+              "upload",
+              "delete",
+              "carousel",
+              "health",
+              "cookie_auth",
+              "rate_limits"
+            ],
+            "details": {},
+            "display_name": "X",
+            "docs_url": "https://developer.x.com/en/docs/x-api",
+            "enabled": true,
+            "error": null,
+            "is_official_api": false,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "video_destination",
+              "destination"
+            ],
+            "live_checked": null,
+            "name": "x",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": "video_destination",
+            "posting_state": "unconfigured",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "source",
+              "video_destination",
+              "analytics"
+            ],
+            "role_states": {
+              "analytics": "unconfigured",
+              "source": "unconfigured",
+              "video_destination": "unconfigured"
+            },
+            "role_status": {
+              "analytics": {
+                "auth_mode": "cookies",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "x",
+                "ready": false,
+                "role": "analytics",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "source": {
+                "auth_mode": "cookies",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "x",
+                "ready": false,
+                "role": "source",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "video_destination": {
+                "auth_mode": "cookies",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "x",
+                "ready": false,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "unconfigured"
+              }
+            },
+            "roles": [
+              "source",
+              "video_destination",
+              "analytics"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "unconfigured",
+            "state_value": "unconfigured"
+          },
+          "youtube": {
+            "auth_mode": "oauth",
+            "authenticated": null,
+            "byo_app": null,
+            "can_post": false,
+            "capabilities": [
+              "upload",
+              "delete",
+              "health",
+              "official_api",
+              "oauth",
+              "rate_limits"
+            ],
+            "details": {},
+            "display_name": "YouTube Shorts",
+            "docs_url": "https://developers.google.com/youtube/v3",
+            "enabled": true,
+            "error": null,
+            "is_official_api": true,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "video_destination",
+              "destination"
+            ],
+            "live_checked": null,
+            "name": "youtube",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": "video_destination",
+            "posting_state": "unconfigured",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "source",
+              "video_destination",
+              "analytics"
+            ],
+            "role_states": {
+              "analytics": "unconfigured",
+              "source": "unconfigured",
+              "video_destination": "unconfigured"
+            },
+            "role_status": {
+              "analytics": {
+                "auth_mode": "oauth",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "youtube",
+                "ready": false,
+                "role": "analytics",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "source": {
+                "auth_mode": "oauth",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "youtube",
+                "ready": false,
+                "role": "source",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "video_destination": {
+                "auth_mode": "oauth",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "youtube",
+                "ready": false,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "unconfigured"
+              }
+            },
+            "roles": [
+              "source",
+              "video_destination",
+              "analytics"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "unconfigured",
+            "state_value": "unconfigured"
+          }
+        },
+        "providers": [
+          {
+            "auth_mode": "oauth",
+            "authenticated": null,
+            "byo_app": null,
+            "can_post": false,
+            "capabilities": [
+              "upload",
+              "delete",
+              "health",
+              "official_api",
+              "oauth",
+              "rate_limits"
+            ],
+            "details": {},
+            "display_name": "YouTube Shorts",
+            "docs_url": "https://developers.google.com/youtube/v3",
+            "enabled": true,
+            "error": null,
+            "is_official_api": true,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "video_destination",
+              "destination"
+            ],
+            "live_checked": null,
+            "name": "youtube",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": "video_destination",
+            "posting_state": "unconfigured",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "source",
+              "video_destination",
+              "analytics"
+            ],
+            "role_states": {
+              "analytics": "unconfigured",
+              "source": "unconfigured",
+              "video_destination": "unconfigured"
+            },
+            "role_status": {
+              "analytics": {
+                "auth_mode": "oauth",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "youtube",
+                "ready": false,
+                "role": "analytics",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "source": {
+                "auth_mode": "oauth",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "youtube",
+                "ready": false,
+                "role": "source",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "video_destination": {
+                "auth_mode": "oauth",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "youtube",
+                "ready": false,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "unconfigured"
+              }
+            },
+            "roles": [
+              "source",
+              "video_destination",
+              "analytics"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "unconfigured",
+            "state_value": "unconfigured"
+          },
+          {
+            "auth_mode": "cookies",
+            "authenticated": null,
+            "byo_app": null,
+            "can_post": false,
+            "capabilities": [
+              "upload",
+              "delete",
+              "carousel",
+              "health",
+              "cookie_auth",
+              "rate_limits"
+            ],
+            "details": {},
+            "display_name": "X",
+            "docs_url": "https://developer.x.com/en/docs/x-api",
+            "enabled": true,
+            "error": null,
+            "is_official_api": false,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "video_destination",
+              "destination"
+            ],
+            "live_checked": null,
+            "name": "x",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": "video_destination",
+            "posting_state": "unconfigured",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "source",
+              "video_destination",
+              "analytics"
+            ],
+            "role_states": {
+              "analytics": "unconfigured",
+              "source": "unconfigured",
+              "video_destination": "unconfigured"
+            },
+            "role_status": {
+              "analytics": {
+                "auth_mode": "cookies",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "x",
+                "ready": false,
+                "role": "analytics",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "source": {
+                "auth_mode": "cookies",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "x",
+                "ready": false,
+                "role": "source",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "video_destination": {
+                "auth_mode": "cookies",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "x",
+                "ready": false,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "unconfigured"
+              }
+            },
+            "roles": [
+              "source",
+              "video_destination",
+              "analytics"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "unconfigured",
+            "state_value": "unconfigured"
+          },
+          {
+            "account_type": "",
+            "account_type_source": "",
+            "auth_mode": "graph_api",
+            "authenticated": null,
+            "byo_app": {
+              "app_id_masked": "",
+              "configurable": true,
+              "configured": false,
+              "create_url": "https://developers.facebook.com/apps",
+              "display_name": "Instagram Reels",
+              "docs_url": "https://developers.facebook.com/docs/graph-api/get-started/getting-access-tokens/about-user-access-tokens#standard-access",
+              "enables": "Publishing Reels to your own account through the official Instagram Platform API. As the app owner you stay in Meta's Standard Access: no App Review and no Business Verification.",
+              "env_vars": [
+                "XPST_INSTAGRAM_APP_ID",
+                "XPST_INSTAGRAM_APP_SECRET"
+              ],
+              "half_configured": false,
+              "id_label": "Meta App ID",
+              "platform": "instagram",
+              "redirect_uri": "http://localhost:8888/callback",
+              "scopes": [
+                "instagram_basic",
+                "instagram_content_publish",
+                "pages_show_list",
+                "pages_read_engagement"
+              ],
+              "secret_label": "Meta App Secret",
+              "sign_in_available": false,
+              "source": ""
+            },
+            "can_post": false,
+            "capabilities": [
+              "upload",
+              "delete",
+              "carousel",
+              "health",
+              "cookie_auth",
+              "rate_limits"
+            ],
+            "details": {},
+            "display_name": "Instagram Reels",
+            "docs_url": "https://developers.facebook.com/docs/instagram-api",
+            "enabled": true,
+            "error": null,
+            "is_official_api": false,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "video_destination",
+              "destination"
+            ],
+            "live_checked": null,
+            "name": "instagram",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": "video_destination",
+            "posting_state": "unconfigured",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "source",
+              "video_destination",
+              "analytics"
+            ],
+            "role_states": {
+              "analytics": "unconfigured",
+              "source": "unconfigured",
+              "video_destination": "unconfigured"
+            },
+            "role_status": {
+              "analytics": {
+                "auth_mode": "graph_api",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "instagram",
+                "ready": false,
+                "role": "analytics",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "source": {
+                "auth_mode": "graph_api",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "instagram",
+                "ready": false,
+                "role": "source",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "video_destination": {
+                "auth_mode": "graph_api",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "instagram",
+                "ready": false,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "unconfigured"
+              }
+            },
+            "roles": [
+              "source",
+              "video_destination",
+              "analytics"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "unconfigured",
+            "state_value": "unconfigured"
+          },
+          {
+            "auth_mode": "app_password",
+            "authenticated": null,
+            "byo_app": null,
+            "can_post": false,
+            "capabilities": [
+              "upload",
+              "delete",
+              "carousel",
+              "health",
+              "official_api",
+              "rate_limits"
+            ],
+            "details": {},
+            "display_name": "Bluesky",
+            "docs_url": "https://docs.bsky.app/",
+            "enabled": false,
+            "error": null,
+            "is_official_api": true,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "video_destination",
+              "destination"
+            ],
+            "live_checked": null,
+            "name": "bluesky",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": "video_destination",
+            "posting_state": "disabled",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "video_destination"
+            ],
+            "role_states": {
+              "video_destination": "disabled"
+            },
+            "role_status": {
+              "video_destination": {
+                "auth_mode": "app_password",
+                "authenticated": null,
+                "details": {},
+                "enabled": false,
+                "error": null,
+                "live_checked": null,
+                "platform": "bluesky",
+                "ready": false,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "disabled"
+              }
+            },
+            "roles": [
+              "video_destination"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "disabled",
+            "state_value": "disabled"
+          },
+          {
+            "auth_mode": "source_only",
+            "authenticated": null,
+            "byo_app": {
+              "app_id_masked": "",
+              "configurable": true,
+              "configured": false,
+              "create_url": "https://developers.tiktok.com/manage/apps",
+              "display_name": "TikTok",
+              "docs_url": "https://developers.tiktok.com/doc/content-posting-api-get-started",
+              "enables": "Direct-posting to your own TikTok account through the official Content Posting API. Unaudited apps post SELF_ONLY (private) until TikTok audits the app \u2014 xPST never claims public reach it does not have.",
+              "env_vars": [
+                "XPST_TIKTOK_CLIENT_KEY",
+                "XPST_TIKTOK_CLIENT_SECRET"
+              ],
+              "half_configured": false,
+              "id_label": "Client Key",
+              "platform": "tiktok",
+              "redirect_uri": "http://localhost:8085/callback",
+              "scopes": [
+                "video.publish",
+                "video.upload",
+                "user.info.stats"
+              ],
+              "secret_label": "Client Secret",
+              "sign_in_available": false,
+              "source": ""
+            },
+            "can_post": false,
+            "capabilities": [
+              "upload",
+              "delete",
+              "health",
+              "official_api",
+              "oauth",
+              "rate_limits"
+            ],
+            "details": {},
+            "display_name": "TikTok",
+            "docs_url": "https://developers.tiktok.com/doc/content-posting-api",
+            "enabled": true,
+            "error": null,
+            "is_official_api": true,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "video_destination",
+              "destination"
+            ],
+            "live_checked": null,
+            "name": "tiktok",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": "TikTok is a source only: xPST downloads from it, and it cannot be used as a posting destination.",
+            "posting_role": "video_destination",
+            "posting_state": "unconfigured",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "source",
+              "video_destination",
+              "analytics"
+            ],
+            "role_states": {
+              "analytics": "unconfigured",
+              "source": "unconfigured",
+              "video_destination": "unconfigured"
+            },
+            "role_status": {
+              "analytics": {
+                "auth_mode": "source_only",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "tiktok",
+                "ready": false,
+                "role": "analytics",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "source": {
+                "auth_mode": "source_only",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "tiktok",
+                "ready": false,
+                "role": "source",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "video_destination": {
+                "auth_mode": "source_only",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "tiktok",
+                "ready": false,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "unconfigured"
+              }
+            },
+            "roles": [
+              "source",
+              "video_destination",
+              "analytics"
+            ],
+            "session_valid": null,
+            "source_only": true,
+            "state": "unconfigured",
+            "state_value": "unconfigured"
+          },
+          {
+            "auth_mode": "oauth",
+            "authenticated": null,
+            "byo_app": {
+              "app_id_masked": "",
+              "configurable": true,
+              "configured": false,
+              "create_url": "https://developers.facebook.com/apps",
+              "display_name": "Threads",
+              "docs_url": "https://developers.facebook.com/docs/threads/get-started/getting-started#auth",
+              "enables": "Publishing posts to your own Threads account through the official Threads API. Same Meta app as Instagram; owner use is Standard Access: no App Review, no Business Verification.",
+              "env_vars": [
+                "XPST_THREADS_APP_ID",
+                "XPST_THREADS_APP_SECRET"
+              ],
+              "half_configured": false,
+              "id_label": "Meta App ID",
+              "platform": "threads",
+              "redirect_uri": "http://localhost:8888/callback",
+              "scopes": [
+                "threads_basic",
+                "threads_content_publish"
+              ],
+              "secret_label": "Meta App Secret",
+              "sign_in_available": false,
+              "source": ""
+            },
+            "can_post": false,
+            "capabilities": [
+              "upload",
+              "health",
+              "official_api",
+              "oauth",
+              "rate_limits"
+            ],
+            "details": {},
+            "display_name": "Threads",
+            "docs_url": "https://developers.facebook.com/docs/threads",
+            "enabled": true,
+            "error": null,
+            "is_official_api": true,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "video_destination",
+              "destination"
+            ],
+            "live_checked": null,
+            "name": "threads",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": "video_destination",
+            "posting_state": "unconfigured",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "video_destination",
+              "analytics"
+            ],
+            "role_states": {
+              "analytics": "unconfigured",
+              "video_destination": "unconfigured"
+            },
+            "role_status": {
+              "analytics": {
+                "auth_mode": "oauth",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "threads",
+                "ready": false,
+                "role": "analytics",
+                "session_valid": null,
+                "state": "unconfigured"
+              },
+              "video_destination": {
+                "auth_mode": "oauth",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "threads",
+                "ready": false,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "unconfigured"
+              }
+            },
+            "roles": [
+              "video_destination",
+              "analytics"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "unconfigured",
+            "state_value": "unconfigured"
+          },
+          {
+            "auth_mode": "oauth",
+            "authenticated": null,
+            "byo_app": {
+              "app_id_masked": "",
+              "configurable": false,
+              "configured": false,
+              "create_url": "https://developers.facebook.com/apps",
+              "display_name": "Messenger",
+              "docs_url": "https://developers.facebook.com/docs/messenger-platform/get-started",
+              "enables": "Messenger auto-reply and DM features on your Page. Messenger keeps its own connect flow; this status line shows the same Meta app.",
+              "env_vars": [
+                "XPST_MESSENGER_APP_ID",
+                "XPST_MESSENGER_APP_SECRET"
+              ],
+              "half_configured": false,
+              "id_label": "Meta App ID",
+              "platform": "messenger",
+              "redirect_uri": "",
+              "scopes": [],
+              "secret_label": "Meta App Secret",
+              "sign_in_available": false,
+              "source": ""
+            },
+            "can_post": false,
+            "capabilities": [
+              "health",
+              "official_api",
+              "rate_limits"
+            ],
+            "details": {},
+            "display_name": "Messenger",
+            "docs_url": "https://developers.facebook.com/docs/messenger-platform",
+            "enabled": false,
+            "error": null,
+            "is_official_api": true,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "messaging",
+              "destination"
+            ],
+            "live_checked": null,
+            "name": "messenger",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": "messaging",
+            "posting_state": "disabled",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "messaging"
+            ],
+            "role_states": {
+              "messaging": "disabled"
+            },
+            "role_status": {
+              "messaging": {
+                "auth_mode": "oauth",
+                "authenticated": null,
+                "details": {},
+                "enabled": false,
+                "error": null,
+                "live_checked": null,
+                "platform": "messenger",
+                "ready": false,
+                "role": "messaging",
+                "session_valid": null,
+                "state": "disabled"
+              }
+            },
+            "roles": [
+              "messaging"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "disabled",
+            "state_value": "disabled"
+          },
+          {
+            "auth_mode": "oauth",
+            "authenticated": null,
+            "byo_app": {
+              "app_id_masked": "",
+              "configurable": false,
+              "configured": false,
+              "create_url": "https://developers.facebook.com/apps",
+              "display_name": "Facebook Page",
+              "docs_url": "https://developers.facebook.com/docs/facebook-login",
+              "enables": "Page-scoped publishing through the Graph API. Facebook keeps its own ``xpst auth facebook`` flow; this status line shows its stored app.",
+              "env_vars": [
+                "XPST_FACEBOOK_APP_ID",
+                "XPST_FACEBOOK_APP_SECRET"
+              ],
+              "half_configured": false,
+              "id_label": "Meta App ID",
+              "platform": "facebook",
+              "redirect_uri": "https://localhost/",
+              "scopes": [
+                "pages_show_list",
+                "pages_read_engagement",
+                "pages_manage_posts"
+              ],
+              "secret_label": "Meta App Secret",
+              "sign_in_available": false,
+              "source": ""
+            },
+            "can_post": false,
+            "capabilities": [
+              "upload",
+              "delete",
+              "health",
+              "official_api",
+              "oauth",
+              "rate_limits"
+            ],
+            "details": {},
+            "display_name": "Facebook Page",
+            "docs_url": "https://developers.facebook.com/docs/pages-api",
+            "enabled": false,
+            "error": null,
+            "is_official_api": true,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "video_destination"
+            ],
+            "live_checked": null,
+            "name": "facebook",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": "video_destination",
+            "posting_state": "disabled",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "video_destination"
+            ],
+            "role_states": {
+              "video_destination": "disabled"
+            },
+            "role_status": {
+              "video_destination": {
+                "auth_mode": "oauth",
+                "authenticated": null,
+                "details": {},
+                "enabled": false,
+                "error": null,
+                "live_checked": null,
+                "platform": "facebook",
+                "ready": false,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "disabled"
+              }
+            },
+            "roles": [
+              "video_destination"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "disabled",
+            "state_value": "disabled"
+          },
+          {
+            "auth_mode": "api_key",
+            "authenticated": null,
+            "byo_app": null,
+            "can_post": false,
+            "capabilities": [
+              "upload",
+              "health"
+            ],
+            "details": {},
+            "display_name": "Rumble",
+            "docs_url": "https://rumble.com/",
+            "enabled": false,
+            "error": null,
+            "is_official_api": true,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "video_destination"
+            ],
+            "live_checked": null,
+            "name": "rumble",
+            "posting_destination": true,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": "video_destination",
+            "posting_state": "disabled",
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "video_destination"
+            ],
+            "role_states": {
+              "video_destination": "disabled"
+            },
+            "role_status": {
+              "video_destination": {
+                "auth_mode": "api_key",
+                "authenticated": null,
+                "details": {},
+                "enabled": false,
+                "error": null,
+                "live_checked": null,
+                "platform": "rumble",
+                "ready": false,
+                "role": "video_destination",
+                "session_valid": null,
+                "state": "disabled"
+              }
+            },
+            "roles": [
+              "video_destination"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "disabled",
+            "state_value": "disabled"
+          },
+          {
+            "auth_mode": "local",
+            "authenticated": null,
+            "byo_app": null,
+            "can_post": false,
+            "capabilities": [
+              "list",
+              "download",
+              "carousel",
+              "health",
+              "local_only"
+            ],
+            "details": {},
+            "display_name": "Local files",
+            "docs_url": null,
+            "enabled": true,
+            "error": null,
+            "is_official_api": false,
+            "legacy_authenticated": false,
+            "legacy_roles": [
+              "source"
+            ],
+            "live_checked": null,
+            "name": "local",
+            "posting_destination": false,
+            "posting_error": null,
+            "posting_note": null,
+            "posting_role": null,
+            "posting_state": null,
+            "probe_class": null,
+            "probe_error": null,
+            "probe_retryable": null,
+            "role_names": [
+              "source"
+            ],
+            "role_states": {
+              "source": "unconfigured"
+            },
+            "role_status": {
+              "source": {
+                "auth_mode": "local",
+                "authenticated": null,
+                "details": {},
+                "enabled": true,
+                "error": null,
+                "live_checked": null,
+                "platform": "local",
+                "ready": false,
+                "role": "source",
+                "session_valid": null,
+                "state": "unconfigured"
+              }
+            },
+            "roles": [
+              "source"
+            ],
+            "session_valid": null,
+            "source_only": false,
+            "state": "unconfigured",
+            "state_value": "unconfigured"
+          }
+        ],
+        "roles": [
+          "source",
+          "video_destination",
+          "messaging",
+          "analytics"
+        ]
+      },
+      "status": 200
+    },
+    "api.schedules": {
+      "body": {
+        "count": 0,
+        "schedules": []
+      },
+      "status": 200
+    },
+    "api.settings": {
+      "body": {
+        "accounts": {
+          "bluesky": {
+            "credentials_path": null,
+            "enabled": false,
+            "identifier": "",
+            "proxy": null,
+            "service": "https://bsky.social"
+          },
+          "instagram": {
+            "account_type": "",
+            "account_type_source": "",
+            "app_id": "",
+            "app_secret": "",
+            "auth_mode": "***",
+            "credentials_path": null,
+            "device_id": null,
+            "enabled": true,
+            "graph_access_token": "",
+            "graph_ig_user_id": "",
+            "password": "",
+            "proxy": null,
+            "session_file": "",
+            "username": ""
+          },
+          "local": {
+            "path": ""
+          },
+          "messenger": {
+            "app_id": "",
+            "app_secret": "",
+            "auto_reply": false,
+            "comment_platforms": [
+              "instagram",
+              "facebook"
+            ],
+            "comment_reply_enabled": false,
+            "credentials_path": null,
+            "enabled": false,
+            "page_access_token": "",
+            "page_id": "",
+            "proxy": null,
+            "reply_rules": {},
+            "verify_token": "",
+            "webhook_path": "/webhook/messenger"
+          },
+          "threads": {
+            "app_id": "",
+            "app_secret": "",
+            "credentials_path": null,
+            "enabled": true,
+            "graph_access_token": "",
+            "proxy": null,
+            "threads_user_id": ""
+          },
+          "tiktok": {
+            "access_token": "",
+            "browser_headless": true,
+            "client_key": "",
+            "client_secret": "",
+            "cookies_file": null,
+            "cookies_from_browser": false,
+            "credentials_path": null,
+            "draft_mode": "auto",
+            "enabled": true,
+            "proxy": null,
+            "publish_mode": "auto",
+            "refresh_token": "",
+            "sandbox": false,
+            "username": ""
+          },
+          "x": {
+            "access_token": "",
+            "access_token_secret": "",
+            "api_key": "",
+            "api_secret": "",
+            "auth_mode": "***",
+            "bearer_token": "",
+            "cookies_file": "",
+            "credentials_path": null,
+            "enabled": true,
+            "max_video_duration_seconds": 0,
+            "password": "",
+            "proxy": null,
+            "username": ""
+          },
+          "youtube": {
+            "channel_id": "",
+            "client_secrets": "",
+            "credentials_path": null,
+            "enabled": true,
+            "proxy": null,
+            "token_file": "",
+            "username": "",
+            "video_mode": "auto"
+          }
+        },
+        "bio": {
+          "handle": "",
+          "links": []
+        },
+        "monitoring": {
+          "dashboard_password_hash": "",
+          "dashboard_username": "",
+          "enable_metrics": true,
+          "health_check_interval": 300,
+          "healthcheck_port": 8080,
+          "log_file": "~/.xpst/logs/xpst.log",
+          "log_level": "INFO",
+          "log_rotation": "10 MB"
+        },
+        "schedule": {
+          "analytics_snapshot_enabled": false,
+          "analytics_snapshot_interval": 3600,
+          "catchup_times_per_day": 3,
+          "catchup_window": 172800,
+          "check_interval": 900,
+          "posting_paused": false
+        },
+        "video": {
+          "cleanup_after_post": false,
+          "download_dir": "~/.xpst/downloads",
+          "encoding_instagram": {
+            "bitrate": null,
+            "bufsize": null,
+            "color": "bt709",
+            "crf": 20,
+            "fps": 60,
+            "gop": 72,
+            "hw_encoder": null,
+            "level": "4.0",
+            "maxrate": "10M",
+            "passthrough": false,
+            "pix_fmt": "yuv420p",
+            "profile": "high",
+            "resolution": 1920,
+            "two_pass": false
+          },
+          "encoding_tiktok": {
+            "bitrate": null,
+            "bufsize": "20M",
+            "color": "bt709",
+            "crf": 20,
+            "fps": 60,
+            "gop": null,
+            "hw_encoder": null,
+            "level": "4.0",
+            "maxrate": "10M",
+            "passthrough": false,
+            "pix_fmt": "yuv420p",
+            "profile": "high",
+            "resolution": 1920,
+            "two_pass": false
+          },
+          "encoding_x": {
+            "bitrate": "10M",
+            "bufsize": null,
+            "color": "bt709",
+            "crf": null,
+            "fps": 60,
+            "gop": 90,
+            "hw_encoder": null,
+            "level": "4.0",
+            "maxrate": "12M",
+            "passthrough": false,
+            "pix_fmt": "yuv420p",
+            "profile": "high",
+            "resolution": 1920,
+            "two_pass": true
+          },
+          "encoding_youtube": {
+            "bitrate": "8M",
+            "bufsize": "12M",
+            "color": "bt709",
+            "crf": null,
+            "fps": 60,
+            "gop": 15,
+            "hw_encoder": null,
+            "level": null,
+            "maxrate": "10M",
+            "passthrough": false,
+            "pix_fmt": "yuv420p",
+            "profile": "high",
+            "resolution": 1920,
+            "two_pass": true
+          }
+        }
+      },
+      "status": 200
+    },
+    "api.summary": {
+      "body": {
+        "best_platform": null,
+        "engagement_by_platform": {
+          "instagram": {
+            "comments": null,
+            "likes": null,
+            "posts": 0,
+            "shares": null,
+            "views": null
+          },
+          "threads": {
+            "comments": null,
+            "likes": null,
+            "posts": 0,
+            "shares": null,
+            "views": null
+          },
+          "tiktok": {
+            "comments": null,
+            "likes": null,
+            "posts": 0,
+            "shares": null,
+            "views": null
+          },
+          "x": {
+            "comments": null,
+            "likes": null,
+            "posts": 0,
+            "shares": null,
+            "views": null
+          },
+          "youtube": {
+            "comments": null,
+            "likes": null,
+            "posts": 0,
+            "shares": null,
+            "views": null
+          }
+        },
+        "freshness": "<volatile>",
+        "last_captured": "<volatile>",
+        "last_captured_relative": "<volatile>",
+        "last_check": "<volatile>",
+        "platform_counts": {
+          "instagram": 0,
+          "threads": 0,
+          "tiktok": 0,
+          "x": 0,
+          "youtube": 0
+        },
+        "platform_health": {},
+        "posts_this_week": 0,
+        "staleness": "unknown",
+        "staleness_hours": null,
+        "total_platform_posts": 0,
+        "total_posts": 0,
+        "total_processed": 0
+      },
+      "status": 200
+    },
+    "health": {
+      "body": {
+        "platforms": {},
+        "status": "healthy",
+        "total_processed": 0
+      },
+      "status": 200
+    },
+    "state": {
+      "body": {
+        "best_platform": null,
+        "engagement_by_platform": {
+          "instagram": {
+            "comments": null,
+            "likes": null,
+            "posts": 0,
+            "shares": null,
+            "views": null
+          },
+          "threads": {
+            "comments": null,
+            "likes": null,
+            "posts": 0,
+            "shares": null,
+            "views": null
+          },
+          "tiktok": {
+            "comments": null,
+            "likes": null,
+            "posts": 0,
+            "shares": null,
+            "views": null
+          },
+          "x": {
+            "comments": null,
+            "likes": null,
+            "posts": 0,
+            "shares": null,
+            "views": null
+          },
+          "youtube": {
+            "comments": null,
+            "likes": null,
+            "posts": 0,
+            "shares": null,
+            "views": null
+          }
+        },
+        "freshness": "<volatile>",
+        "last_captured": "<volatile>",
+        "last_captured_relative": "<volatile>",
+        "last_check": "<volatile>",
+        "platform_counts": {
+          "instagram": 0,
+          "threads": 0,
+          "tiktok": 0,
+          "x": 0,
+          "youtube": 0
+        },
+        "platform_health": {},
+        "posts_this_week": 0,
+        "staleness": "unknown",
+        "staleness_hours": null,
+        "total_platform_posts": 0,
+        "total_posts": 0,
+        "total_processed": 0
+      },
+      "status": 200
+    }
+  }
+}

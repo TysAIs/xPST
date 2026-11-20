@@ -1,0 +1,19 @@
+[package]
+name = "xpst-state"
+description = "state.json: the durable record of what was published, where, and what happened to it (read + write)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+fd-lock = "4.0.4"
+jiff.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

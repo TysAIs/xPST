@@ -1,0 +1,48 @@
+[package]
+name = "xpst-provider-youtube"
+description = "YouTube destination (P2)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+default = ["live-http"]
+# The reqwest-backed transport in [`http`]. On by default so the workspace gate
+# builds and tests it; `--no-default-features` keeps the protocol-only graph.
+live-http = ["xpst-provider/live-http"]
+
+[dependencies]
+xpst-provider = { version = "1.3.0", path = "../xpst-provider" }
+# The capability declaration reads its numbers from the same registry the
+# planner reads, so the two cannot drift apart.
+xpst-core = { path = "../xpst-core" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror = "2"
+# Approved for token lifecycle only (docs/technical/licence-policy.md): MIT OR
+# Apache-2.0. The resumable upload protocol has no maintained crate, so it is
+# implemented here against Google's documented protocol.
+yup-oauth2 = { version = "12", default-features = false, features = ["hyper-rustls", "ring"] }
+# Only for `Sleeper`: the driver never blocks a worker thread.
+tokio = { version = "1", features = ["time"] }
+hyper-util = { version = "0.1", features = ["client-legacy"] }
+
+# MSRV guard, not a code dependency. The workspace promises rust-version 1.89
+# (`Cargo.toml`, `[workspace.package]`; see docs/technical/security-advisories.md
+# for why that floor moved). This pin used to hold the workspace at 1.85, and it
+# stayed because `time` 0.3.46+ requires 1.86. It has to move now: 0.3.45 is
+# vulnerable to RUSTSEC-2026-0009 (stack exhaustion when parsing RFC 2822 input)
+# and the fix landed in 0.3.47, so the floor below is the first release that is
+# both patched and buildable on the workspace's toolchain.
+time = "0.3.47"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }
+# RFC 9110 date formatting, for the Retry-After date-form test vector.
+httpdate = "1"

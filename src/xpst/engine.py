@@ -1,0 +1,1946 @@
+"""
+Core cross-posting engine for xPST
+
+Orchestrates the entire cross-posting workflow:
+1. Fetch new videos from TikTok
+2. Download video files
+3. Encode for each platform (platform-specific settings)
+4. Upload to YouTube Shorts, X/Twitter, Instagram Reels
+5. Track state and health
+
+Features:
+- Graceful degradation (one platform failure doesn't block others)
+- Circuit breaker pattern (auto-disable failing platforms)
+- Retry with exponential backoff (1s/2s/4s, fatal errors skip retry)
+- Error categorization (retryable vs fatal)
+- Upload progress tracking
+- Webhook notifications (Discord/Telegram, optional)
+- Graceful shutdown handling
+- State persistence (atomic writes)
+- Catch-up logic (handle Mac sleep/wake cycles)
+
+Refactored to delegate to UploadService and SourceService.
+"""
+
+import inspect
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from xpst.anti_bot import AntiBotProtection
+from xpst.config import XPSTConfig
+from xpst.content import (
+    PUBLISH_ROUTE_CAROUSEL,
+    PUBLISH_ROUTE_IMAGE,
+    PUBLISH_ROUTE_TEXT,
+    PUBLISH_ROUTE_VIDEO,
+    UNIMPLEMENTED_PUBLISH_ERROR,
+    ContentIssue,
+    ContentRequest,
+    publish_route,
+    validate_content_request,
+)
+from xpst.crash_recovery import CrashRecoveryManager
+from xpst.monitor import NewPost, PostMonitor
+from xpst.platforms.base import (
+    DeleteOutcome,
+    DeleteResult,
+    PlatformUploader,
+    UploadResult,
+    normalize_delete_result,
+)
+from xpst.services.source_service import SourceService
+from xpst.services.upload_service import UploadService
+from xpst.sources.base import VideoMetadata
+from xpst.state import StateManager
+from xpst.utils.circuit_breaker import CircuitBreakerManager
+from xpst.utils.credentials import CredentialStore
+from xpst.utils.disk import DiskSpaceError, check_disk_space
+from xpst.utils.logger import get_logger
+from xpst.utils.notifications import NotificationConfig, WebhookNotifier
+from xpst.utils.pidfile import PidfileLock
+from xpst.utils.progress import get_video_duration
+from xpst.utils.quota import QuotaManager
+from xpst.utils.sessions import SessionManager
+from xpst.utils.shutdown import ShutdownHandler
+from xpst.utils.video import VideoProcessor
+
+logger = get_logger(__name__)
+
+
+# ── Opt-in destinations: skipped is a state, not a failure (R3) ─────────────
+
+def skipped_unconnected_result(platform: str) -> UploadResult:
+    """One result row for a requested destination that is not connected.
+
+    Before this row existed the engine logged "not available" and dropped the
+    platform, so a post to an unconnected account looked like a successful run
+    with one fewer destination. ``skipped_unconnected`` is neutral: it is not a
+    failure and it never turns a run's exit code non-zero on its own.
+    """
+    return UploadResult(
+        success=False,
+        error=(
+            f"SKIPPED_UNCONNECTED: {platform} is not connected, so nothing was "
+            f"published there. Connect it with `xpst connect {platform}`."
+        ),
+        platform=platform,
+        retryable=False,
+        metadata={
+            "state": "skipped_unconnected",
+            "skipped_unconnected": True,
+            "connect_command": f"xpst connect {platform}",
+        },
+    )
+
+
+def refused_visibility_result(platform: str, detail: str = "") -> UploadResult:
+    """One result row for a destination that refused the requested visibility.
+
+    Nothing was uploaded and nothing failed: the caller asked for a level this
+    destination's route cannot honour, and publishing anyway would silently
+    produce something else (a public post). It is a refusal, not a failure, so
+    it carries ``state: refused_visibility`` and is never counted as an upload
+    error — but it is also never a success, so a gate reading the exit status
+    still sees that the request was not carried out as written.
+    """
+    message = detail or (
+        "REFUSED_VISIBILITY: the requested upload-time visibility cannot be "
+        "honoured by this destination, so nothing was uploaded."
+    )
+    return UploadResult(
+        success=False,
+        error=message,
+        platform=platform,
+        retryable=False,
+        metadata={
+            "state": "refused_visibility",
+            "refused_visibility": True,
+        },
+    )
+
+
+def unsupported_format_result(platform: str, content_type: str, detail: str = "") -> UploadResult:
+    """One result row for a destination that cannot publish this content type."""
+    message = detail or (
+        f"UNSUPPORTED_FORMAT: {platform} cannot publish {content_type} posts; "
+        "nothing was uploaded."
+    )
+    return UploadResult(
+        success=False,
+        error=message,
+        platform=platform,
+        retryable=False,
+        metadata={
+            "state": "unsupported_format",
+            "unsupported_format": True,
+            "content_type": content_type,
+        },
+    )
+
+
+def _content_refusal(platform: str, content_type: str) -> UploadResult | None:
+    """Refuse a content type the destination does not implement.
+
+    The capability answer comes from :mod:`xpst.content` (the registry
+    ``xpst capabilities`` emits), so a destination that cannot publish this
+    format is refused *before* its uploader is called and the row says
+    ``unsupported_format`` — not a generic upload failure.
+    """
+    from xpst.content import coerce_content_type, content_profile
+
+    try:
+        wanted = coerce_content_type(content_type)
+    except Exception:  # noqa: BLE001 - an unknown spelling is not a capability answer
+        return None
+    profile = content_profile(platform)
+    if profile is None or profile.supports(wanted):
+        return None
+    supported = ", ".join(sorted(item.value for item in profile.implemented)) or "nothing"
+    return unsupported_format_result(
+        platform,
+        wanted.value,
+        (
+            f"UNSUPPORTED_FORMAT: {platform} cannot publish {wanted.value} posts "
+            f"(supports: {supported}); nothing was uploaded."
+        ),
+    )
+
+
+# Platform-encoded temp-file suffixes (single source, ISC-92)
+_ENCODED_SUFFIXES = ("_youtube", "_instagram", "_x", "_tiktok", "_threads", "_facebook")
+
+
+def caption_for_destination(
+    platform: str,
+    default: str,
+    per_platform_captions: Mapping[str, str] | None = None,
+) -> str:
+    """The caption one destination gets: its override, else the shared default.
+
+    The mapping is matched case-insensitively and never trimmed, so the copy a
+    user wrote for a destination is the copy the uploader receives verbatim.
+    """
+    if not per_platform_captions:
+        return default
+    key = str(platform).strip().lower()
+    for name, caption in per_platform_captions.items():
+        if str(name).strip().lower() == key:
+            return str(caption)
+    return default
+
+
+@dataclass
+class CrossPostResult:
+    """Result of a cross-posting operation.
+
+    Aggregates upload results from all target platforms for a single video.
+    Tracks whether all platforms succeeded or only some (partial success).
+
+    Attributes:
+        video_id: Source video identifier.
+        caption: Caption text used for the post.
+        results: Per-platform upload results keyed by platform name.
+        all_success: True only if every platform upload succeeded.
+        partial_success: True if at least one platform succeeded.
+
+    Example:
+        >>> result = CrossPostResult(video_id="123", caption="Hello")
+        >>> result.results["youtube"] = UploadResult(success=True)
+        >>> result.update_status()
+        >>> assert result.all_success is True
+    """
+    video_id: str
+    caption: str
+    results: dict[str, UploadResult] = field(default_factory=dict)
+    all_success: bool = False
+    partial_success: bool = False
+    #: The caption actually handed to each destination's uploader, keyed by
+    #: platform. Populated only for destinations that were attempted, so a
+    #: caller can prove which copy each destination received (per-destination
+    #: overrides make ``caption`` the shared/default text, not what was sent).
+    captions: dict[str, str] = field(default_factory=dict)
+
+    def update_status(self) -> None:
+        """Recalculate success flags from the current results dict.
+
+        Must be called after all platform uploads are complete to ensure
+        ``all_success`` and ``partial_success`` reflect reality.
+        """
+
+        successes = [r.is_published for r in self.results.values()]
+        self.all_success = all(successes) and len(successes) > 0
+        self.partial_success = any(successes)
+
+
+def refused_result(
+    request: ContentRequest,
+    blockers: Sequence[ContentIssue],
+    *,
+    platforms: Sequence[str] | None = None,
+) -> CrossPostResult:
+    """Build the ONE truthful "this request was refused" result.
+
+    Pure and engine-free on purpose: a surface that refuses a request must not
+    have to construct an engine (whose ``__init__`` performs crash recovery and
+    state writes) just to report the refusal. Every surface therefore reports
+    the same per-destination rows with the same contract message, and none of
+    them can turn a refusal into a success.
+    """
+    targets = list(platforms) if platforms is not None else [str(item).strip().lower() for item in request.platforms]
+    content_type = request.effective_content_type
+    result = CrossPostResult(video_id=f"{content_type.value}-request", caption=request.text)
+    for platform in targets:
+        messages = [issue.message for issue in blockers if issue.platform in (None, platform)]
+        result.results[platform] = UploadResult(
+            success=False,
+            error=" ".join(messages) or blockers[0].message,
+            platform=platform,
+            metadata={"content_type": content_type.value, "blocked": True},
+            retryable=False,
+        )
+    result.update_status()
+    return result
+
+
+class CrossPostEngine:
+    """
+    Core engine for cross-posting videos.
+
+    Manages the entire workflow from fetching to uploading,
+    with reliability features like circuit breakers and retry logic.
+
+    Orchestrates: source fetching → downloading → per-platform encoding →
+    uploading → state tracking → notifications. Each platform is handled
+    independently so a single platform failure never blocks others.
+
+    Attributes:
+        config: Loaded xPST configuration.
+        state: Persistent state manager for tracking posted videos.
+        video_processor: FFmpeg-based video encoder.
+        circuit_breakers: Per-platform circuit breaker manager.
+        credentials: Secure credential store (OS keychain).
+        session_manager: Persistent auth session manager.
+        quota_manager: Per-platform API quota tracker.
+        notifier: Optional webhook notifier (Discord/Telegram).
+        shutdown_handler: Graceful SIGINT/SIGTERM handler.
+        crash_recovery: Checkpoint-based crash recovery manager.
+        upload_service: Upload pipeline service.
+        source_service: Source management service.
+
+    Thread Safety:
+        Not thread-safe. Designed for single-threaded async usage via
+        ``asyncio.run()``. The state manager handles its own locking.
+
+    Example:
+        >>> config = XPSTConfig.load()
+        >>> engine = CrossPostEngine(config)
+        >>> results = asyncio.run(engine.check_and_post())
+        >>> for r in results:
+        ...     print(r.video_id, r.all_success)
+    """
+
+    def __init__(self, config: XPSTConfig) -> None:
+        """Initialize the engine and all sub-components.
+
+        Sets up state management, video processing, circuit breakers,
+        credential storage, session management, quota tracking, webhook
+        notifications, graceful shutdown handling, and crash recovery.
+
+        On startup, performs crash recovery:
+        1. Checks for stale shutdown state (from previous crash/SIGTERM)
+        2. Finds half-uploaded videos and cleans up temp files
+        3. Logs recovery actions taken
+
+        Args:
+            config: Fully loaded xPST configuration.
+
+        Raises:
+            RuntimeError: If FFmpeg is not installed (raised by VideoProcessor).
+        """
+
+        self._pidfile: PidfileLock | None = None
+        self.config = config
+
+        # Initialize components
+        self.state = StateManager(config.config_dir)
+        self.video_processor = VideoProcessor()
+        self.circuit_breakers = CircuitBreakerManager()
+
+        # Initialize security components
+        self.credentials = CredentialStore(config.config_dir)
+        self.session_manager = SessionManager(config.config_dir)
+        self.quota_manager = QuotaManager(config.config_dir, config=config)
+
+        # Initialize notifications
+        self.notifier = WebhookNotifier(
+            NotificationConfig(
+                enabled=config.notifications.enabled,
+                on_success=config.notifications.on_success,
+                on_failure=config.notifications.on_failure,
+                discord_webhook_url=config.notifications.discord_webhook_url,
+                telegram_bot_token=config.notifications.telegram_bot_token,
+                telegram_chat_id=config.notifications.telegram_chat_id,
+            )
+        )
+
+        # Initialize graceful shutdown handler
+        self.shutdown_handler = ShutdownHandler(config.config_dir)
+        self.shutdown_handler.register()
+
+        # Initialize crash recovery
+        self.crash_recovery = CrashRecoveryManager(config.config_dir)
+
+        # Initialize services
+        self.source_service = SourceService(config)
+        # Issue #296: let the source service persist fetch failures so a dead
+        # source degrades visible health instead of only logging to a file.
+        self.source_service.state = self.state
+        self.anti_bot = AntiBotProtection(daily_limits={
+            "youtube": config.rate_limits.youtube,
+            "instagram": config.rate_limits.instagram,
+            "x": config.rate_limits.x,
+            "tiktok": config.rate_limits.tiktok,
+            "threads": config.rate_limits.threads,
+            "facebook": config.rate_limits.facebook,
+        })
+        self.upload_service = UploadService(
+            video_processor=self.video_processor,
+            circuit_breakers=self.circuit_breakers,
+            quota_manager=self.quota_manager,
+            state=self.state,
+            notifier=self.notifier,
+            shutdown_handler=self.shutdown_handler,
+            config=config,
+            anti_bot=self.anti_bot,
+        )
+        # Wire crash recovery into upload service
+        self.upload_service._crash_recovery = self.crash_recovery
+        # Perform startup crash recovery
+        self._startup_crash_recovery()
+
+        # Back-compat: expose sources and platforms on engine
+        self._sources = self.source_service.sources
+        # Initialize platforms
+        self._platforms: dict[str, PlatformUploader] = {}
+        self._init_platforms()
+        # Inject session manager into platforms for secure auth.
+        for platform in self._platforms.values():
+            platform._session_manager = self.session_manager
+        # Initialize post monitor for bidirectional cross-posting
+        self._monitor: PostMonitor | None = None
+
+    def acquire_pidfile(self) -> None:
+        """Acquire pidfile lock to prevent concurrent instances.
+
+        Raises:
+            PidfileLockError: If another instance is already running.
+        """
+        self._pidfile = PidfileLock(self.config.config_dir)
+        self._pidfile.acquire()
+
+    def release_pidfile(self) -> None:
+        """Release pidfile lock."""
+        if self._pidfile:
+            self._pidfile.release()
+            self._pidfile = None
+
+    def _startup_crash_recovery(self) -> None:
+        """Perform crash recovery on startup.
+
+        Checks for stale shutdown state and pending checkpoints,
+        then cleans up any half-uploaded temp files.
+        """
+        # Check for stale shutdown state
+        shutdown_state = self.shutdown_handler.load_shutdown_state()
+        if shutdown_state:
+            video_id = shutdown_state.get("video_id", "unknown")
+            platform = shutdown_state.get("platform", "unknown")
+            phase = shutdown_state.get("phase", "unknown")
+            logger.warning(
+                "Found incomplete upload from previous run: %s -> %s (phase: %s)",
+                video_id, platform, phase,
+            )
+            # Clean up temp files from the shutdown state
+            temp_files = shutdown_state.get("temp_files", [])
+            for tf in temp_files:
+                try:
+                    path = Path(tf)
+                    if path.exists():
+                        path.unlink()
+                        logger.info("Cleaned up temp file from crash: %s", tf)
+                except OSError as e:
+                    logger.warning("Failed to clean up %s: %s", tf, e)
+            self.shutdown_handler.clear_shutdown_state()
+
+        # Check for pending checkpoints
+        pending = self.crash_recovery.get_pending_checkpoints()
+        if pending:
+            logger.warning(
+                "Found %d pending upload checkpoints from previous run",
+                len(pending),
+            )
+            for _key, checkpoint in pending.items():
+                video_path = checkpoint.get("metadata", {}).get("video_path")
+                if video_path:
+                    path = Path(video_path)
+                    # Clean up platform-specific encoded files
+                    for suffix in _ENCODED_SUFFIXES:
+                        encoded = path.with_stem(f"{path.stem}{suffix}")
+                        if encoded.exists():
+                            try:
+                                encoded.unlink()
+                                logger.info("Cleaned up partial encode: %s", encoded)
+                            except OSError:
+                                pass
+            # Clear all stale checkpoints
+            self.crash_recovery.clear_all_checkpoints()
+            logger.info("Crash recovery complete")
+
+    def _init_platforms(self) -> None:
+        """Initialize enabled platform uploaders.
+
+        Only platforms with ``enabled=True`` in config are loaded.
+        Import failures (missing dependencies) are logged and skipped,
+        allowing the engine to operate with a subset of platforms.
+        """
+
+        # YouTube
+        if self.config.youtube.enabled:
+            try:
+                from xpst.platforms.youtube import YouTubeUploader
+                self._platforms["youtube"] = YouTubeUploader(self.config)
+                logger.info("YouTube uploader initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize YouTube uploader: {e}")
+
+        # X/Twitter
+        if self.config.x.enabled:
+            try:
+                from xpst.platforms.x import XUploader
+                self._platforms["x"] = XUploader(self.config)
+                logger.info("X/Twitter uploader initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize X uploader: {e}")
+
+        # Instagram
+        if self.config.instagram.enabled:
+            try:
+                from xpst.platforms.instagram import InstagramUploader
+                self._platforms["instagram"] = InstagramUploader(self.config)
+                logger.info("Instagram uploader initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize Instagram uploader: {e}")
+
+        # TikTok (destination via Content Posting API; also a source via sources/)
+        if self.config.tiktok.enabled:
+            try:
+                from xpst.platforms.tiktok import TikTokUploader
+                self._platforms["tiktok"] = TikTokUploader(self.config)
+                logger.info("TikTok uploader initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize TikTok uploader: {e}")
+
+        # Threads
+        if self.config.threads.enabled:
+            try:
+                from xpst.platforms.threads import ThreadsUploader
+                self._platforms["threads"] = ThreadsUploader(self.config)
+                logger.info("Threads uploader initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize Threads uploader: {e}")
+
+        # Bluesky (AT Protocol; OPT-IN, text + image posting)
+        if getattr(self.config, "bluesky", None) is not None and self.config.bluesky.enabled:
+            try:
+                from xpst.platforms.bluesky import BlueskyUploader
+
+                self._platforms["bluesky"] = BlueskyUploader(self.config)
+                logger.info("Bluesky uploader initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize Bluesky uploader: {e}")
+
+        # Facebook Page (Page-scoped publishing via Facebook Login for Business)
+        if self.config.facebook.enabled:
+            try:
+                from xpst.platforms.facebook import FacebookPageUploader
+                self._platforms["facebook"] = FacebookPageUploader(self.config)
+                logger.info("Facebook Page uploader initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize Facebook Page uploader: {e}")
+
+        # Rumble (OPT-IN, integration-uncertain: partner API when a key exists,
+        # manual handoff otherwise). Disabled by default so nothing changes for
+        # an existing install.
+        if getattr(self.config, "rumble", None) is not None and self.config.rumble.enabled:
+            try:
+                from xpst.platforms.rumble import RumbleUploader
+                self._platforms["rumble"] = RumbleUploader(self.config)
+                logger.info("Rumble uploader initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize Rumble uploader: {e}")
+
+        # NOTE: Messenger is intentionally NOT registered here. It is a
+        # webhook-driven auto-reply adapter (ManyChat-lite), not a video-posting
+        # destination — adding it to `_platforms` would make `check_and_post`
+        # send the caption as a text message to the page on every cross-post.
+        # It is reachable via the dashboard webhook, `xpst auth messenger`, and
+        # the MCP `messenger_send` / `messenger_set_rules` tools instead.
+
+    async def check_and_post(
+        self,
+        catch_up: bool = False,
+        source: str = "tiktok",
+        max_posts: int | None = None,
+    ) -> list[CrossPostResult]:
+        """Main workflow: check for new videos and post them to all platforms.
+
+        Fetches recent videos from the requested source, filters to unposted
+        ones, then downloads, encodes, and uploads each to every enabled
+        platform. State is persisted after each video for crash recovery.
+
+        Args:
+            catch_up: If True, fetches up to 20 videos instead of 5 to
+                compensate for Mac sleep/wake downtime. ``catch_up`` takes
+                precedence over ``max_posts`` to preserve the wake-recovery
+                contract.
+            source: Source to fetch from (e.g. ``"tiktok"``, ``"youtube"``).
+            max_posts: Maximum number of videos to fetch in a normal cycle.
+                Ignored when ``catch_up`` is True. Defaults to 5.
+
+        Returns:
+            List of CrossPostResult, one per processed video. Empty if
+            no new videos found or source unavailable.
+        """
+
+        results = []
+
+        # Check for shutdown before starting
+        if self.shutdown_handler.should_shutdown:
+            logger.info("Shutdown requested, aborting check_and_post")
+            return results
+
+        # Fetch videos via source service
+        max_count = 20 if catch_up else (max_posts if max_posts is not None else 5)
+        logger.info(f"Fetching videos (source: {source}, max: {max_count})")
+        videos = await self.source_service.fetch_new_videos(source, max_count)
+
+        if not videos:
+            return results
+
+        # Filter to new videos
+        new_videos = self.source_service.filter_new(videos, self.state, self._platforms)
+
+        if not new_videos:
+            logger.info("No new videos to post")
+            return results
+
+        logger.info(f"Found {len(new_videos)} new videos")
+
+        # Process each video
+        for video in new_videos:
+            if self.shutdown_handler.should_shutdown:
+                logger.info("Shutdown requested, stopping after current video")
+                break
+
+            try:
+                result = await self._process_video(video, source)
+                results.append(result)
+
+                # Send per-platform notifications
+                for platform_name, upload_result in result.results.items():
+                    if upload_result.is_published and not upload_result.metadata.get("already_posted"):
+                        self.notifier.notify_upload_success(
+                            platform=platform_name,
+                            video_id=video.video_id,
+                            post_url=upload_result.post_url or "",
+                        )
+                    elif not upload_result.is_published:
+                        self.notifier.notify_upload_failure(
+                            platform=platform_name,
+                            video_id=video.video_id,
+                            error=upload_result.error or "Unknown error",
+                        )
+
+                # Save state after each video
+                self.state.save()
+
+            except Exception as e:
+                logger.error(f"Failed to process video {video.video_id}: {e}")
+                continue
+
+        # Update last check time
+        self.state.update_last_check_time()
+        self.state.save()
+
+        # Send batch notification
+        if results:
+            total = sum(len(r.results) for r in results)
+            success = sum(
+                sum(1 for ur in r.results.values() if ur.is_published)
+                for r in results
+            )
+            failed = total - success
+            self.notifier.notify_batch_complete(total, success, failed)
+
+        return results
+
+    async def _process_video(
+        self,
+        video: VideoMetadata,
+        source: str = "tiktok",
+    ) -> CrossPostResult:
+        """Process a single video through the full pipeline.
+
+        Downloads the video from the source, then delegates each platform
+        upload to the upload_service.
+        """
+
+        result = CrossPostResult(
+            video_id=video.video_id,
+            caption=video.caption,
+        )
+
+        logger.info(f"Processing: {video.video_id} - {video.caption[:50]}")
+
+        # Track download in shutdown handler (G01: honor the requested
+        # source — this was hardcoded to "tiktok", breaking every other one)
+        source_obj = self._sources.get(source)
+        if not source_obj:
+            logger.error(f"No source available for download: {source}")
+            return result
+
+        self.shutdown_handler.start_tracking(video.video_id, "", "downloading")
+
+        # Check disk space before downloading
+        download_dir = Path(self.config.video.download_dir)
+        try:
+            check_disk_space(download_dir)
+        except DiskSpaceError as e:
+            logger.error("Insufficient disk space for download: %s", e)
+            self.shutdown_handler.stop_tracking()
+            return result
+
+        # Download video
+        download_result = await source_obj.download(video.video_id, download_dir)
+
+        if not download_result.success or not download_result.video_path:
+            logger.error(f"Download failed: {download_result.error}")
+            self.shutdown_handler.stop_tracking()
+            return result
+
+        video_path = download_result.video_path
+
+        # Register temp file for cleanup
+        self.shutdown_handler.add_temp_file(video_path)
+
+        # Save checkpoint: download complete
+        self.crash_recovery.save_checkpoint(video.video_id, "all", "downloaded", {
+            "video_path": str(video_path),
+        })
+
+        # Get video duration for progress tracking
+        get_video_duration(video_path)
+
+        # Post to each platform using upload service
+        for platform_name, uploader in self._platforms.items():
+            if self.shutdown_handler.should_shutdown:
+                logger.info(f"Shutdown requested, saving state for {video.video_id}")
+                self.state.save()
+                break
+
+            # Update shutdown tracking
+            self.shutdown_handler.start_tracking(
+                video.video_id, platform_name, "uploading"
+            )
+
+            # Save checkpoint
+            self.crash_recovery.save_checkpoint(
+                video.video_id, platform_name, "uploading",
+                {"video_path": str(video_path)},
+            )
+
+            # Check if already posted
+            if self.state.is_video_posted(video.video_id, platform_name):
+                logger.info(f"Already posted to {platform_name}")
+                result.results[platform_name] = UploadResult(
+                    success=True,
+                    platform=platform_name,
+                    metadata={"already_posted": True},
+                )
+                continue
+
+            # Delegate to upload service
+            upload_result = await self.upload_service.upload_to_platform(
+                uploader=uploader,
+                video_path=video_path,
+                caption=video.caption,
+                platform_name=platform_name,
+                video_id=video.video_id,
+                source_platform=source,
+            )
+
+            result.results[platform_name] = upload_result
+
+        # Cleanup encoded temp files if configured
+        if self.config.video.cleanup_after_post:
+            self._cleanup_encoded_files(video_path)
+
+        self.shutdown_handler.stop_tracking()
+        result.update_status()
+        return result
+
+    def _analytics_store(self) -> Any:
+        """Return the analytics store bound to THIS engine's config dir.
+
+        Never the no-argument ``AnalyticsStore()``: that resolves the
+        process-wide default, which is how a test run — or any relocated
+        ``config_dir`` — recorded cross-post groups into the operator's real
+        ``~/.xpst/analytics.db`` while the dashboard and MCP analytics tools
+        read ``config.config_dir / "analytics.db"``. One ledger, one path.
+        """
+        from xpst.analytics_store import AnalyticsStore
+
+        return AnalyticsStore(Path(self.config.config_dir).expanduser() / "analytics.db")
+
+    def _cleanup_encoded_files(self, video_path: Path) -> None:
+        """Remove platform-specific encoded copies of a video."""
+        for suffix in _ENCODED_SUFFIXES:
+            encoded = video_path.with_stem(f"{video_path.stem}{suffix}")
+            if encoded.exists():
+                try:
+                    encoded.unlink()
+                    logger.debug(f"Cleaned up encoded file: {encoded.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up {encoded}: {e}")
+
+    async def post_manual(
+        self,
+        video_path: Path,
+        caption: str,
+        platforms: list[str] | None = None,
+        per_platform_captions: Mapping[str, str] | None = None,
+        visibility: str | None = None,
+        force_now: bool = False,
+        video_mode: str | None = None,
+    ) -> CrossPostResult:
+        """Manually post a single video to specified platforms.
+
+        Bypasses the source fetching step — directly encodes and uploads
+        the given file. Useful for one-off posts or re-uploading after fixes.
+
+        Args:
+            video_path: Path to the video file on disk.
+            caption: Caption/title for the post (the default for every
+                destination that has no per-destination override).
+            platforms: Target platform names. None means all enabled platforms.
+            per_platform_captions: ``{platform: caption}`` overrides. A
+                destination absent from the mapping keeps ``caption``.
+            visibility: Optional target visibility (YouTube: ``public``,
+                ``unlisted``, ``private``). Honoured by YouTube only.
+            video_mode: Optional short/long form choice (``--shorts`` /
+                ``--long``). Honoured by the YouTube uploader; every other
+                destination enforces its own declared envelope.
+
+        Returns:
+            CrossPostResult with per-platform outcomes.
+
+        Raises:
+            FileNotFoundError: If video_path does not exist.
+        """
+
+        if platforms is None:
+            platforms = list(self._platforms.keys())
+
+        # G09: stem alone collides across directories/re-exports; suffix the
+        # file fingerprint so the state key is content-stable.
+        from xpst.utils.content_hash import compute_content_hash
+        video_id = f"{video_path.stem}-{compute_content_hash(file_path=video_path, filename=video_path.name)[:8]}"
+
+        result = CrossPostResult(
+            video_id=video_id,
+            caption=caption,
+        )
+
+        for platform_name in platforms:
+            if self.shutdown_handler.should_shutdown:
+                logger.info("Shutdown requested, stopping manual post")
+                break
+
+            uploader = self._platforms.get(platform_name)
+            if not uploader:
+                # Requested but not connected: a row, not a silent drop (R3).
+                logger.info("Platform %s is not connected; recording a skip", platform_name)
+                result.results[platform_name] = skipped_unconnected_result(platform_name)
+                continue
+            refusal = _content_refusal(platform_name, "video")
+            if refusal is not None:
+                result.results[platform_name] = refusal
+                continue
+
+            # The copy this destination gets: its own override when the user
+            # wrote one, else the shared caption. Recorded on the result so the
+            # caller can prove what each destination received.
+            platform_caption = caption_for_destination(platform_name, caption, per_platform_captions)
+            result.captions[platform_name] = platform_caption
+
+            # Delegate to upload service
+            upload_result = await self.upload_service.upload_to_platform(
+                uploader=uploader,
+                video_path=video_path,
+                caption=platform_caption,
+                platform_name=platform_name,
+                video_id=video_id,
+                source_platform="local",
+                visibility=visibility,
+                video_mode=video_mode,
+                ignore_window=force_now,
+            )
+
+            result.results[platform_name] = upload_result
+            # Caption fidelity (D6): if the upload path varied the caption
+            # (anti-bot suffixing), the truth of what went live is on the
+            # result metadata — report THAT, not the requested copy.
+            sent = (upload_result.metadata or {}).get("caption_sent")
+            if isinstance(sent, str) and sent:
+                result.captions[platform_name] = sent
+
+            # Send per-result notification (manual mode)
+            if upload_result.is_published:
+                self.notifier.notify_upload_success(
+                    platform=platform_name,
+                    video_id=video_id,
+                    post_url=upload_result.post_url or "",
+                )
+            elif (
+                upload_result.error != "Circuit breaker open"
+                and "QUOTA_EXHAUSTED" not in (upload_result.error or "")
+                and "RATE_LIMIT_COOLDOWN" not in (upload_result.error or "")
+            ):
+                self.notifier.notify_upload_failure(
+                    platform=platform_name,
+                    video_id=video_id,
+                    error=upload_result.error or "Unknown error",
+                )
+
+        # Record the cross-post group (B1) so manual multi-platform posts also
+        # aggregate as a single analytics entry.
+        platforms_data = []
+        for platform_name, upload_result in result.results.items():
+            if upload_result.is_published:
+                platforms_data.append({
+                    "platform": platform_name,
+                    "post_id": upload_result.post_id,
+                    "url": upload_result.post_url,
+                })
+        if platforms_data:
+            try:
+                store = self._analytics_store()
+                store.record_cross_post_group(
+                    content_hash=video_id,
+                    video_id=video_id,
+                    caption=caption,
+                    source_url=str(video_path),
+                    platforms=platforms_data,
+                )
+            except Exception as exc:  # noqa: BLE001 — analytics must never block posting
+                logger.warning("Failed to record cross-post group: %s", exc)
+
+        result.update_status()
+        self.state.save()
+        return result
+
+    async def post_manual_carousel(
+        self,
+        media_paths: list[Path],
+        caption: str,
+        platforms: list[str] | None = None,
+        per_platform_captions: Mapping[str, str] | None = None,
+        force_now: bool = False,
+    ) -> CrossPostResult:
+        """Manually post a carousel/multi-media to specified platforms.
+
+        Each platform handles carousels differently:
+        - Instagram: native ``album_upload()`` (2-10 items, order preserved)
+        - X/Twitter: tweet thread with one media per tweet
+
+        A destination with no native carousel path is refused *by name* before
+        its uploader is called — nothing is stitched into a video. This is the
+        chokepoint every caller (CLI, MCP, HTTP API) shares, so a photo carousel
+        can never be silently turned into a video by a caller that skipped the
+        preflight.
+
+        Args:
+            media_paths: List of paths to images/videos, in post order.
+            caption: Caption for the post (the default for every destination
+                that has no per-destination override).
+            platforms: Target platform names. None means all enabled.
+            per_platform_captions: ``{platform: caption}`` overrides. A
+                destination absent from the mapping keeps ``caption``.
+
+        Returns:
+            CrossPostResult with per-platform outcomes.
+        """
+
+        if platforms is None:
+            platforms = list(self._platforms.keys())
+
+        video_id = f"carousel_{'_'.join(p.stem for p in media_paths[:3])}"
+
+        result = CrossPostResult(
+            video_id=video_id,
+            caption=caption,
+        )
+
+        for platform_name in platforms:
+            if self.shutdown_handler.should_shutdown:
+                logger.info("Shutdown requested, stopping carousel post")
+                break
+
+            uploader = self._platforms.get(platform_name)
+            if not uploader:
+                logger.info("Platform %s is not connected; recording a skip", platform_name)
+                result.results[platform_name] = skipped_unconnected_result(platform_name)
+                continue
+
+            platform_caption = caption_for_destination(platform_name, caption, per_platform_captions)
+            result.captions[platform_name] = platform_caption
+
+            refusal = self._carousel_capability_refusal(platform_name)
+            if refusal is not None:
+                # Refused on capability, not on transport: the destination
+                # cannot publish a carousel, so nothing is uploaded and the row
+                # says exactly why.
+                logger.warning("Refusing carousel for %s: %s", platform_name, refusal)
+                result.results[platform_name] = UploadResult(
+                    success=False,
+                    error=refusal,
+                    platform=platform_name,
+                    retryable=False,
+                    metadata={
+                        "content_type": "carousel",
+                        "items": len(media_paths),
+                        "unsupported": True,
+                        "state": "unsupported_format",
+                    },
+                )
+                continue
+
+            # Delegate to upload service
+            upload_result = await self.upload_service.upload_carousel_to_platform(
+                uploader=uploader,
+                media_paths=media_paths,
+                caption=platform_caption,
+                platform_name=platform_name,
+                video_id=video_id,
+                ignore_window=force_now,
+            )
+
+            result.results[platform_name] = upload_result
+
+        result.update_status()
+        self.state.save()
+        return result
+
+    @staticmethod
+    def _carousel_capability_refusal(platform_name: str) -> str | None:
+        """The refusal text for a destination that cannot publish a carousel.
+
+        The wording is the content contract's own destination-naming refusal
+        (:func:`xpst.content.unsupported_content_message`, the same string the
+        preflight produces) plus the explicit promise that nothing was stitched.
+        ``None`` means the destination can publish carousels — or is not in the
+        capability table at all (a third-party plugin), in which case its own
+        uploader reports the real outcome rather than xPST inventing a verdict.
+        """
+        from xpst.content import ContentType, content_profile, unsupported_content_message
+
+        profile = content_profile(platform_name)
+        if profile is None or not profile.is_publishing:
+            return None
+        if profile.supports(ContentType.CAROUSEL):
+            return None
+        base = unsupported_content_message(
+            platform_name,
+            ContentType.CAROUSEL,
+            supported=sorted(profile.implemented, key=lambda item: item.value),
+            declared=ContentType.CAROUSEL in profile.declared,
+        )
+        return f"{base} xPST will not stitch your items into a single video and call that a carousel."
+
+    async def post_manual_image(
+        self,
+        image_path: Path,
+        caption: str,
+        platforms: list[str] | None = None,
+        force_now: bool = False,
+    ) -> CrossPostResult:
+        """Publish a single image to the specified platforms.
+
+        Each destination publishes the image natively:
+
+        - Instagram: feed photo (``photo_upload`` / Graph API image container)
+        - X: image post (twikit media upload / v1.1 chunked media + v2 tweet)
+
+        The file is never encoded: an image is not a video, and no destination's
+        image path invokes ffmpeg. A destination whose adapter has no image path
+        (or that refuses this image format, aspect or size) reports an explicit
+        failure naming the reason — nothing is silently uploaded as a video.
+
+        Args:
+            image_path: Path to the image file on disk.
+            caption: Caption/text for the post.
+            platforms: Target platform names. None means all enabled platforms.
+
+        Returns:
+            CrossPostResult with per-platform outcomes.
+
+        Raises:
+            FileNotFoundError: If a local image_path does not exist.
+        """
+        if not str(image_path).startswith(("http://", "https://")) and not image_path.exists():
+            raise FileNotFoundError(f"Image not found: {image_path}")
+
+        if platforms is None:
+            platforms = list(self._platforms.keys())
+
+        from xpst.utils.content_hash import compute_content_hash
+
+        video_id = f"image_{image_path.stem}-{compute_content_hash(file_path=image_path, filename=image_path.name)[:8]}"
+
+        result = CrossPostResult(
+            video_id=video_id,
+            caption=caption,
+        )
+
+        for platform_name in platforms:
+            if self.shutdown_handler.should_shutdown:
+                logger.info("Shutdown requested, stopping image post")
+                break
+
+            uploader = self._platforms.get(platform_name)
+            if not uploader:
+                logger.info("Platform %s is not connected; recording a skip", platform_name)
+                result.results[platform_name] = skipped_unconnected_result(platform_name)
+                continue
+            refusal = _content_refusal(platform_name, "image")
+            if refusal is not None:
+                result.results[platform_name] = refusal
+                continue
+
+            upload_result = await self.upload_service.upload_image_to_platform(
+                uploader=uploader,
+                image_path=image_path,
+                caption=caption,
+                platform_name=platform_name,
+                video_id=video_id,
+                source_platform="local",
+                ignore_window=force_now,
+            )
+
+            result.results[platform_name] = upload_result
+            # Caption fidelity (D6): the image route carries one shared caption;
+            # record it (and the exact sent copy, when the service reports one)
+            # so --json/MCP captions cover image posts too.
+            sent = (upload_result.metadata or {}).get("caption_sent")
+            result.captions[platform_name] = (
+                sent if isinstance(sent, str) and sent else caption
+            )
+
+            # Notifications, circuit breaking, quota and state are owned by
+            # ``upload_service.upload_image_to_platform`` (it reports the outcome
+            # once per upload) — the engine must not announce the same upload a
+            # second time, or every webhook fires twice.
+
+        # Record the cross-post group (B1) so an image post also aggregates as a
+        # single analytics entry.
+        platforms_data = [
+            {
+                "platform": platform_name,
+                "post_id": upload_result.post_id,
+                "url": upload_result.post_url,
+            }
+            for platform_name, upload_result in result.results.items()
+            if upload_result.is_published
+        ]
+        if platforms_data:
+            try:
+                store = self._analytics_store()
+                store.record_cross_post_group(
+                    content_hash=video_id,
+                    video_id=video_id,
+                    caption=caption,
+                    source_url=str(image_path),
+                    platforms=platforms_data,
+                )
+            except Exception as exc:  # noqa: BLE001 — analytics must never block posting
+                logger.warning("Failed to record cross-post group: %s", exc)
+
+        result.update_status()
+        self.state.save()
+        return result
+
+    # ── Typed content requests (the content_type contract) ──────────────
+
+    async def post_text(
+        self,
+        text: str,
+        platforms: list[str] | None = None,
+        *,
+        per_destination: Mapping[str, str] | None = None,
+    ) -> CrossPostResult:
+        """Post a text-only status to specified platforms (no media).
+
+        The cheapest complete modality: no source fetch, no ffmpeg, no encode,
+        no media upload — one API call per destination that implements
+        ``post_text``. Validation and the modality→route decision stay in
+        :mod:`xpst.content`; this method only performs the publish and records
+        the outcome (state + analytics) exactly like a video post.
+
+        Args:
+            text: the post's text.
+            platforms: target platform names. None means all enabled platforms.
+            per_destination: optional ``{platform: text}`` overrides. A
+                destination present here gets its own text instead of ``text``
+                (the per-destination copy the content contract validates).
+
+        Returns:
+            CrossPostResult with one row per requested destination.
+        """
+        if platforms is None:
+            platforms = list(self._platforms.keys())
+
+        overrides = {str(name).strip().lower(): value for name, value in (per_destination or {}).items()}
+        # A stable identity for the post so it appears in state/analytics under
+        # one id: the text itself is the content, so hash it (a video post keys
+        # on its file fingerprint instead).
+        import hashlib
+
+        identity_source = text or "".join(sorted(overrides.values()))
+        text_id = f"text-{hashlib.sha256(identity_source.encode('utf-8')).hexdigest()[:8]}"
+
+        result = CrossPostResult(video_id=text_id, caption=text)
+
+        for platform_name in platforms:
+            if self.shutdown_handler.should_shutdown:
+                logger.info("Shutdown requested, stopping text post")
+                break
+
+            uploader = self._platforms.get(platform_name)
+            if not uploader:
+                logger.info("Platform %s is not connected; recording a skip", platform_name)
+                result.results[platform_name] = skipped_unconnected_result(platform_name)
+                continue
+            refusal = _content_refusal(platform_name, "text")
+            if refusal is not None:
+                result.results[platform_name] = refusal
+                continue
+
+            body = overrides.get(str(platform_name).strip().lower(), text)
+
+            upload_result = await self.upload_service.upload_text_to_platform(
+                uploader=uploader,
+                text=body,
+                platform_name=platform_name,
+                video_id=text_id,
+                source_platform="local",
+            )
+            result.results[platform_name] = upload_result
+
+            if upload_result.is_published:
+                self.notifier.notify_upload_success(
+                    platform=platform_name,
+                    video_id=text_id,
+                    post_url=upload_result.post_url or "",
+                )
+            elif upload_result.error != "Circuit breaker open" and "QUOTA_EXHAUSTED" not in (upload_result.error or ""):
+                self.notifier.notify_upload_failure(
+                    platform=platform_name,
+                    video_id=text_id,
+                    error=upload_result.error or "Unknown error",
+                )
+
+        # Record the cross-post group (B1) so a text post also aggregates as one
+        # analytics entry across the destinations it reached.
+        platforms_data = [
+            {
+                "platform": platform_name,
+                "post_id": upload_result.post_id,
+                "url": upload_result.post_url,
+            }
+            for platform_name, upload_result in result.results.items()
+            if upload_result.is_published
+        ]
+        if platforms_data:
+            try:
+                self._analytics_store().record_cross_post_group(
+                    content_hash=text_id,
+                    video_id=text_id,
+                    caption=text,
+                    source_url="",
+                    platforms=platforms_data,
+                )
+            except Exception as exc:  # noqa: BLE001 — analytics must never block posting
+                logger.warning("Failed to record cross-post group: %s", exc)
+
+        result.update_status()
+        self.state.save()
+        return result
+
+    async def post_request(self, request: ContentRequest) -> CrossPostResult:
+        """Publish one typed content request from the content-type contract.
+
+        This is the contract-complete entry point: the request says
+        ``{content_type, media, text, platforms, overrides}`` and the content
+        type is validated against every destination's *implemented* capability
+        before any uploader is touched. An unsupported content type produces an
+        explicit failure naming the destination and nothing is uploaded.
+
+        Args:
+            request: the typed publish request.
+
+        Returns:
+            CrossPostResult with one row per requested destination — including
+            rows for a refused request, which is how the caller learns that no
+            upload happened.
+        """
+        content_type = request.effective_content_type
+        platforms = [str(item).strip().lower() for item in request.platforms if str(item).strip()]
+
+        issues = list(validate_content_request(request))
+        if not platforms:
+            issues.append(
+                ContentIssue(
+                    code="content_type.no_destinations",
+                    message="Choose at least one destination platform.",
+                    severity="error",
+                )
+            )
+
+        blockers = [issue for issue in issues if issue.is_error]
+        if blockers:
+            # Refused before any upload: every requested destination is
+            # reported, none of them is reported as a success.
+            return refused_result(request, blockers, platforms=platforms)
+
+        media = list(request.resolved_media)
+        # The per-destination copy the user wrote (empty for every destination
+        # that keeps the shared text), so validation and upload use one shape.
+        per_platform_captions = request.per_platform_texts(platforms)
+        # The modality -> publishing-path decision lives in the contract module
+        # so no surface can route a request differently.
+        route = publish_route(request)
+        if route == PUBLISH_ROUTE_TEXT:
+            # The text route reads one text per destination, so per-destination
+            # overrides are honoured here as well as on the media routes.
+            per_destination = {
+                platform: request.text_for(platform)
+                for platform in platforms
+                if request.override_for(platform) is not None
+            }
+            return await self.post_text(request.text, platforms, per_destination=per_destination or None)
+        if route == PUBLISH_ROUTE_VIDEO and len(media) == 1:
+            return await self.post_manual(media[0], request.text, platforms, per_platform_captions)
+        if route == PUBLISH_ROUTE_IMAGE and len(media) == 1:
+            return await self.post_manual_image(media[0], request.text, platforms)
+        if route == PUBLISH_ROUTE_CAROUSEL and len(media) >= 2:
+            return await self.post_manual_carousel(media, request.text, platforms, per_platform_captions)
+
+        # Validated for this destination (an undeclared/plugin destination) but
+        # there is no publishing path for the content type yet.
+        result = CrossPostResult(video_id=f"{content_type.value}-request", caption=request.text)
+        for platform in platforms:
+            result.results[platform] = UploadResult(
+                success=False,
+                error=UNIMPLEMENTED_PUBLISH_ERROR.format(platform=platform, content_type=content_type.value),
+                platform=platform,
+                metadata={"content_type": content_type.value},
+                retryable=False,
+            )
+        result.update_status()
+        return result
+
+    async def backfill(
+        self,
+        platforms: list[str] | None = None,
+        limit: int = 10,
+        source: str | None = None,
+    ) -> list[CrossPostResult]:
+        """Retry videos that previously failed or weren't fully posted.
+
+        Scans state for videos missing from any platform, then re-attempts
+        upload using the previously downloaded video file. Skips videos
+        whose download files no longer exist on disk.
+
+        Args:
+            platforms: Target platforms to backfill. None means all enabled.
+            limit: Maximum number of videos to attempt.
+            source: If set, only backfill videos that originated from this
+                source (matched against each record's ``source_platform``).
+                None backfills records from every source.
+
+        Returns:
+            List of CrossPostResult for attempted backfills.
+        """
+
+        if platforms is None:
+            platforms = list(self._platforms.keys())
+
+        results = []
+        download_dir = Path(self.config.video.download_dir)
+
+        # Limit AFTER source filtering so a source filter does not silently
+        # consume the candidate budget with records from other sources.
+        candidates = [
+            (video_id, video_data)
+            for video_id, video_data in self.state.state["posted_videos"].items()
+            if source is None or video_data.get("source_platform") == source
+        ]
+
+        # Find videos that need backfilling
+        for video_id, video_data in candidates[:limit]:
+            # Check which platforms need posting
+            missing_platforms = []
+            for platform in platforms:
+                if platform not in video_data.get("posted_to", {}):
+                    missing_platforms.append(platform)
+
+            if not missing_platforms:
+                continue
+
+            # Find video file
+            video_path = download_dir / f"{video_id}.mp4"
+            if not video_path.exists():
+                logger.warning(f"Video file not found for backfill: {video_id}")
+                continue
+
+            caption = video_data.get("caption", f"Video from @{self.config.tiktok.username}")
+
+            logger.info(f"Backfilling {video_id} to: {', '.join(missing_platforms)}")
+
+            # Post to missing platforms
+            result = await self.post_manual(
+                video_path,
+                caption,
+                missing_platforms,
+            )
+            results.append(result)
+
+        return results
+
+    async def delete_post(
+        self,
+        video_id: str,
+        platform: str,
+        *,
+        soft: bool = False,
+        visibility: str | None = None,
+    ) -> DeleteResult:
+        """Delete or unpublish a previously posted video (Phase-1.2 D5 contract).
+
+        Every call returns an explicit :class:`DeleteResult` — never ``None``
+        and never a bare bool, so the UI always knows what happened:
+
+        - ``deleted``: hard delete confirmed on the platform; state keeps a
+          tombstone (platform, id, url, deleted_at, reason) for analytics.
+        - ``soft_hidden``: reversible unpublish (e.g. YouTube
+          ``status.privacyStatus=private|unlisted``); state records the new
+          visibility and keeps metrics.
+        - ``pending``: deletion could not be confirmed (e.g. TikTok web-session
+          fallback failed); state is marked ``delete_pending`` and the result
+          carries the share URL for one-tap manual removal.
+        - ``unsupported``: the platform (or the recorded data) cannot delete;
+          nothing is changed silently.
+
+        Args:
+            video_id: xPST's internal video id, OR the platform-side post id,
+                OR a full post URL (e.g.
+                ``https://youtube.com/shorts/RZ6i-0HM5dM``). A platform id or
+                URL is resolved to the internal record before deleting.
+            platform: Platform name to delete from.
+            soft: Request a reversible unpublish instead of a hard delete
+                where the platform supports it (YouTube only today).
+            visibility: Target visibility for soft hides (YouTube:
+                ``private`` or ``unlisted``).
+
+        Returns:
+            DeleteResult with an explicit outcome and UI-facing message.
+        """
+        post_data = self.state.get_post_data(video_id, platform)
+        if not post_data:
+            # Accept a platform-side post id or a full post URL, not just the
+            # internal id: a real user copy-pastes what the platform shows them
+            # (e.g. "RZ6i-0HM5dM" or its /shorts/ URL), never xPST's key.
+            from xpst.utils.post_refs import extract_post_id
+
+            candidate = extract_post_id(video_id)
+            try:
+                internal_id = (
+                    self.state.find_video_id_by_platform_post(platform, candidate)
+                    if candidate else None
+                )
+            except AttributeError:  # state double without the resolver
+                internal_id = None
+            if internal_id and internal_id != video_id:
+                logger.info(
+                    "Resolved delete reference %r to internal id %r on %s",
+                    video_id,
+                    internal_id,
+                    platform,
+                )
+                video_id = internal_id
+                post_data = self.state.get_post_data(video_id, platform)
+
+        if not post_data:
+            # D5 fallback: no local record, but the caller may still name a
+            # REAL platform post id (e.g. a post made outside this install,
+            # or one whose state row predates the current store). The
+            # adapter can delete by id without any local context, so try it
+            # before refusing. The outcome is whatever the platform reports —
+            # never a fabricated success, and a failed takedown stays
+            # `pending`/`unsupported` rather than pretending to have deleted.
+            from xpst.utils.post_refs import extract_post_id
+
+            uploader = self._platforms.get(platform)
+            direct_id = extract_post_id(video_id)
+            if uploader is not None and direct_id:
+                logger.info(
+                    "delete_post(%s, %s): no local record — attempting direct "
+                    "adapter delete by id",
+                    video_id,
+                    platform,
+                )
+                try:
+                    raw = uploader.delete(direct_id, soft=soft, visibility=visibility)
+                    if inspect.isawaitable(raw):
+                        raw = await raw
+                    direct_result = normalize_delete_result(raw, platform, direct_id)
+                except Exception as e:
+                    logger.error(
+                        "Direct adapter delete failed for %s on %s: %s",
+                        direct_id,
+                        platform,
+                        e,
+                    )
+                    direct_result = DeleteResult(
+                        outcome=DeleteOutcome.PENDING,
+                        platform=platform,
+                        post_id=direct_id,
+                        detail=str(e)[:200],
+                    )
+                if direct_result.ok:
+                    # Record the tombstone WITHOUT a state row: a deleted
+                    # platform post with no local video row still deserves a
+                    # tombstone record for the audit trail, but there is no
+                    # video_id to hang it on — log the truth instead.
+                    logger.info(
+                        "Direct adapter delete confirmed on %s (id %s); no "
+                        "local state row existed for it",
+                        platform,
+                        direct_id,
+                    )
+                    direct_result.detail = (
+                        (direct_result.detail + "; " if direct_result.detail else "")
+                        + "deleted by id (no local record)"
+                    )
+                return direct_result
+
+            logger.error(f"No post data found for {video_id} on {platform}")
+            return DeleteResult(
+                outcome=DeleteOutcome.UNSUPPORTED,
+                platform=platform,
+                post_id="",
+                message=(
+                    f"No post data found for {video_id} on {platform}, and a "
+                    "direct delete by id did not confirm a takedown."
+                ),
+            )
+
+        # Idempotency (QA wave): if state already carries a delete tombstone
+        # for this (video_id, platform), short-circuit — do not call the
+        # platform API again. Repeated delete calls converge to the same
+        # explicit outcome instead of erroring or double-deleting.
+        if post_data.get("deleted"):
+            deleted_at = str(post_data.get("deleted_at") or "unknown time")
+            logger.info(
+                "delete_post(%s, %s): already deleted at %s — short-circuiting",
+                video_id,
+                platform,
+                deleted_at,
+            )
+            already_post_id = str(post_data.get("post_id") or post_data.get("id") or "")
+            return DeleteResult(
+                outcome=DeleteOutcome.DELETED,
+                platform=platform,
+                post_id=already_post_id,
+                message=f"Already deleted from {platform} ({deleted_at})",
+                detail="already deleted",
+            )
+
+        # State schema stores the platform post id under "id" (see state.py
+        # mark_video_posted / state_manager.py record_posted). Accept "post_id"
+        # too for robustness against older or external state shapes.
+        post_id = post_data.get("post_id") or post_data.get("id")
+        if not post_id:
+            logger.error(f"No post id found for {video_id} on {platform}")
+            return DeleteResult(
+                outcome=DeleteOutcome.UNSUPPORTED,
+                platform=platform,
+                post_id="",
+                message=f"No post id found for {video_id} on {platform}",
+            )
+        uploader = self._platforms.get(platform)
+        if not uploader:
+            logger.error(f"Platform {platform} not available")
+            return DeleteResult(
+                outcome=DeleteOutcome.UNSUPPORTED,
+                platform=platform,
+                post_id=post_id,
+                message=f"Platform {platform} not available for deletion",
+            )
+
+        share_url = str(post_data.get("url") or "")
+
+        try:
+            raw = await uploader.delete(post_id, soft=soft, visibility=visibility)
+            result = normalize_delete_result(raw, platform, post_id)
+        except Exception as e:
+            logger.error(f"Delete failed for {video_id} on {platform}: {e}")
+            result = DeleteResult(
+                outcome=DeleteOutcome.PENDING,
+                platform=platform,
+                post_id=post_id,
+                detail=str(e)[:200],
+            )
+
+        # State discipline (D5 §3.6): hard deletes leave a tombstone, soft
+        # hides update visibility, pending marks are surfaced — never a silent
+        # removal of context.
+        if result.outcome == DeleteOutcome.DELETED:
+            self.state.record_delete_tombstone(
+                video_id,
+                platform,
+                reason="hard_delete",
+                detail=result.detail,
+            )
+            self.state.save()
+        elif result.outcome == DeleteOutcome.SOFT_HIDDEN:
+            self.state.set_visibility(video_id, platform, visibility or "private")
+            self.state.save()
+        elif result.outcome == DeleteOutcome.PENDING:
+            self.state.mark_delete_pending(
+                video_id,
+                platform,
+                reason="delete_pending",
+                detail=result.detail,
+            )
+            self.state.save()
+            result = result.with_share_url(share_url)
+        else:  # unsupported
+            result = result.with_share_url(share_url)
+
+        return result
+
+    def _get_monitor(self) -> PostMonitor:
+        """Get or create the PostMonitor instance.
+
+        Lazily initializes the monitor on first access, wiring it to
+        the current sources and platforms.
+
+        Returns:
+            PostMonitor instance.
+        """
+        if self._monitor is None:
+            self._monitor = PostMonitor(
+                config=self.config,
+                state=self.state,
+                sources=self._sources,
+                platforms=set(self._platforms.keys()),
+            )
+        return self._monitor
+
+    async def check_and_post_bidirectional(
+        self, max_per_source: int = 5
+    ) -> list[CrossPostResult]:
+        """Bidirectional cross-posting: check ALL sources for new posts.
+
+        Unlike check_and_post() which only checks TikTok, this method
+        polls ALL enabled sources for new posts. If a new post is found
+        on any platform, it gets cross-posted to all OTHER platforms.
+
+        Args:
+            max_per_source: Max posts to check per source.
+
+        Returns:
+            List of CrossPostResult, one per processed post.
+        """
+        results: list[CrossPostResult] = []
+
+        if self.shutdown_handler.should_shutdown:
+            logger.info("Shutdown requested, aborting bidirectional check")
+            return results
+
+        # Check time-of-day
+        if not self.anti_bot.should_post_now():
+            logger.info("Outside posting hours, deferring bidirectional check")
+            return results
+
+        monitor = self._get_monitor()
+
+        # Find new posts across all sources
+        new_posts = await monitor.check_all_sources(max_per_source)
+
+        if not new_posts:
+            logger.info("No new posts found across all sources")
+            return results
+
+        logger.info(
+            "Found %d new posts to cross-post: %s",
+            len(new_posts),
+            ", ".join(f"{p.source_platform}:{p.video_id}" for p in new_posts),
+        )
+
+        # Process each new post
+        for post in new_posts:
+            if self.shutdown_handler.should_shutdown:
+                logger.info("Shutdown requested, stopping after current post")
+                break
+
+            try:
+                result = await self._process_bidirectional_post(post)
+                results.append(result)
+                self.state.save()
+            except Exception as e:
+                logger.error(
+                    "Failed to process bidirectional post %s: %s",
+                    post.composite_key, e,
+                )
+                continue
+
+        # Update last check time
+        self.state.update_last_check_time()
+        self.state.save()
+
+        # Send batch notification
+        if results:
+            total = sum(len(r.results) for r in results)
+            success = sum(
+                sum(1 for ur in r.results.values() if ur.is_published)
+                for r in results
+            )
+            failed = total - success
+            self.notifier.notify_batch_complete(total, success, failed)
+
+        return results
+
+    async def _process_bidirectional_post(
+        self, post: NewPost
+    ) -> CrossPostResult:
+        """Process a single post for bidirectional cross-posting.
+
+        Downloads from source, then uploads to all targets with
+        anti-bot protections (random delays, caption variation, rate limits).
+
+        Args:
+            post: NewPost with source info and target platforms.
+
+        Returns:
+            CrossPostResult with per-platform upload outcomes.
+        """
+        result = CrossPostResult(
+            video_id=post.composite_key,
+            caption=post.caption,
+        )
+
+        logger.info(
+            "Processing bidirectional: %s - %s",
+            post.composite_key, post.caption[:50],
+        )
+
+        # Get the source plugin for downloading
+        source = self._sources.get(post.source_platform)
+        if not source:
+            logger.error("No source for %s", post.source_platform)
+            return result
+
+        # Check disk space before downloading
+        download_dir = Path(self.config.video.download_dir)
+        try:
+            check_disk_space(download_dir)
+        except DiskSpaceError as e:
+            logger.error("Insufficient disk space for bidirectional download: %s", e)
+            return result
+
+        # Download video from source
+        download_dir = Path(self.config.video.download_dir)
+        download_result = await source.download(post.video_id, download_dir)
+
+        if not download_result.success or not download_result.video_path:
+            logger.error("Download failed: %s", download_result.error)
+            return result
+
+        video_path = download_result.video_path
+        self.shutdown_handler.add_temp_file(video_path)
+
+        # Randomize platform order
+        target_order = self.anti_bot.get_randomized_platform_order(
+            post.target_platforms
+        )
+
+        # Upload to each target platform
+        for platform_name in target_order:
+            if self.shutdown_handler.should_shutdown:
+                logger.info("Shutdown requested, stopping uploads")
+                break
+
+            uploader = self._platforms.get(platform_name)
+            if not uploader:
+                logger.warning("Platform %s not available", platform_name)
+                continue
+
+            # Check if already cross-posted
+            if self.state.is_cross_posted(post.composite_key, platform_name):
+                logger.info("Already cross-posted to %s", platform_name)
+                result.results[platform_name] = UploadResult(
+                    success=True, platform=platform_name,
+                    metadata={"already_posted": True},
+                )
+                continue
+
+            # Upload via upload service (includes anti-bot protections)
+            upload_result = await self.upload_service.upload_to_platform(
+                uploader=uploader,
+                video_path=video_path,
+                caption=post.caption,
+                platform_name=platform_name,
+                video_id=post.composite_key,
+                source_platform=post.source_platform,
+            )
+
+            result.results[platform_name] = upload_result
+
+            # Record in cross-posted state
+            if upload_result.is_published:
+                self.state.mark_cross_posted(
+                    post.composite_key, platform_name,
+                    post_id=upload_result.post_id,
+                    post_url=upload_result.post_url,
+                    caption=post.caption,
+                    content_hash=post.content_hash,
+                )
+                self.notifier.notify_upload_success(
+                    platform=platform_name,
+                    video_id=post.composite_key,
+                    post_url=upload_result.post_url or "",
+                )
+            elif not upload_result.metadata.get("deferred"):
+                self.state.mark_cross_post_failed(
+                    post.composite_key, platform_name,
+                    upload_result.error or "Unknown error",
+                )
+                self.notifier.notify_upload_failure(
+                    platform=platform_name,
+                    video_id=post.composite_key,
+                    error=upload_result.error or "Unknown error",
+                )
+
+        # After all platforms attempted, record the cross-post group (B1):
+        # one video posted to multiple platforms shows as ONE analytics entry
+        # with aggregated metrics.
+        platforms_data = []
+        for platform_name, upload_result in result.results.items():
+            if upload_result.is_published:
+                platforms_data.append({
+                    "platform": platform_name,
+                    "post_id": upload_result.post_id,
+                    "url": upload_result.post_url,
+                })
+        if platforms_data:
+            try:
+                store = self._analytics_store()
+                store.record_cross_post_group(
+                    content_hash=post.content_hash or "",
+                    video_id=result.video_id,
+                    caption=result.caption,
+                    source_url=post.url or "",
+                    platforms=platforms_data,
+                )
+            except Exception as exc:  # noqa: BLE001 — analytics must never block posting
+                logger.warning("Failed to record cross-post group: %s", exc)
+
+        # Cleanup
+        if self.config.video.cleanup_after_post:
+            self._cleanup_encoded_files(video_path)
+
+        result.update_status()
+        return result
+
+    async def check_health(self, *, include_platforms: bool = True) -> dict[str, Any]:
+        """Check health of all sources, platforms, and subsystems.
+
+        Performs connectivity tests on each platform (without uploading)
+        and collects circuit breaker states, quota status, and state stats.
+
+        Args:
+            include_platforms: Probe the engine's own uploaders and fill the
+                ``platforms`` block. Pass ``False`` when the caller renders
+                platform auth from the canonical collector
+                (:func:`xpst.auth_status.platform_health_entries`) — otherwise
+                the same account would be probed twice and could be reported
+                with two different verdicts.
+
+        Returns:
+            Health status dict with keys: ``sources``, ``platforms``,
+            ``circuit_breakers``, ``state``, ``quotas``.
+        """
+
+        health = {
+            "sources": {},
+            "platforms": {},
+            "circuit_breakers": self.circuit_breakers.get_status(),
+            "state": self.state.get_statistics(),
+            "quotas": self.quota_manager.get_status(),
+        }
+
+        # Check sources
+        for name, source in self._sources.items():
+            try:
+                source_health = await source.check_health()
+                health["sources"][name] = source_health
+            except Exception as e:
+                health["sources"][name] = {
+                    "status": "error",
+                    "error": str(e),
+                }
+
+        # Issue #296: a source whose check_health probe passes but whose
+        # actual fetch pipeline is dead must not read green. Merge the
+        # persisted fetch-failure record into the live verdict.
+        persisted_source_health: dict[str, Any] = (
+            self.state.state.get("health", {}).get("sources", {})
+            if getattr(self, "state", None) is not None
+            else {}
+        )
+        for name, entry in health["sources"].items():
+            fetch_record = persisted_source_health.get(name) or {}
+            if fetch_record.get("last_error"):
+                entry["last_fetch_error"] = fetch_record["last_error"]
+                entry["last_fetch_error_at"] = fetch_record.get("last_error_at")
+                entry["consecutive_fetch_failures"] = fetch_record.get("consecutive_failures", 0)
+                if entry.get("status") == "ok":
+                    entry["status"] = "degraded"
+
+        # Check platforms (connectivity test, no uploads)
+        all_known_platforms = {"youtube", "instagram", "x", "tiktok", "threads", "facebook"}
+        if include_platforms:
+            for name, uploader in self._platforms.items():
+                try:
+                    platform_health = await uploader.check_health()
+                    health["platforms"][name] = {
+                        "authenticated": platform_health.authenticated,
+                        "session_valid": platform_health.session_valid,
+                        "error": platform_health.error,
+                        "details": platform_health.details,
+                    }
+                except Exception as e:
+                    health["platforms"][name] = {
+                        "authenticated": False,
+                        "session_valid": False,
+                        "error": str(e),
+                    }
+
+            # Report disabled platforms (not initialized but known)
+            for name in all_known_platforms - set(self._platforms.keys()):
+                health["platforms"][name] = {
+                    "authenticated": False,
+                    "session_valid": False,
+                    "error": "disabled",
+                    "details": {},
+                }
+
+        # Role-qualified truth on every platform entry. ``authenticated`` here
+        # is the UPLOADER's verdict — i.e. the posting role — and a source-only
+        # platform (TikTok before its Content Posting API app is approved) gets
+        # ``can_post: false`` plus the reason, so no reader mistakes a working
+        # download source for a postable destination. One implementation:
+        # ``provider_truth.posting_capability``.
+        from xpst.provider_truth import POSTING_FIELDS, posting_capability
+
+        for name, entry in health["platforms"].items():
+            truth = posting_capability(
+                self.config,
+                name,
+                {
+                    "authenticated": entry.get("authenticated"),
+                    "session_valid": entry.get("session_valid"),
+                    "live_checked": True,
+                    "error": entry.get("error"),
+                    "details": entry.get("details") or {},
+                },
+            )
+            entry["role"] = truth["posting_role"] or "video_destination"
+            for field_name in POSTING_FIELDS:
+                entry[field_name] = truth[field_name]
+
+        return health

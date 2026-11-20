@@ -1,0 +1,20 @@
+[package]
+name = "xpst-store"
+description = "Analytics, snapshots and the knowledge base (SQLite) (P3+)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+rusqlite = { version = "0.41", features = ["bundled"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+

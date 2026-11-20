@@ -1,0 +1,129 @@
+<script>
+  import { onMount } from "svelte";
+  import { api, errorMessage } from "../lib/api.js";
+  import Card from "../lib/components/Card.svelte";
+  import EmptyState from "../lib/components/EmptyState.svelte";
+  import ErrorState from "../lib/components/ErrorState.svelte";
+  import LoadingSkeleton from "../lib/components/LoadingSkeleton.svelte";
+  import PlatformBadge from "../lib/components/PlatformBadge.svelte";
+  import StatusBadge from "../lib/components/StatusBadge.svelte";
+
+  let state = $state("loading");
+  let schedules = $state([]);
+  let error = $state("");
+  let cancellingId = $state("");
+  let cancelError = $state("");
+  let cancelledId = $state("");
+
+  async function load() {
+    state = "loading";
+    error = "";
+    try {
+      const payload = await api.schedules();
+      schedules = Array.isArray(payload?.schedules) ? payload.schedules : [];
+      state = "ready";
+    } catch (cause) {
+      error = errorMessage(cause);
+      state = "error";
+    }
+  }
+
+  onMount(load);
+
+  /** Cancel one persisted plan. Local store only — never un-posts live content. */
+  async function cancel(entryId) {
+    if (!entryId || cancellingId) return;
+    cancellingId = entryId;
+    cancelError = "";
+    cancelledId = "";
+    try {
+      const payload = await api.cancelSchedule(entryId);
+      if (payload?.cancelled) {
+        cancelledId = entryId;
+        await load();
+      } else {
+        cancelError = payload?.error || `The engine could not cancel ${entryId}.`;
+      }
+    } catch (cause) {
+      cancelError = errorMessage(cause);
+    } finally {
+      cancellingId = "";
+    }
+  }
+
+  function statusFor(status) {
+    return { pending: "warning", processing: "warning", completed: "success", failed: "error" }[status] ?? "neutral";
+  }
+
+  function formatTime(value) {
+    if (!value) return "—";
+    const date = new Date(value);
+    return Number.isNaN(date.valueOf()) ? value : date.toLocaleString();
+  }
+</script>
+
+<header class="xpst-page-header">
+  <div>
+    <h1>Schedule</h1>
+    <p>Persisted plans and their truthful state. Cancelling removes the plan from the local store — it never un-posts content that already went out.</p>
+  </div>
+</header>
+
+{#if cancelError}
+  <p class="xpst-field__error" role="status">{cancelError}</p>
+{:else if cancelledId}
+  <p class="xpst-field__hint" role="status">Schedule cancelled. It will not run.</p>
+{/if}
+
+{#if state === "loading"}
+  <LoadingSkeleton rows={5} label="Loading schedule" onRetry={load} />
+{:else if state === "error"}
+  <ErrorState message={error} retry={load} />
+{:else if schedules.length === 0}
+  <EmptyState title="Nothing scheduled" description="Create a schedule from the CLI or MCP. The dashboard will show it here without inventing progress." actionLabel="Refresh" onAction={load} />
+{:else}
+  <Card title="Scheduled posts" description={`${schedules.length} persisted plan${schedules.length === 1 ? "" : "s"}`}>
+    <div class="xpst-table-wrap" style="box-shadow: none;">
+      <table class="xpst-table">
+        <thead>
+          <tr><th scope="col">Content</th><th scope="col">Destinations</th><th scope="col">When</th><th scope="col">State</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
+        </thead>
+        <tbody>
+          {#each schedules as entry (entry.id)}
+            <tr>
+              <td>
+                <strong>{entry.caption || "Untitled post"}</strong>
+                <small class="xpst-schedule-path">{entry.video_path || (entry.content_type === "text" ? "Text post (no media)" : "No media path")}</small>
+              </td>
+              <td>
+                <div class="xpst-schedule-platforms">
+                  {#each entry.platforms ?? [] as platform}
+                    <PlatformBadge {platform} size={16} />
+                  {:else}
+                    <span data-muted="true">All enabled</span>
+                  {/each}
+                </div>
+              </td>
+              <td>{formatTime(entry.scheduled_time)}</td>
+              <td><StatusBadge status={statusFor(entry.status)} label={entry.status ?? "unknown"} /></td>
+              <td>
+                {#if ["pending", "processing", "failed"].includes(entry.status)}
+                  <button
+                    class="xpst-button"
+                    data-variant="secondary"
+                    type="button"
+                    onclick={() => cancel(entry.id)}
+                    disabled={cancellingId === entry.id}
+                    aria-busy={cancellingId === entry.id ? "true" : undefined}
+                  >
+                    {cancellingId === entry.id ? "Cancelling…" : "Cancel"}
+                  </button>
+                {/if}
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  </Card>
+{/if}

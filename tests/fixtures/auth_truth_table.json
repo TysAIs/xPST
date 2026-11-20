@@ -1,0 +1,2025 @@
+{
+  "capture_rules": {
+    "clock": 1700000000.0,
+    "config_dir": "throwaway scratch directory per row (XPST_CONFIG_DIR); ~/.xpst is never touched",
+    "network": "none \u2014 no provider API is called",
+    "provenance": {
+      "config_only": "observed by loading a scratch config profile with no credentials",
+      "unverified_no_credentials": "state transition produced by the real mapping functions from a SYNTHETIC probe result; not observed against a live provider account"
+    }
+  },
+  "engine": "python:src/xpst (provider_truth, token_state, auth_path_risk)",
+  "generated_by": "scripts/capture_auth_truth_table.py",
+  "now_epoch": 1700000000.0,
+  "providers": {
+    "bluesky": {
+      "auth_mode": "app_password",
+      "display_name": "Bluesky",
+      "roles": [
+        "video_destination"
+      ]
+    },
+    "facebook": {
+      "auth_mode": "oauth",
+      "display_name": "Facebook Page",
+      "roles": [
+        "video_destination"
+      ]
+    },
+    "instagram": {
+      "auth_mode": "session",
+      "display_name": "Instagram Reels",
+      "roles": [
+        "source",
+        "video_destination",
+        "analytics"
+      ]
+    },
+    "local": {
+      "auth_mode": "local",
+      "display_name": "Local files",
+      "roles": [
+        "source"
+      ]
+    },
+    "messenger": {
+      "auth_mode": "oauth",
+      "display_name": "Messenger",
+      "roles": [
+        "messaging"
+      ]
+    },
+    "rumble": {
+      "auth_mode": "api_key",
+      "display_name": "Rumble",
+      "roles": [
+        "video_destination"
+      ]
+    },
+    "threads": {
+      "auth_mode": "oauth",
+      "display_name": "Threads",
+      "roles": [
+        "video_destination",
+        "analytics"
+      ]
+    },
+    "tiktok": {
+      "auth_mode": "source_only",
+      "display_name": "TikTok",
+      "roles": [
+        "source",
+        "video_destination",
+        "analytics"
+      ]
+    },
+    "x": {
+      "auth_mode": "cookies",
+      "display_name": "X",
+      "roles": [
+        "source",
+        "video_destination",
+        "analytics"
+      ]
+    },
+    "youtube": {
+      "auth_mode": "oauth",
+      "display_name": "YouTube Shorts",
+      "roles": [
+        "source",
+        "video_destination",
+        "analytics"
+      ]
+    }
+  },
+  "rows": [
+    {
+      "expected": {
+        "auth_mode": "oauth",
+        "auto_refresh": false,
+        "badge": "unknown",
+        "ban_risk": null,
+        "can_post": false,
+        "provider_state": "unconfigured",
+        "role_states": {
+          "analytics": "unconfigured",
+          "source": "unconfigured",
+          "video_destination": "unconfigured"
+        },
+        "source_only": false,
+        "token_state": "unknown"
+      },
+      "id": "default/youtube",
+      "informational": {
+        "badge_reason": "no live check has run \u2014 a stored credential is not proof of a working session",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "youtube",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": false,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "fresh config: YouTube is enabled but has no token file",
+      "platform": "youtube",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "cookies",
+        "auto_refresh": false,
+        "badge": "unknown",
+        "ban_risk": {
+          "acknowledged": false,
+          "advisory_code": "UNOFFICIAL_WEB_CLIENT",
+          "code": "unofficial_web_client",
+          "enabled": true,
+          "severity": "advisory"
+        },
+        "can_post": false,
+        "provider_state": "unconfigured",
+        "role_states": {
+          "analytics": "unconfigured",
+          "source": "unconfigured",
+          "video_destination": "unconfigured"
+        },
+        "source_only": false,
+        "token_state": "unknown"
+      },
+      "id": "default/x",
+      "informational": {
+        "badge_reason": "no live check has run \u2014 a stored credential is not proof of a working session",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "cookies",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "x",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": false,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "fresh config: X defaults to the unofficial cookies path",
+      "platform": "x",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "graph_api",
+        "auto_refresh": false,
+        "badge": "unknown",
+        "ban_risk": null,
+        "can_post": false,
+        "provider_state": "unconfigured",
+        "role_states": {
+          "analytics": "unconfigured",
+          "source": "unconfigured",
+          "video_destination": "unconfigured"
+        },
+        "source_only": false,
+        "token_state": "unknown"
+      },
+      "id": "default/instagram",
+      "informational": {
+        "badge_reason": "no live check has run \u2014 a stored credential is not proof of a working session",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "graph_api",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "instagram",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": false,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "fresh config: instagram reports the configured graph_api mode",
+      "platform": "instagram",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "source_only",
+        "auto_refresh": false,
+        "badge": "source_only",
+        "ban_risk": null,
+        "can_post": false,
+        "provider_state": "unconfigured",
+        "role_states": {
+          "analytics": "unconfigured",
+          "source": "unconfigured",
+          "video_destination": "unconfigured"
+        },
+        "source_only": true,
+        "token_state": "source_only"
+      },
+      "id": "default/tiktok",
+      "informational": {
+        "badge_reason": "source only \u2014 no posting credentials configured (TikTok dev app pending)",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "tiktok",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": false,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "fresh config: no posting creds, so source_only is the effective mode",
+      "platform": "tiktok",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "app_password",
+        "auto_refresh": false,
+        "badge": "disabled",
+        "ban_risk": null,
+        "can_post": false,
+        "provider_state": "disabled",
+        "role_states": {
+          "video_destination": "disabled"
+        },
+        "source_only": false,
+        "token_state": "disabled"
+      },
+      "id": "default/bluesky",
+      "informational": {
+        "badge_reason": "disabled in config",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": false,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "bluesky",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": false,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "bluesky is opt-in and disabled by default",
+      "platform": "bluesky",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "oauth",
+        "auto_refresh": false,
+        "badge": "disabled",
+        "ban_risk": null,
+        "can_post": false,
+        "provider_state": "disabled",
+        "role_states": {
+          "analytics": "disabled",
+          "video_destination": "disabled"
+        },
+        "source_only": false,
+        "token_state": "disabled"
+      },
+      "id": "default/threads",
+      "informational": {
+        "badge_reason": "disabled in config",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": false,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "threads",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": false,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "threads is disabled by default",
+      "platform": "threads",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "local",
+        "auto_refresh": null,
+        "badge": null,
+        "ban_risk": null,
+        "can_post": false,
+        "provider_state": "unconfigured",
+        "role_states": {
+          "source": "unconfigured"
+        },
+        "source_only": false,
+        "token_state": null
+      },
+      "id": "default/local",
+      "informational": {
+        "badge_reason": null,
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "local",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": false,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "local source has no path configured",
+      "platform": "local",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "oauth",
+        "auto_refresh": true,
+        "badge": "unknown",
+        "ban_risk": null,
+        "can_post": true,
+        "provider_state": "ready",
+        "role_states": {
+          "analytics": "ready",
+          "source": "ready",
+          "video_destination": "ready"
+        },
+        "source_only": false,
+        "token_state": "unknown"
+      },
+      "id": "youtube-token-file-present",
+      "informational": {
+        "badge_reason": "no live check has run \u2014 a stored credential is not proof of a working session",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": 1705184000.0,
+          "graph_access_token": false,
+          "has_refresh_token": true,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "youtube",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": true,
+          "token_document_present": true,
+          "token_file_exists": true,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "a stored credential is configured data, not proof of a live session",
+      "platform": "youtube",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "source_only",
+        "auto_refresh": false,
+        "badge": "source_only",
+        "ban_risk": null,
+        "can_post": false,
+        "provider_state": "unconfigured",
+        "role_states": {
+          "analytics": "unconfigured",
+          "source": "ready",
+          "video_destination": "unconfigured"
+        },
+        "source_only": true,
+        "token_state": "source_only"
+      },
+      "id": "tiktok-source-username",
+      "informational": {
+        "badge_reason": "source only \u2014 no posting credentials configured (TikTok dev app pending)",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "tiktok",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": true,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": true
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "source role configured, destination role not configured",
+      "platform": "tiktok",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "content_posting_api",
+        "auto_refresh": true,
+        "badge": "unknown",
+        "ban_risk": null,
+        "can_post": true,
+        "provider_state": "ready",
+        "role_states": {
+          "analytics": "ready",
+          "source": "unconfigured",
+          "video_destination": "ready"
+        },
+        "source_only": false,
+        "token_state": "unknown"
+      },
+      "id": "tiktok-content-posting-api",
+      "informational": {
+        "badge_reason": "no live check has run \u2014 a stored credential is not proof of a working session",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": true,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": true,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": true,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "tiktok",
+          "publish_mode": "auto",
+          "refresh_token": true,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": true,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "Content Posting API credentials select the posting route",
+      "platform": "tiktok",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "content_posting_api",
+        "auto_refresh": false,
+        "badge": "unknown",
+        "ban_risk": null,
+        "can_post": false,
+        "provider_state": "blocked_external_review",
+        "role_states": {
+          "analytics": "ready",
+          "source": "unconfigured",
+          "video_destination": "blocked_external_review"
+        },
+        "source_only": false,
+        "token_state": "unknown"
+      },
+      "id": "tiktok-sandbox",
+      "informational": {
+        "badge_reason": "no live check has run \u2014 a stored credential is not proof of a working session",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": true,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": true,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "tiktok",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": true,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": true,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "sandbox app cannot publish publicly",
+      "platform": "tiktok",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "session",
+        "auto_refresh": false,
+        "badge": "unknown",
+        "ban_risk": {
+          "acknowledged": false,
+          "advisory_code": "UNOFFICIAL_PRIVATE_API",
+          "code": "unofficial_private_api",
+          "enabled": true,
+          "severity": "high"
+        },
+        "can_post": false,
+        "provider_state": "unconfigured",
+        "role_states": {
+          "analytics": "unconfigured",
+          "source": "unconfigured",
+          "video_destination": "unconfigured"
+        },
+        "source_only": false,
+        "token_state": "unknown"
+      },
+      "id": "instagram-session-enabled-no-file",
+      "informational": {
+        "badge_reason": "no live check has run \u2014 a stored credential is not proof of a working session",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "session",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "instagram",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": false,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "unofficial private-API path raises the high-severity ban risk",
+      "platform": "instagram",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "graph_api",
+        "auto_refresh": false,
+        "badge": "unknown",
+        "ban_risk": null,
+        "can_post": false,
+        "provider_state": "unconfigured",
+        "role_states": {
+          "analytics": "unconfigured",
+          "source": "unconfigured",
+          "video_destination": "unconfigured"
+        },
+        "source_only": false,
+        "token_state": "unknown"
+      },
+      "id": "instagram-graph-no-token",
+      "informational": {
+        "badge_reason": "no live check has run \u2014 a stored credential is not proof of a working session",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "graph_api",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "instagram",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": false,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "official path selected but no token supplied",
+      "platform": "instagram",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "api_v2",
+        "auto_refresh": false,
+        "badge": "unknown",
+        "ban_risk": null,
+        "can_post": true,
+        "provider_state": "ready",
+        "role_states": {
+          "analytics": "ready",
+          "source": "ready",
+          "video_destination": "ready"
+        },
+        "source_only": false,
+        "token_state": "unknown"
+      },
+      "id": "x-api-v2-bearer",
+      "informational": {
+        "badge_reason": "no live check has run \u2014 a stored credential is not proof of a working session",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "api_v2",
+          "bearer_token": true,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "x",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": true,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "official X API v2 path: no ban-risk advisory",
+      "platform": "x",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "cookies",
+        "auto_refresh": false,
+        "badge": "unknown",
+        "ban_risk": {
+          "acknowledged": false,
+          "advisory_code": "UNOFFICIAL_WEB_CLIENT",
+          "code": "unofficial_web_client",
+          "enabled": true,
+          "severity": "advisory"
+        },
+        "can_post": false,
+        "provider_state": "unconfigured",
+        "role_states": {
+          "analytics": "unconfigured",
+          "source": "unconfigured",
+          "video_destination": "unconfigured"
+        },
+        "source_only": false,
+        "token_state": "unknown"
+      },
+      "id": "x-cookies-missing-file",
+      "informational": {
+        "badge_reason": "no live check has run \u2014 a stored credential is not proof of a working session",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "cookies",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "x",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": false,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "cookies path selected, cookie jar absent",
+      "platform": "x",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "oauth",
+        "auto_refresh": false,
+        "badge": "unknown",
+        "ban_risk": null,
+        "can_post": false,
+        "provider_state": "unconfigured",
+        "role_states": {
+          "video_destination": "unconfigured"
+        },
+        "source_only": false,
+        "token_state": "unknown"
+      },
+      "id": "facebook-page-id-only",
+      "informational": {
+        "badge_reason": "no live check has run \u2014 a stored credential is not proof of a working session",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": true,
+          "platform": "facebook",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": false,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "half-configured Page is not configured",
+      "platform": "facebook",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "oauth",
+        "auto_refresh": true,
+        "badge": "unknown",
+        "ban_risk": null,
+        "can_post": false,
+        "provider_state": "unconfigured",
+        "role_states": {
+          "analytics": "unconfigured",
+          "video_destination": "unconfigured"
+        },
+        "source_only": false,
+        "token_state": "unknown"
+      },
+      "id": "threads-token-no-user",
+      "informational": {
+        "badge_reason": "no live check has run \u2014 a stored credential is not proof of a working session",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": true,
+          "has_refresh_token": true,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "threads",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": false,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "a Threads token without the user id is not configured",
+      "platform": "threads",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "local",
+        "auto_refresh": null,
+        "badge": null,
+        "ban_risk": null,
+        "can_post": false,
+        "provider_state": "ready",
+        "role_states": {
+          "source": "ready"
+        },
+        "source_only": false,
+        "token_state": null
+      },
+      "id": "local-path-present",
+      "informational": {
+        "badge_reason": null,
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": true,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "local",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": false,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "local source path exists",
+      "platform": "local",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "source_only",
+        "auto_refresh": false,
+        "badge": "disabled",
+        "ban_risk": null,
+        "can_post": false,
+        "provider_state": "disabled",
+        "role_states": {
+          "analytics": "disabled",
+          "source": "disabled",
+          "video_destination": "disabled"
+        },
+        "source_only": true,
+        "token_state": "disabled"
+      },
+      "id": "all-disabled/tiktok",
+      "informational": {
+        "badge_reason": "disabled in config",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": null,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": false,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "tiktok",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": true,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": true
+        },
+        "live": null,
+        "source_live": null
+      },
+      "note": "disabled in config wins over a configured source",
+      "platform": "tiktok",
+      "provenance": "config_only"
+    },
+    {
+      "expected": {
+        "auth_mode": "oauth",
+        "auto_refresh": true,
+        "badge": "connected",
+        "ban_risk": null,
+        "can_post": true,
+        "provider_state": "ready",
+        "role_states": {
+          "analytics": "ready",
+          "source": "ready",
+          "video_destination": "ready"
+        },
+        "source_only": false,
+        "token_state": "valid"
+      },
+      "id": "youtube-live-ok",
+      "informational": {
+        "badge_reason": "live check passed; access token refreshes automatically in the background",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": 1700000000.0,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": 1705184000.0,
+          "graph_access_token": false,
+          "has_refresh_token": true,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "youtube",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": true,
+          "token_document_present": true,
+          "token_file_exists": true,
+          "username": false
+        },
+        "live": {
+          "authenticated": true,
+          "checked_at": 1700000000.0,
+          "details": {},
+          "error": null,
+          "live_checked": true,
+          "session_valid": true
+        },
+        "source_live": null
+      },
+      "note": "live probe passed",
+      "platform": "youtube",
+      "provenance": "unverified_no_credentials"
+    },
+    {
+      "expected": {
+        "auth_mode": "oauth",
+        "auto_refresh": true,
+        "badge": "expiring",
+        "ban_risk": null,
+        "can_post": false,
+        "provider_state": "degraded",
+        "role_states": {
+          "analytics": "degraded",
+          "source": "degraded",
+          "video_destination": "degraded"
+        },
+        "source_only": false,
+        "token_state": "expired_refreshable"
+      },
+      "id": "youtube-live-expired-refreshable",
+      "informational": {
+        "badge_reason": "access token expired (invalid_grant: Token has been expired or revoked); a refresh token is available and xPST will refresh automatically",
+        "error": "invalid_grant: Token has been expired or revoked"
+      },
+      "inputs": {
+        "checked_at": 1700000000.0,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": 1705184000.0,
+          "graph_access_token": false,
+          "has_refresh_token": true,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "youtube",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": true,
+          "token_document_present": true,
+          "token_file_exists": true,
+          "username": false
+        },
+        "live": {
+          "authenticated": false,
+          "checked_at": 1700000000.0,
+          "details": {},
+          "error": "invalid_grant: Token has been expired or revoked",
+          "live_checked": true,
+          "session_valid": false
+        },
+        "source_live": null
+      },
+      "note": "expired access token with a stored refresh token",
+      "platform": "youtube",
+      "provenance": "unverified_no_credentials"
+    },
+    {
+      "expected": {
+        "auth_mode": "oauth",
+        "auto_refresh": false,
+        "badge": "needs_reauth",
+        "ban_risk": null,
+        "can_post": false,
+        "provider_state": "degraded",
+        "role_states": {
+          "analytics": "degraded",
+          "source": "degraded",
+          "video_destination": "degraded"
+        },
+        "source_only": false,
+        "token_state": "expired_unrefreshable"
+      },
+      "id": "youtube-live-expired-no-refresh",
+      "informational": {
+        "badge_reason": "invalid_grant: Token has been expired or revoked; no refresh path for this auth mode",
+        "error": "invalid_grant: Token has been expired or revoked"
+      },
+      "inputs": {
+        "checked_at": 1700000000.0,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": 1705184000.0,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "youtube",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": true,
+          "token_document_present": true,
+          "token_file_exists": true,
+          "username": false
+        },
+        "live": {
+          "authenticated": false,
+          "checked_at": 1700000000.0,
+          "details": {},
+          "error": "invalid_grant: Token has been expired or revoked",
+          "live_checked": true,
+          "session_valid": false
+        },
+        "source_live": null
+      },
+      "note": "expired access token with no refresh path",
+      "platform": "youtube",
+      "provenance": "unverified_no_credentials"
+    },
+    {
+      "expected": {
+        "auth_mode": "oauth",
+        "auto_refresh": false,
+        "badge": "expiring",
+        "ban_risk": null,
+        "can_post": true,
+        "provider_state": "ready",
+        "role_states": {
+          "analytics": "ready",
+          "source": "ready",
+          "video_destination": "ready"
+        },
+        "source_only": false,
+        "token_state": "expiring"
+      },
+      "id": "youtube-live-expiring-no-refresh",
+      "informational": {
+        "badge_reason": "live check passed but the token expires in 3d and there is no automatic refresh",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": 1700000000.0,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": 1700259200.0,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "youtube",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": true,
+          "token_document_present": true,
+          "token_file_exists": true,
+          "username": false
+        },
+        "live": {
+          "authenticated": true,
+          "checked_at": 1700000000.0,
+          "details": {},
+          "error": null,
+          "live_checked": true,
+          "session_valid": true
+        },
+        "source_live": null
+      },
+      "note": "usable now, human must renew before it dies",
+      "platform": "youtube",
+      "provenance": "unverified_no_credentials"
+    },
+    {
+      "expected": {
+        "auth_mode": "oauth",
+        "auto_refresh": true,
+        "badge": "unknown",
+        "ban_risk": null,
+        "can_post": true,
+        "provider_state": "ready",
+        "role_states": {
+          "analytics": "ready",
+          "source": "ready",
+          "video_destination": "ready"
+        },
+        "source_only": false,
+        "token_state": "unknown"
+      },
+      "id": "youtube-live-stale-check",
+      "informational": {
+        "badge_reason": "last live check was 1h ago \u2014 older than the 15m freshness window",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": 1699996400.0,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": 1705184000.0,
+          "graph_access_token": false,
+          "has_refresh_token": true,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "youtube",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": true,
+          "token_document_present": true,
+          "token_file_exists": true,
+          "username": false
+        },
+        "live": {
+          "authenticated": true,
+          "checked_at": 1700000000.0,
+          "details": {},
+          "error": null,
+          "live_checked": true,
+          "session_valid": true
+        },
+        "source_live": null
+      },
+      "note": "a check older than the freshness window may not claim green",
+      "platform": "youtube",
+      "provenance": "unverified_no_credentials"
+    },
+    {
+      "expected": {
+        "auth_mode": "cookies",
+        "auto_refresh": false,
+        "badge": "needs_reauth",
+        "ban_risk": {
+          "acknowledged": false,
+          "advisory_code": "UNOFFICIAL_WEB_CLIENT",
+          "code": "unofficial_web_client",
+          "enabled": true,
+          "severity": "advisory"
+        },
+        "can_post": false,
+        "provider_state": "degraded",
+        "role_states": {
+          "analytics": "degraded",
+          "source": "degraded",
+          "video_destination": "degraded"
+        },
+        "source_only": false,
+        "token_state": "expired_unrefreshable"
+      },
+      "id": "x-live-invalid-cookies",
+      "informational": {
+        "badge_reason": "cookies expired: login required; no refresh path for this auth mode",
+        "error": "cookies expired: login required"
+      },
+      "inputs": {
+        "checked_at": 1700000000.0,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "cookies",
+          "bearer_token": false,
+          "browser_jar_exists": true,
+          "client_key": false,
+          "cookies_file_exists": true,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "x",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": true,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": {
+          "authenticated": false,
+          "checked_at": 1700000000.0,
+          "details": {},
+          "error": "cookies expired: login required",
+          "live_checked": true,
+          "session_valid": false
+        },
+        "source_live": null
+      },
+      "note": "replayed web session rejected by the provider",
+      "platform": "x",
+      "provenance": "unverified_no_credentials"
+    },
+    {
+      "expected": {
+        "auth_mode": "cookies",
+        "auto_refresh": false,
+        "badge": "unknown",
+        "ban_risk": {
+          "acknowledged": false,
+          "advisory_code": "UNOFFICIAL_WEB_CLIENT",
+          "code": "unofficial_web_client",
+          "enabled": true,
+          "severity": "advisory"
+        },
+        "can_post": false,
+        "provider_state": "degraded",
+        "role_states": {
+          "analytics": "degraded",
+          "source": "degraded",
+          "video_destination": "degraded"
+        },
+        "source_only": false,
+        "token_state": "unknown"
+      },
+      "id": "x-live-unverified-probe",
+      "informational": {
+        "badge_reason": "live check could not verify the account (unverified probe result, not a proven expiry) \u2014 http 429 rate limited",
+        "error": "http 429 rate limited"
+      },
+      "inputs": {
+        "checked_at": 1700000000.0,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "cookies",
+          "bearer_token": false,
+          "browser_jar_exists": true,
+          "client_key": false,
+          "cookies_file_exists": true,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "x",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": true,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": {
+          "authenticated": false,
+          "checked_at": 1700000000.0,
+          "details": {
+            "probe_class": "unverified"
+          },
+          "error": "http 429 rate limited",
+          "live_checked": true,
+          "session_valid": false
+        },
+        "source_live": null
+      },
+      "note": "probe failed without proving the credential dead",
+      "platform": "x",
+      "provenance": "unverified_no_credentials"
+    },
+    {
+      "expected": {
+        "auth_mode": "graph_api",
+        "auto_refresh": false,
+        "badge": "connected",
+        "ban_risk": null,
+        "can_post": true,
+        "provider_state": "ready",
+        "role_states": {
+          "analytics": "ready",
+          "source": "ready",
+          "video_destination": "ready"
+        },
+        "source_only": false,
+        "token_state": "valid"
+      },
+      "id": "instagram-graph-live-ok",
+      "informational": {
+        "badge_reason": "live check passed; token expiry not reported by this provider",
+        "error": null
+      },
+      "inputs": {
+        "checked_at": 1700000000.0,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "graph_api",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": true,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "instagram",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": true,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": false
+        },
+        "live": {
+          "authenticated": true,
+          "checked_at": 1700000000.0,
+          "details": {},
+          "error": null,
+          "live_checked": true,
+          "session_valid": true
+        },
+        "source_live": null
+      },
+      "note": "official Meta Graph API probe passed",
+      "platform": "instagram",
+      "provenance": "unverified_no_credentials"
+    },
+    {
+      "expected": {
+        "auth_mode": "session",
+        "auto_refresh": false,
+        "badge": "needs_reauth",
+        "ban_risk": {
+          "acknowledged": false,
+          "advisory_code": "UNOFFICIAL_PRIVATE_API",
+          "code": "unofficial_private_api",
+          "enabled": true,
+          "severity": "high"
+        },
+        "can_post": false,
+        "provider_state": "degraded",
+        "role_states": {
+          "analytics": "degraded",
+          "source": "degraded",
+          "video_destination": "degraded"
+        },
+        "source_only": false,
+        "token_state": "expired_unrefreshable"
+      },
+      "id": "instagram-session-live-invalid",
+      "informational": {
+        "badge_reason": "session expired: login_required; no refresh path for this auth mode",
+        "error": "session expired: login_required"
+      },
+      "inputs": {
+        "checked_at": 1700000000.0,
+        "destination_live": null,
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "session",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "instagram",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": true,
+          "threads_user_id": false,
+          "token_configured": true,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": true
+        },
+        "live": {
+          "authenticated": false,
+          "checked_at": 1700000000.0,
+          "details": {},
+          "error": "session expired: login_required",
+          "live_checked": true,
+          "session_valid": false
+        },
+        "source_live": null
+      },
+      "note": "instagram session invalidated server-side",
+      "platform": "instagram",
+      "provenance": "unverified_no_credentials"
+    },
+    {
+      "expected": {
+        "auth_mode": "source_only",
+        "auto_refresh": false,
+        "badge": "source_only",
+        "ban_risk": null,
+        "can_post": false,
+        "provider_state": "unconfigured",
+        "role_states": {
+          "analytics": "unconfigured",
+          "source": "ready",
+          "video_destination": "unconfigured"
+        },
+        "source_only": true,
+        "token_state": "source_only"
+      },
+      "id": "tiktok-live-source-ok",
+      "informational": {
+        "badge_reason": "source only \u2014 no posting credentials configured (TikTok dev app pending)",
+        "error": "TikTok Content Posting API is not configured"
+      },
+      "inputs": {
+        "checked_at": 1700000000.0,
+        "destination_live": {
+          "auth_mode": "source_only",
+          "authenticated": false,
+          "checked_at": 1700000000.0,
+          "details": {},
+          "error": "TikTok Content Posting API is not configured",
+          "live_checked": true,
+          "session_valid": false
+        },
+        "facts": {
+          "access_token": false,
+          "access_token_secret": false,
+          "api_key": false,
+          "api_secret": false,
+          "auth_mode": "",
+          "bearer_token": false,
+          "browser_jar_exists": false,
+          "client_key": false,
+          "cookies_file_exists": false,
+          "cookies_from_browser": false,
+          "credentials_stored": false,
+          "enabled": true,
+          "expires_at": null,
+          "graph_access_token": false,
+          "has_refresh_token": false,
+          "identifier": false,
+          "local_path_exists": false,
+          "page_access_token": false,
+          "page_id": false,
+          "platform": "tiktok",
+          "publish_mode": "auto",
+          "refresh_token": false,
+          "sandbox": false,
+          "session_file_exists": false,
+          "threads_user_id": false,
+          "token_configured": true,
+          "token_document_present": false,
+          "token_file_exists": false,
+          "username": true
+        },
+        "live": {
+          "destination_check": {
+            "auth_mode": "source_only",
+            "authenticated": false,
+            "checked_at": 1700000000.0,
+            "details": {},
+            "error": "TikTok Content Posting API is not configured",
+            "live_checked": true,
+            "session_valid": false
+          },
+          "details": {},
+          "error": null,
+          "live_checked": true,
+          "source_check": {
+            "auth_mode": "source_only",
+            "authenticated": true,
+            "checked_at": 1700000000.0,
+            "details": {},
+            "error": null,
+            "live_checked": true,
+            "session_valid": true
+          }
+        },
+        "source_live": {
+          "auth_mode": "source_only",
+          "authenticated": true,
+          "checked_at": 1700000000.0,
+          "details": {},
+          "error": null,
+          "live_checked": true,
+          "session_valid": true
+        }
+      },
+      "note": "download side works, posting side does not exist",
+      "platform": "tiktok",
+      "provenance": "unverified_no_credentials"
+    }
+  ],
+  "schema_version": 1
+}

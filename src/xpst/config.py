@@ -1,0 +1,1990 @@
+"""
+Configuration management for xPST
+
+Handles loading, validation, and merging of configuration from:
+1. Default values
+2. Config file (~/.xpst/config.yaml)
+3. Environment variables
+4. CLI arguments
+
+Example config file:
+    accounts:
+      tiktok:
+        username: "your_username"
+      youtube:
+        enabled: true
+        client_secrets: "~/.xpst/credentials/youtube_client_secrets.json"
+"""
+
+import logging
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+logger = logging.getLogger(__name__)
+
+MIN_ANALYTICS_SNAPSHOT_INTERVAL = 60
+MAX_ANALYTICS_SNAPSHOT_INTERVAL = 86_400
+
+
+def _backup_corrupt_config_file(cfg_path: Path) -> Path | None:
+    """Back up a config file that cannot be parsed, leaving the original untouched.
+
+    Returns the backup path (or None if the backup itself failed).
+    """
+    import shutil
+    import time as _time
+
+    try:
+        backup_dir = Path(cfg_path).parent / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        dest = backup_dir / f"config.yaml.corrupt_{int(_time.time())}"
+        shutil.copy2(cfg_path, dest)
+        logger.error(
+            "XPST config file at %s is corrupted; a copy was saved to %s",
+            cfg_path, dest,
+        )
+        return dest
+    except Exception:
+        logger.exception("Failed to back up corrupted config file %s", cfg_path)
+        return None
+
+
+def _config_dir_override() -> bool:
+    """True when ``XPST_CONFIG_DIR`` selects the config directory."""
+    return bool((os.environ.get("XPST_CONFIG_DIR") or "").strip())
+
+
+def _default_config_path() -> Path:
+    """Return the default config file path (``XPST_CONFIG_DIR`` aware)."""
+    from xpst.utils.platform import get_config_dir
+
+    return get_config_dir() / "config.yaml"
+
+
+def ensure_config_dir_usable(config_dir: Path) -> None:
+    """Fail early, actionably and without a traceback when the config dir is unusable.
+
+    A *missing* directory is fine — it is created on first run.  A path that
+    exists but is not a directory, or that the current user cannot write to
+    (read-only volume, root-owned install, sandboxed profile), is a
+    user-facing configuration error: the caller is told exactly which path is
+    wrong, why, and what to change (``XPST_CONFIG_DIR`` / ``chmod``).
+
+    Raises:
+        ValueError: With an actionable message, never a bare OSError.
+    """
+    try:
+        if config_dir.exists():
+            if not config_dir.is_dir():
+                raise ValueError(
+                    f"XPST config directory {config_dir} exists but is not a directory. "
+                    f"Fix: remove or rename {config_dir}, or set XPST_CONFIG_DIR to a real directory."
+                )
+            if not os.access(config_dir, os.W_OK | os.X_OK):
+                raise ValueError(
+                    f"XPST config directory {config_dir} is not writable by uid {os.getuid()}. "
+                    f"Fix: chmod u+rwx {config_dir} (or chown it to your user), or set "
+                    f"XPST_CONFIG_DIR to a writable directory."
+                )
+            return
+
+        # Directory is missing: the nearest existing ancestor must be writable
+        # for us to create it.
+        parent = config_dir.parent
+        while not parent.exists() and parent != parent.parent:
+            parent = parent.parent
+        if not os.access(parent, os.W_OK | os.X_OK):
+            raise ValueError(
+                f"XPST cannot create its config directory {config_dir}: {parent} is not "
+                f"writable by uid {os.getuid()}. Fix: mkdir -p {config_dir} yourself, or set "
+                f"XPST_CONFIG_DIR to a writable directory."
+            )
+    except OSError as e:  # pragma: no cover - exotic stat/permission failures
+        raise ValueError(
+            f"XPST could not check its config directory {config_dir}: {e}. "
+            f"Fix: verify the path exists, is a directory and is readable, or set "
+            f"XPST_CONFIG_DIR to a writable directory."
+        ) from e
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` atomically and owner-only (0600).
+
+    Two properties the old ``open(path, "w")`` did not have:
+
+    * config.yaml carries account details (and, for an install without the
+      encrypted store, credentials), so the file is created ``0600`` — a
+      world-readable ``~/.xpst/config.yaml`` leaked every stored token to any
+      local user.
+    * a crash or a full disk part-way through the write must leave the
+      *previous* config intact.  ``open(..., "w")`` truncated it first, so a
+      failed write destroyed the user's accounts.
+    """
+    from xpst.utils.atomic import write_text_atomic
+
+    write_text_atomic(path, text, mode=0o600)
+
+
+#: Config fields that belong in the encrypted credential store, not the YAML.
+#:
+#: ``accounts.tiktok.client_secret`` was written in cleartext to a 0644 file
+#: while every other token lived in the store (card t_95928695 D6). The YAML
+#: slot stays in the schema (empty) so the file shape is stable and an install
+#: without ``cryptography`` can still fall back to writing the value there.
+_SECRET_CONFIG_FIELDS: dict[tuple[str, str], str] = {
+    ("tiktok", "client_secret"): "tiktok_client_secret",
+}
+
+
+def _store_config_secret(config_dir: str, key: str, value: str) -> bool:
+    """Persist one config secret in the encrypted store; False when impossible."""
+
+    try:
+        from xpst.utils.credentials import CredentialStore
+
+        CredentialStore(config_dir).store(key, value)
+        return True
+    except Exception as exc:  # noqa: BLE001 - keep the config usable either way
+        logger.warning(
+            "Could not store %s in the encrypted credential store (%s); it stays "
+            "in config.yaml, which is written 0600.",
+            key,
+            exc,
+        )
+        return False
+
+
+def _load_config_secret(config_dir: str, key: str) -> str | None:
+    """Read one config secret back from the encrypted store, if it is there."""
+
+    # Building a CredentialStore derives key material (scrypt) and logs, so it
+    # is only done when the secret can actually be there: an encrypted file for
+    # this key, or the OS keychain, which is opt-in via XPST_USE_KEYRING.
+    creds = Path(config_dir).expanduser() / "credentials"
+    encrypted = creds / f"{key}.enc"
+    keyring_opt_in = os.environ.get("XPST_USE_KEYRING", "").lower() in ("1", "true", "yes")
+    if not encrypted.is_file() and not (keyring_opt_in and creds.is_dir()):
+        return None
+    try:
+        from xpst.utils.credentials import CredentialStore
+
+        return CredentialStore(config_dir).retrieve(key) or None
+    except Exception as exc:  # noqa: BLE001 - an unreadable store is "absent"
+        logger.debug("Could not read %s from the credential store: %s", key, exc)
+        return None
+
+
+def _tighten_config_permissions(path: Path) -> None:
+    """Make the config owner-only, and say why if that is impossible.
+
+    The file holds account details and, on an install without the encrypted
+    store, secrets. xPST writes it 0600, but a file written by an older version
+    (or by hand, or by a backup restore) keeps whatever mode it had until
+    something rewrites it — so it is tightened here instead of being reported
+    and left alone. The fix is silent on success (a load must not print) and
+    only speaks up when the chmod genuinely fails.
+    """
+
+    if os.name == "nt":  # POSIX mode bits are not meaningful there
+        return
+    try:
+        import stat as _stat
+
+        mode = _stat.S_IMODE(path.stat().st_mode)
+        if not mode & 0o077:
+            return
+        os.chmod(path, 0o600)
+        logger.debug("Tightened %s from %s to 0600 (owner-only).", path, oct(mode))
+    except OSError as exc:
+        logger.warning(
+            "XPST config %s is group/world-readable and could not be tightened (%s); "
+            "it carries account details and must stay private. Fix: chmod 600 %s",
+            path,
+            exc,
+            path,
+        )
+
+
+#: Credential-file fields whose shipped defaults point at ``~/.xpst``.
+#:
+#: Why this table exists: with ``XPST_CONFIG_DIR`` set to a throwaway directory,
+#: ``config.config_dir`` and ``CredentialStore(config.config_dir)`` correctly
+#: move, but these per-platform paths stayed absolute defaults pointing at the
+#: real home — so a "sandboxed" run still read AND rewrote the user's live
+#: credentials (observed: `xpst auth status` with a temp XPST_CONFIG_DIR
+#: refreshed ``~/.xpst/credentials/x_cookies.json``). Any agent, CI job or test
+#: that sandboxes itself with XPST_CONFIG_DIR was silently touching real
+#: accounts.
+_REBASABLE_CREDENTIAL_FIELDS: tuple[tuple[str, str], ...] = (
+    ("youtube", "client_secrets"),
+    ("youtube", "token_file"),
+    ("x", "cookies_file"),
+    ("instagram", "session_file"),
+    ("tiktok", "cookies_file"),
+)
+
+
+# Default configuration values
+DEFAULT_CONFIG = {
+    "accounts": {
+        "tiktok": {
+            "username": "",
+            "cookies_from_browser": False,
+            "cookies_file": None,
+            "client_key": "",
+            "client_secret": "",
+            "access_token": "",
+            "refresh_token": "",
+            "sandbox": False,
+            "draft_mode": "auto",
+            "publish_mode": "auto",
+            "browser_headless": True,
+        },
+        "youtube": {
+            "enabled": True,
+            "client_secrets": "~/.xpst/credentials/youtube_client_secrets.json",
+            "token_file": "~/.xpst/credentials/youtube_token.json",
+        },
+        "x": {
+            "enabled": True,
+            "cookies_file": "~/.xpst/credentials/x_cookies.json",
+            "auth_mode": "cookies",
+        },
+        "instagram": {
+            "enabled": True,
+            "session_file": "~/.xpst/credentials/instagram_session.json",
+            "username": "",
+            "auth_mode": "graph_api",
+            "app_id": "",
+        },
+        "threads": {
+            "enabled": False,
+            "graph_access_token": "",
+            "threads_user_id": "",
+            "app_id": "",
+        },
+        "bluesky": {
+            "enabled": False,
+            "identifier": "",
+            "service": "https://bsky.social",
+        },
+        "messenger": {
+            "enabled": False,
+            "page_id": "",
+            "page_access_token": "",
+            "app_id": "",
+            "app_secret": "",
+            "verify_token": "",
+            "webhook_path": "/webhook/messenger",
+            "auto_reply": False,
+            "reply_rules": {},
+            "comment_reply_enabled": False,
+            "comment_platforms": ["instagram", "facebook"],
+        },
+        "facebook": {
+            "enabled": False,
+            "page_id": "",
+            "page_name": "",
+            "page_access_token": "",
+            "app_id": "",
+            "app_secret": "",
+            "graph_user_token": "",
+            "login_config_id": "",
+        },
+        "rumble": {
+            "enabled": False,
+            "api_key": "",
+            "api_url": "https://rumble.com/-/api/v1/media",
+            "manual_handoff_dir": "~/.xpst/rumble-handoff",
+            "upload_page_url": "https://rumble.com/upload.php",
+        },
+        "local": {
+            "path": "",
+        },
+    },
+    "video": {
+        "download_dir": "~/.xpst/downloads",
+        "cleanup_after_post": False,
+        "encoding": {
+            "youtube": {
+                "passthrough": False,
+                "resolution": 1920,
+                "bitrate": "8M",
+                "maxrate": "10M",
+                "bufsize": "12M",
+                "profile": "high",
+                "gop": 15,
+                "fps": 60,
+                "color": "bt709",
+                "pix_fmt": "yuv420p",
+            },
+            "instagram": {
+                "resolution": 1920,
+                "crf": 20,
+                "maxrate": "10M",
+                "profile": "high",
+                "level": "4.0",
+                "gop": 72,
+                "fps": 60,
+                "color": "bt709",
+                "pix_fmt": "yuv420p",
+            },
+            "x": {
+                "resolution": 1920,
+                "bitrate": "10M",
+                "maxrate": "12M",
+                "profile": "high",
+                "level": "4.0",
+                "gop": 90,
+                "fps": 60,
+                "color": "bt709",
+                "pix_fmt": "yuv420p",
+            },
+            "tiktok": {
+                "resolution": 1920,
+                "crf": 20,
+                "maxrate": "10M",
+                "bufsize": "20M",
+                "profile": "high",
+                "level": "4.0",
+                "fps": 60,
+                "color": "bt709",
+                "pix_fmt": "yuv420p",
+            },
+        },
+    },
+    "reliability": {
+        "max_retries": 3,
+        "retry_backoff": 2,
+        "circuit_breaker_threshold": 5,
+        "circuit_breaker_reset": 3600,
+    },
+    "monitoring": {
+        "log_level": "INFO",
+        "log_file": "~/.xpst/logs/xpst.log",
+        "log_rotation": "10 MB",
+        "healthcheck_port": 8080,
+        "enable_metrics": True,
+        "dashboard_username": "",
+        "dashboard_password_hash": "",
+        "health_check_interval": 300,
+    },
+    "notifications": {
+        "enabled": False,
+        "on_success": True,
+        "on_failure": True,
+        "discord": {
+            "webhook_url": "",
+        },
+        "telegram": {
+            "bot_token": "",
+            "chat_id": "",
+        },
+    },
+    "rate_limits": {
+        "youtube": 5,
+        "instagram": 5,
+        "x": 5,
+        "tiktok": 5,
+        "threads": 5,
+        "facebook": 5,
+    },
+    "bio": {
+        "handle": "",
+        "links": [],
+    },
+    "chat": {
+        # Read-only live chat. Channel names only — no credentials: Twitch is
+        # read anonymously, Kick's public chatroom needs no auth, and YouTube
+        # reuses the existing OAuth connection.
+        "twitch_channels": [],
+        "kick_channels": [],
+        "youtube_video_id": "",
+        "max_messages": 500,
+        "youtube_poll_interval_s": 2.0,
+    },
+    "anti_bot": {
+        # Caption variation appends engagement-bait suffixes
+        # ("🎬 Subscribe for more!") per platform. It is OPT-IN: the operator's
+        # caption is theirs, and silently rewriting published copy is a
+        # consent defect, not hardening. Off unless explicitly enabled.
+        "caption_variation": False,
+    },
+    "schedule": {
+        "check_interval": 900,  # 15 minutes
+        "catchup_window": 172800,  # 48 hours
+        "catchup_times_per_day": 3,
+        "analytics_snapshot_enabled": False,
+        "analytics_snapshot_interval": 3600,  # 1 hour
+        "posting_paused": False,  # refuse implicit queueing while the deployment is paused
+    },
+    "shortcuts": {
+        "dashboard": "Ctrl+1",
+        "content": "Ctrl+2",
+        "analytics": "Ctrl+3",
+        "connect": "Ctrl+4",
+        "schedule": "Ctrl+5",
+        "refresh": "Ctrl+R",
+        "quit": "Ctrl+Q",
+    },
+}
+
+
+@dataclass
+class AccountConfig:
+    """Account configuration for a platform"""
+    enabled: bool = True
+    credentials_path: str | None = None
+    proxy: str | None = None
+
+
+@dataclass
+class TikTokAccountConfig(AccountConfig):
+    """TikTok-specific account configuration"""
+    username: str = ""
+    cookies_from_browser: bool = False
+    cookies_file: str | None = None
+    # Content Posting API (Direct Post) OAuth credentials — destination mode
+    client_key: str = ""
+    client_secret: str = ""
+    access_token: str = ""
+    refresh_token: str = ""
+    # Sandbox apps can only post to a test environment (no public posts)
+    sandbox: bool = False
+    # Unaudited-client fallback: upload as an inbox DRAFT the user finishes in
+    # the TikTok app (video.upload scope; no audit; 5 pending shares/24h).
+    # "auto" uses draft mode only when direct post is refused for an unaudited
+    # client; "always" skips direct post entirely; "never" keeps direct post.
+    draft_mode: str = "auto"
+    # Publish route preference (unaudited-app reality forces a choice):
+    # "auto" = official Direct Post when the client is audited, else the
+    # inbox-draft fallback (the pre-browser behaviour, unchanged default);
+    # "browser" = opt in to the browser-native publisher (unofficial; drives
+    # the logged-in TikTok Studio web flow) BEFORE falling back to inbox-draft;
+    # "browser_only" = browser-native publisher or an honest failure.
+    # Route order: official-direct-post (if audited) > tiktok_browser >
+    # inbox-draft. See docs/TIKTOK-SOLUTION-2026-09-28.md.
+    publish_mode: str = "auto"
+    # Run the publisher browser headless (default True). False is a debugging
+    # aid on desktop installs.
+    browser_headless: bool = True
+
+
+@dataclass
+class YouTubeAccountConfig(AccountConfig):
+    """YouTube-specific account configuration"""
+    client_secrets: str = ""
+    token_file: str = ""
+    channel_id: str = ""
+    username: str = ""
+    #: How a video is published: "auto" (derive from the media probe using the
+    #: stated thresholds), "shorts" or "long". "auto" refuses an ambiguous video
+    #: (between 60 s and 180 s, portrait) rather than guessing; the CLI's
+    #: ``--shorts`` / ``--long`` override this per post.
+    video_mode: str = "auto"
+
+
+@dataclass
+class XAccountConfig(AccountConfig):
+    """X/Twitter-specific account configuration"""
+    cookies_file: str = ""
+    username: str = ""
+    password: str = ""
+    # Auth mode: "cookies" (twikit, unofficial) or "api_v2" (official X API v2 free tier)
+    auth_mode: str = "cookies"
+    # X API v2 credentials (only used when auth_mode == "api_v2")
+    api_key: str = ""
+    api_secret: str = ""
+    access_token: str = ""
+    access_token_secret: str = ""
+    bearer_token: str = ""
+    #: Verified per-account video ceiling in seconds. 0 keeps the documented
+    #: standard-account envelope from ``xpst.content.VIDEO_ENVELOPES`` (140 s);
+    #: a Premium account that X lets upload longer sets its real limit here.
+    #: Only a number the account owner has confirmed belongs here — xPST never
+    #: guesses a higher ceiling and never truncates to fit a lower one.
+    max_video_duration_seconds: int = 0
+
+
+@dataclass
+class InstagramAccountConfig(AccountConfig):
+    """Instagram-specific account configuration"""
+    session_file: str = ""
+    username: str = ""
+    password: str = ""
+    # Auth mode: "graph_api" (official Meta Graph API, default) or "session" (instagrapi, unofficial)
+    auth_mode: str = "graph_api"
+    # Persisted device ID for instagrapi (anti-ban: stable device fingerprint per account)
+    device_id: str | None = None
+    # Meta Graph API credentials (only used when auth_mode == "graph_api")
+    graph_access_token: str = ""
+    graph_ig_user_id: str = ""
+    # Bring-your-own Meta app (BYO path, Standard Access). The id is mirrored
+    # to config for display; the SECRET lives only in the encrypted store and
+    # is deliberately never serialized into config.yaml from the BYO path.
+    app_id: str = ""
+    app_secret: str = ""
+    # Verified account type from the last live probe: "business", "creator",
+    # "personal", or "" for never-probed. Meta's publishing API only serves
+    # professional accounts, so a personal account is a guided setup step, not
+    # a mystery publish failure. ``account_type_source`` records which probe
+    # decided (graph_field / graph_error / session_account_info) so the claim
+    # is auditable; an unprobed account is "" and renders as "unknown", never
+    # as a guessed verdict.
+    account_type: str = ""
+    account_type_source: str = ""
+
+
+@dataclass
+class ThreadsAccountConfig(AccountConfig):
+    """Threads (Meta Threads API) account configuration — destination only."""
+    # Long-lived access token (60 days, refreshable)
+    graph_access_token: str = ""
+    # Threads user ID (numeric)
+    threads_user_id: str = ""
+    # Bring-your-own Meta app (same app may serve Instagram). Secret lives
+    # only in the encrypted store; see InstagramAccountConfig.app_id.
+    app_id: str = ""
+    app_secret: str = ""
+
+
+@dataclass
+class BlueskyAccountConfig(AccountConfig):
+    """Bluesky account configuration — OPT-IN destination (AT Protocol).
+
+    Disabled by default: a Bluesky account is only used once someone connects
+    it. The app password is NEVER stored here — it lives in the encrypted
+    credential store (``bluesky_app_password``) together with the session JWTs
+    the PDS returns. Only the non-secret handle and the service host are
+    serialized, so a config.yaml can be shared without leaking a credential.
+    """
+
+    #: Handle (``name.bsky.social``) or DID. Not a secret; the store is still
+    #: authoritative when both exist.
+    identifier: str = ""
+    #: The service host. A self-hosted PDS or another entryway overrides this.
+    service: str = "https://bsky.social"
+    #: OPT-IN. The account base class defaults to enabled; Bluesky must not be,
+    #: because "no platform is connected by default" is a contract the preflight
+    #: and the routing preview both rely on.
+    enabled: bool = False
+
+
+@dataclass
+class MessengerAccountConfig(AccountConfig):
+    """Messenger (Facebook Messenger Platform) account config — OPT-IN.
+
+    Disabled by default; the adapter stays idle until ``enabled`` is set and
+    a Page Access Token exists. The token/secret live encrypted in the
+    CredentialStore; these fields are a write-through convenience.
+
+
+    Fields:
+        enabled: Master on/off switch (default False).
+        page_id: Numeric Page ID (also used as upload() test recipient).
+        page_access_token: Convenience fallback; CredentialStore is primary.
+        app_id: Meta App ID (informational).
+        app_secret: App secret (proof/signature); CredentialStore is primary.
+        verify_token: Developer-chosen webhook verify token.
+        webhook_path: Dashboard webhook URL path (default /webhook/messenger).
+        auto_reply: ManyChat-lite master switch.
+        reply_rules: Keyword → reply text map; "*" is catch-all.
+        comment_reply_enabled: Content360-lite master switch for IG/FB comment
+            auto-reply on posts.
+        comment_platforms: Platforms allowed to run comment auto-reply
+            ("instagram", "facebook"); empty means none.
+    """
+
+    enabled: bool = False
+    page_id: str = ""
+    page_access_token: str = ""
+    app_id: str = ""
+    app_secret: str = ""
+    verify_token: str = ""
+    webhook_path: str = "/webhook/messenger"
+    auto_reply: bool = False
+    reply_rules: dict = field(default_factory=dict)
+    comment_reply_enabled: bool = False
+    comment_platforms: list = field(default_factory=lambda: ["instagram", "facebook"])
+
+
+@dataclass
+class RumbleAccountConfig(AccountConfig):
+    """Rumble account config — OPT-IN, and deliberately integration-uncertain.
+
+    Rumble's upload API is partner-gated: an API key is issued to partners and
+    there is no self-serve developer console comparable to Meta's or Google's.
+    Two honest paths therefore exist, and neither is guessed:
+
+    * ``api_key`` set — the adapter POSTs the rendition to ``api_url`` (the
+      partner-specific endpoint, configurable because Rumble issues it per
+      partner) through an injectable transport.
+    * otherwise — a MANUAL HANDOFF: the rendition and a caption sidecar are
+      written into ``manual_handoff_dir`` and the result says so, with the
+      upload page URL. Nothing is claimed to have been published.
+    """
+
+    #: Opt-in: an existing install keeps posting to exactly the platforms it
+    #: already had until ``accounts.rumble.enabled: true`` is written.
+    enabled: bool = False
+    api_key: str = ""
+    api_url: str = "https://rumble.com/-/api/v1/media"
+    manual_handoff_dir: str = "~/.xpst/rumble-handoff"
+    upload_page_url: str = "https://rumble.com/upload.php"
+
+
+@dataclass
+class FacebookPageAccountConfig(AccountConfig):
+    """Facebook Page account config — Page-scoped publishing, OPT-IN.
+
+    Facebook has no publishing API for personal profiles: the Graph API only
+    publishes as a Page, so this account is page-scoped by construction. It is
+    reachable only through a BYO Meta app (Facebook Login for Business with
+    Standard Access), which is why it is disabled until ``xpst auth facebook``
+    completes.
+
+    Disabled by default; the adapter stays idle until ``enabled`` is set and a
+    Page access token exists. Tokens/secrets live encrypted in the
+    CredentialStore; these fields are a write-through convenience.
+
+    Fields:
+        enabled: Master on/off switch (default False).
+        page_id: Numeric ID of the Page that owns the token (never a user id).
+        page_name: Page display name (for status/UI; never used for posting).
+        page_access_token: Convenience fallback; CredentialStore is primary.
+        app_id: Meta App ID of the BYO app (informational).
+        app_secret: App secret (code exchange / appsecret_proof); CredentialStore is primary.
+        graph_user_token: Long-lived user token used to (re)discover Pages.
+        login_config_id: Optional Facebook Login for Business configuration id.
+    """
+
+    enabled: bool = False
+    page_id: str = ""
+    page_name: str = ""
+    page_access_token: str = ""
+    app_id: str = ""
+    app_secret: str = ""
+    graph_user_token: str = ""
+    login_config_id: str = ""
+
+
+@dataclass
+class LocalAccountConfig:
+    """Local file source configuration"""
+    path: str = ""
+
+
+@dataclass
+class EncodingConfig:
+    """Video encoding configuration for a platform.
+
+    resolution is the LONG-EDGE target in pixels (orientation-aware): a
+    1080x1920 portrait and a 1920x1080 landscape both satisfy 1920.
+    fps is an output CAP (ffmpeg -fpsmax), never a force: sources below the
+    cap keep their native frame rate.
+    """
+    resolution: int | None = None
+    crf: int | None = None
+    bitrate: str | None = None
+    maxrate: str | None = None
+    bufsize: str | None = None
+    profile: str | None = None
+    level: str | None = None
+    gop: int | None = None
+    fps: int | None = None
+    color: str = "bt709"
+    pix_fmt: str = "yuv420p"
+    passthrough: bool = False
+    # Two-pass x264 for exact-bitrate targets (converges on -b:v precisely;
+    # relevant only for bitrate-targeted profiles — CRF profiles ignore it).
+    two_pass: bool = False
+    # Hardware encoder override ("h264_videotoolbox", "h264_nvenc",
+    # "h264_qsv", "h264_vaapi", or "libx264" to force software). None =
+    # auto-detect. The XPST_HW_ENCODER env var wins over this field.
+    hw_encoder: str | None = None
+
+
+@dataclass
+class VideoConfig:
+    """Video processing configuration"""
+    download_dir: str = "~/.xpst/downloads"
+    cleanup_after_post: bool = False
+    encoding_youtube: EncodingConfig = field(default_factory=lambda: EncodingConfig(
+        resolution=1920, bitrate="8M", maxrate="10M", bufsize="12M", profile="high", gop=15, fps=60,
+        two_pass=True,
+    ))
+    encoding_instagram: EncodingConfig = field(default_factory=lambda: EncodingConfig(
+        resolution=1920, crf=20, maxrate="10M", profile="high", level="4.0", gop=72, fps=60
+    ))
+    encoding_x: EncodingConfig = field(default_factory=lambda: EncodingConfig(
+        resolution=1920, bitrate="10M", maxrate="12M", profile="high", level="4.0", gop=90, fps=60,
+        two_pass=True,
+    ))
+    # TikTok: dedicated profile (no longer shares Instagram's). GOP is None =
+    # computed per-encode as 2*source fps (30fps→60, 60fps→120), capped at
+    # 2*fps_cap.
+    encoding_tiktok: EncodingConfig = field(default_factory=lambda: EncodingConfig(
+        resolution=1920, crf=20, maxrate="10M", bufsize="20M", profile="high", level="4.0", fps=60
+    ))
+
+
+@dataclass
+class ReliabilityConfig:
+    """Reliability and retry configuration"""
+    max_retries: int = 3
+    retry_backoff: int = 2
+    circuit_breaker_threshold: int = 5
+    circuit_breaker_reset: int = 3600
+
+
+@dataclass
+class MonitoringConfig:
+    """Monitoring and logging configuration"""
+    log_level: str = "INFO"
+    log_file: str = "~/.xpst/logs/xpst.log"
+    log_rotation: str = "10 MB"
+    healthcheck_port: int = 8080
+    enable_metrics: bool = True
+    dashboard_username: str = ""
+    dashboard_password_hash: str = ""
+    health_check_interval: int = 300
+
+    def set_dashboard_password(self, plaintext: str) -> None:
+        """Hash and store a plaintext password."""
+        import bcrypt
+        self.dashboard_password_hash = bcrypt.hashpw(plaintext.encode(), bcrypt.gensalt()).decode()
+
+    def verify_dashboard_password(self, plaintext: str) -> bool:
+        """Verify a plaintext password against the stored hash."""
+        if not self.dashboard_password_hash:
+            return False
+        import bcrypt
+        return bcrypt.checkpw(plaintext.encode(), self.dashboard_password_hash.encode())
+
+
+@dataclass
+class ScheduleConfig:
+    """Scheduling configuration"""
+    check_interval: int = 900
+    catchup_window: int = 172800
+    catchup_times_per_day: int = 3
+    analytics_snapshot_enabled: bool = False
+    analytics_snapshot_interval: int = 3600
+    #: Deployment kill-switch for IMPLICIT posting. When true, a manual post
+    #: that would be QUEUED to the schedule store (fired outside the anti-bot
+    #: window) is refused instead — nothing is written, nothing is uploaded —
+    #: so a paused deployment cannot accumulate a queue behind the operator's
+    #: back. An explicit in-window post, or ``--now``, still publishes: the
+    #: pause forbids silent deferral, not a deliberate manual action.
+    #: ``XPST_POSTING_PAUSED`` (1/true/yes/on) turns it on without editing the
+    #: file, which is what a lane-level pause needs.
+    posting_paused: bool = False
+
+
+@dataclass
+class NotificationConfig:
+    """Webhook notification configuration"""
+    enabled: bool = False
+    on_success: bool = True
+    on_failure: bool = True
+    discord_webhook_url: str = ""
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
+
+@dataclass
+class RateLimitConfig:
+    """Per-platform daily upload limits (user-configurable)"""
+    youtube: int = 5
+    instagram: int = 5
+    x: int = 5
+    tiktok: int = 5
+    threads: int = 5
+    facebook: int = 5
+
+
+@dataclass
+class BioConfig:
+    """Link-in-bio page configuration (served at /bio by the dashboard).
+
+    Fields:
+        handle: Display name shown on the bio page (avatar initial + heading).
+        links: Custom links rendered below the social accounts. Each entry is
+            a dict with ``label`` and ``url`` keys (http/https only).
+    """
+    handle: str = ""
+    links: list[dict] = field(default_factory=list)
+
+
+@dataclass
+class AntiBotConfig:
+    """Operator-visible anti-bot behaviour switches.
+
+    ``caption_variation`` gates :meth:`AntiBotProtection.vary_caption`, which
+    appends platform-specific engagement-bait suffixes to a caption. It used to
+    run unconditionally on every video/image upload, so xPST published copy the
+    operator never wrote. Default off: consent is the default, mutation is the
+    opt-in.
+    """
+
+    caption_variation: bool = False
+
+
+@dataclass
+class ChatConfig:
+    """Which channels the read-only chat timeline watches.
+
+    No credentials live here: Twitch chat is read anonymously, Kick's public
+    chatroom needs no auth, and YouTube reuses the existing OAuth connection.
+    What an operator must supply is *which* channels to watch, which is why
+    these are plain names and nothing else.
+
+    ``max_messages`` bounds the merged timeline (oldest dropped first), so a
+    busy channel cannot grow the payload without limit.
+    """
+
+    twitch_channels: list[str] = field(default_factory=list)
+    kick_channels: list[str] = field(default_factory=list)
+    youtube_video_id: str = ""
+    max_messages: int = 500
+    youtube_poll_interval_s: float = 2.0
+
+
+@dataclass
+class XPSTConfig:
+    """Main configuration for xPST"""
+    # Accounts
+    tiktok: TikTokAccountConfig = field(default_factory=TikTokAccountConfig)
+    youtube: YouTubeAccountConfig = field(default_factory=YouTubeAccountConfig)
+    x: XAccountConfig = field(default_factory=XAccountConfig)
+    instagram: InstagramAccountConfig = field(default_factory=InstagramAccountConfig)
+    threads: ThreadsAccountConfig = field(default_factory=ThreadsAccountConfig)
+    bluesky: BlueskyAccountConfig = field(default_factory=BlueskyAccountConfig)
+    messenger: MessengerAccountConfig = field(default_factory=MessengerAccountConfig)
+    facebook: FacebookPageAccountConfig = field(default_factory=FacebookPageAccountConfig)
+    rumble: RumbleAccountConfig = field(default_factory=RumbleAccountConfig)
+    local: LocalAccountConfig = field(default_factory=LocalAccountConfig)
+
+    # Video processing
+    video: VideoConfig = field(default_factory=VideoConfig)
+
+    # Reliability
+    reliability: ReliabilityConfig = field(default_factory=ReliabilityConfig)
+
+    # Monitoring
+    monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
+
+    # Scheduling
+    schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
+
+    # Rate limits
+    rate_limits: RateLimitConfig = field(default_factory=RateLimitConfig)
+
+    # Link-in-bio page
+    bio: BioConfig = field(default_factory=BioConfig)
+
+    # Notifications
+    notifications: NotificationConfig = field(default_factory=NotificationConfig)
+
+    # Read-only live chat (Twitch / YouTube / Kick merged timeline)
+    chat: ChatConfig = field(default_factory=ChatConfig)
+    # Anti-bot behaviour switches (caption variation is opt-in)
+    anti_bot: AntiBotConfig = field(default_factory=AntiBotConfig)
+
+    # Paths
+    config_dir: str = "~/.xpst"
+
+    # Phase 5.1: first-run onboarding flag. Persisted to config.yaml so the
+    # desktop app shows the OnboardingPage wizard exactly once per install.
+    first_run_complete: bool = False
+
+    # Provider mode: "official" (default — only official APIs) or "community"
+    # (official + unofficial integrations like instagrapi/twikit).
+    # When "official", unofficial platforms are hidden from UI and disabled.
+    provider_mode: str = "official"
+
+    # Shortcuts (stored as raw dict, not a dataclass)
+    _shortcuts: dict = field(default_factory=lambda: {
+        "dashboard": "Ctrl+1",
+        "content": "Ctrl+2",
+        "analytics": "Ctrl+3",
+        "connect": "Ctrl+4",
+        "schedule": "Ctrl+5",
+        "refresh": "Ctrl+R",
+        "quit": "Ctrl+Q",
+    })
+
+    @classmethod
+    def load(cls, config_path: str | None = None) -> "XPSTConfig":
+        """
+        Load configuration from file, environment, and defaults.
+
+        Priority (highest to lowest):
+        1. Environment variables (XPST_*)
+        2. Config file
+        3. Default values
+
+        Args:
+            config_path: Path to config file (default: ~/.xpst/config.yaml)
+
+        Returns:
+            Loaded and validated configuration
+        """
+        config = cls._merge_config(cls(), DEFAULT_CONFIG)
+
+        # Load from file - backward compatibility: use old ~/.crosspstr/ if it exists
+        if config_path is None:
+            new_dir = _default_config_path().parent
+            old_dir = Path(os.path.expanduser("~/.crosspstr"))
+            # Legacy rename only applies to the real default location: an
+            # explicit XPST_CONFIG_DIR profile must never adopt (or mutate)
+            # the user's ~/.crosspstr home directory.
+            if (
+                old_dir.exists()
+                and not new_dir.exists()
+                and not _config_dir_override()
+                and old_dir != new_dir
+            ):
+                # Migrate: rename old directory to new
+                import shutil
+                shutil.move(str(old_dir), str(new_dir))
+            config_path = str(new_dir / "config.yaml")
+
+        cfg_path: Path = Path(config_path)
+        if not cfg_path.exists():
+            # First run: materialize the default location so a fresh install
+            # works without a manual config step (dashboard, desktop, engine
+            # all expect the file). An explicit --config path must exist —
+            # that is a user error and still raises.
+            default_path = _default_config_path()
+            if cfg_path == default_path:
+                # Only the config *directory* is checked here: an explicit
+                # path that does not exist is a "file not found" (below), not a
+                # directory problem, and must keep raising FileNotFoundError.
+                ensure_config_dir_usable(cfg_path.parent)
+                try:
+                    created_dir = not cfg_path.parent.exists()
+                    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+                    if created_dir:
+                        # The config directory holds credentials; keep a fresh
+                        # one owner-only (existing directories are left alone).
+                        try:
+                            os.chmod(cfg_path.parent, 0o700)
+                        except OSError:
+                            pass
+                    # Atomic + 0600: DEFAULT_CONFIG contains empty credential
+                    # slots, but the same file is later written by save(), and
+                    # a half-written first-run file must never be observed.
+                    # The schema version is stamped in so a brand-new install
+                    # is not immediately "migrated" (which would rewrite the
+                    # user's file and drop a backup on the very first run).
+                    from xpst.config_migration import ConfigMigration
+
+                    payload = yaml.safe_dump(
+                        {"version": ConfigMigration.CURRENT_VERSION, **DEFAULT_CONFIG},
+                        sort_keys=False,
+                    )
+                    _atomic_write_text(cfg_path, payload)
+                except OSError as e:
+                    raise ValueError(
+                        f"XPST could not create its config file {cfg_path}: {e}. "
+                        f"Fix: make {cfg_path.parent} writable, or set XPST_CONFIG_DIR to a "
+                        f"writable directory."
+                    ) from e
+                logger.info("Created default config at %s", cfg_path)
+            else:
+                raise FileNotFoundError(
+                    f"XPST config file not found: {cfg_path} "
+                    f"(expected {default_path} or a path passed via --config)"
+                )
+        else:
+            # The file exists: the directory still has to be writable, because
+            # state.json, backups and logs live beside it. Checking here turns
+            # a raw "Permission denied: .../backups" from the migrator into an
+            # actionable message naming the directory and the fix.
+            ensure_config_dir_usable(cfg_path.parent)
+            _tighten_config_permissions(cfg_path)
+        try:
+            with open(cfg_path, "rb") as f:
+                raw = f.read()
+            try:
+                text = raw.decode("utf-8-sig")
+            except UnicodeDecodeError as e:
+                backup = _backup_corrupt_config_file(cfg_path)
+                raise ValueError(
+                    f"XPST config file is not valid UTF-8 (binary or corrupted?): "
+                    f"{cfg_path}. The original file was backed up to: {backup}. "
+                    f"Fix or restore the file, then retry."
+                ) from e
+            from xpst.config_migration import _BoundedSafeLoader
+            try:
+                # nosec B506 on next line: _BoundedSafeLoader subclasses SafeLoader.
+                file_config = yaml.load(text, Loader=_BoundedSafeLoader)  # nosec B506
+            except yaml.YAMLError as e:
+                backup = _backup_corrupt_config_file(cfg_path)
+                raise ValueError(
+                    f"XPST config file could not be parsed: {cfg_path} ({e}). "
+                    f"The original file was backed up to: {backup}. Fix or "
+                    f"restore the file, then retry."
+                ) from e
+        except OSError as e:
+            raise ValueError(f"XPST config file could not be read: {cfg_path} ({e})") from e
+        if file_config is None:
+            backup = _backup_corrupt_config_file(cfg_path)
+            raise ValueError(
+                f"XPST config file is empty or invalid: {cfg_path}. It may "
+                f"have been truncated by a crash or a full disk — the "
+                f"original file was backed up to: {backup}."
+            )
+        if not isinstance(file_config, dict):
+            raise ValueError(
+                f"XPST config must be a mapping, got {type(file_config).__name__}: {cfg_path}"
+            )
+        config = cls._merge_config(config, file_config)
+        config.config_dir = str(cfg_path.parent)
+
+        # Secrets live in the encrypted store, not the YAML (an install without
+        # the store still writes them to the config, see save()).
+        for (section, field_name), store_key in _SECRET_CONFIG_FIELDS.items():
+            account = getattr(config, section, None)
+            if account is None or getattr(account, field_name, ""):
+                continue
+            stored = _load_config_secret(config.config_dir, store_key)
+            if stored:
+                setattr(account, field_name, stored)
+
+        # Auto-migrate config from older versions
+        from xpst.config_migration import auto_migrate
+        auto_migrate(config.config_dir)
+        config = cls._fix_legacy_paths(config)
+
+        # Override with environment variables
+        config = cls._apply_env_vars(config)
+
+        # An explicit XPST_CONFIG_DIR profile owns its credential files: rebase
+        # any path still pointing at the default ~/.xpst before expanding.
+        config = cls._rebase_credential_paths(config)
+
+        # Expand paths
+        config = cls._expand_paths(config)
+
+        # Validate
+        config._validate()
+
+        return config
+
+    @classmethod
+    def _merge_config(cls, config: "XPSTConfig", file_config: dict[str, Any]) -> "XPSTConfig":
+        """Merge file configuration into an existing config object.
+
+        Applies values from the YAML config file onto the config, preserving
+        defaults for any keys not present in the file.
+
+        Args:
+            config: Config object with default values.
+            file_config: Parsed YAML dictionary.
+
+        Returns:
+            Config object with file values merged in.
+        """
+
+        # TikTok
+        if "accounts" in file_config and "tiktok" in file_config["accounts"]:
+            tk = file_config["accounts"]["tiktok"]
+            if tk and isinstance(tk, dict):
+                config.tiktok.username = tk.get("username", config.tiktok.username)
+                config.tiktok.cookies_from_browser = tk.get("cookies_from_browser", config.tiktok.cookies_from_browser)
+                config.tiktok.cookies_file = tk.get("cookies_file", config.tiktok.cookies_file)
+                config.tiktok.proxy = tk.get("proxy", config.tiktok.proxy)
+                config.tiktok.enabled = tk.get("enabled", config.tiktok.enabled)
+                config.tiktok.client_key = tk.get("client_key", config.tiktok.client_key)
+                config.tiktok.client_secret = tk.get("client_secret", config.tiktok.client_secret)
+                config.tiktok.access_token = tk.get("access_token", config.tiktok.access_token)
+                config.tiktok.refresh_token = tk.get("refresh_token", config.tiktok.refresh_token)
+                config.tiktok.sandbox = tk.get("sandbox", config.tiktok.sandbox)
+                config.tiktok.draft_mode = tk.get("draft_mode", config.tiktok.draft_mode)
+                config.tiktok.publish_mode = tk.get("publish_mode", config.tiktok.publish_mode)
+                config.tiktok.browser_headless = tk.get(
+                    "browser_headless", config.tiktok.browser_headless
+                )
+
+        # YouTube
+        if "accounts" in file_config and "youtube" in file_config["accounts"]:
+            yt = file_config["accounts"]["youtube"]
+            if yt and isinstance(yt, dict):
+                config.youtube.enabled = yt.get("enabled", config.youtube.enabled)
+                config.youtube.client_secrets = yt.get("client_secrets", config.youtube.client_secrets)
+                config.youtube.token_file = yt.get("token_file", config.youtube.token_file)
+                config.youtube.channel_id = yt.get("channel_id", config.youtube.channel_id)
+                config.youtube.username = yt.get("username", config.youtube.username)
+                config.youtube.proxy = yt.get("proxy", config.youtube.proxy)
+                config.youtube.video_mode = yt.get("video_mode", config.youtube.video_mode)
+
+        # X
+        if "accounts" in file_config and "x" in file_config["accounts"]:
+            x_cfg = file_config["accounts"]["x"]
+            if x_cfg and isinstance(x_cfg, dict):
+                config.x.enabled = x_cfg.get("enabled", config.x.enabled)
+                config.x.cookies_file = x_cfg.get("cookies_file", config.x.cookies_file)
+                config.x.username = x_cfg.get("username", config.x.username)
+                config.x.password = x_cfg.get("password", config.x.password)
+                config.x.proxy = x_cfg.get("proxy", config.x.proxy)
+                config.x.auth_mode = x_cfg.get("auth_mode", config.x.auth_mode)
+                config.x.max_video_duration_seconds = x_cfg.get(
+                    "max_video_duration_seconds", config.x.max_video_duration_seconds
+                )
+                config.x.api_key = x_cfg.get("api_key", config.x.api_key)
+                config.x.api_secret = x_cfg.get("api_secret", config.x.api_secret)
+                config.x.access_token = x_cfg.get("access_token", config.x.access_token)
+                config.x.access_token_secret = x_cfg.get("access_token_secret", config.x.access_token_secret)
+                config.x.bearer_token = x_cfg.get("bearer_token", config.x.bearer_token)
+
+        # Instagram
+        if "accounts" in file_config and "instagram" in file_config["accounts"]:
+            ig = file_config["accounts"]["instagram"]
+            if ig and isinstance(ig, dict):
+                config.instagram.enabled = ig.get("enabled", config.instagram.enabled)
+                config.instagram.session_file = ig.get("session_file", config.instagram.session_file)
+                config.instagram.username = ig.get("username", config.instagram.username)
+                config.instagram.password = ig.get("password", config.instagram.password)
+                config.instagram.proxy = ig.get("proxy", config.instagram.proxy)
+                config.instagram.auth_mode = ig.get("auth_mode", config.instagram.auth_mode)
+                config.instagram.device_id = ig.get("device_id", config.instagram.device_id)
+                config.instagram.graph_access_token = ig.get("graph_access_token", config.instagram.graph_access_token)
+                config.instagram.graph_ig_user_id = ig.get("graph_ig_user_id", config.instagram.graph_ig_user_id)
+                # app_id only for write-back: the BYO secret lives in the
+                # encrypted store, and a config.yaml that *persisted* it would
+                # leak it in plaintext. A hand-written secret in the user's own
+                # file is honoured for this process but never rewritten.
+                config.instagram.app_id = ig.get("app_id", config.instagram.app_id)
+                config.instagram.app_secret = ig.get("app_secret", config.instagram.app_secret)
+                config.instagram.account_type = ig.get("account_type", config.instagram.account_type)
+                config.instagram.account_type_source = ig.get(
+                    "account_type_source", config.instagram.account_type_source
+                )
+
+        # Threads
+        if "accounts" in file_config and "threads" in file_config["accounts"]:
+            th = file_config["accounts"]["threads"]
+            if th and isinstance(th, dict):
+                config.threads.enabled = th.get("enabled", config.threads.enabled)
+                config.threads.graph_access_token = th.get("graph_access_token", config.threads.graph_access_token)
+                config.threads.threads_user_id = th.get("threads_user_id", config.threads.threads_user_id)
+                config.threads.proxy = th.get("proxy", config.threads.proxy)
+                config.threads.app_id = th.get("app_id", config.threads.app_id)
+                config.threads.app_secret = th.get("app_secret", config.threads.app_secret)
+
+        # Bluesky
+        if "accounts" in file_config and "bluesky" in file_config["accounts"]:
+            bs = file_config["accounts"]["bluesky"]
+            if bs and isinstance(bs, dict):
+                config.bluesky.enabled = bs.get("enabled", config.bluesky.enabled)
+                config.bluesky.identifier = bs.get("identifier", config.bluesky.identifier)
+                config.bluesky.service = bs.get("service", config.bluesky.service)
+                config.bluesky.proxy = bs.get("proxy", config.bluesky.proxy)
+
+        # Messenger
+        if "accounts" in file_config and "messenger" in file_config["accounts"]:
+            ms = file_config["accounts"]["messenger"]
+            if ms and isinstance(ms, dict):
+                config.messenger.enabled = ms.get("enabled", config.messenger.enabled)
+                config.messenger.page_id = ms.get("page_id", config.messenger.page_id)
+                config.messenger.page_access_token = ms.get("page_access_token", config.messenger.page_access_token)
+                config.messenger.app_id = ms.get("app_id", config.messenger.app_id)
+                config.messenger.app_secret = ms.get("app_secret", config.messenger.app_secret)
+                config.messenger.verify_token = ms.get("verify_token", config.messenger.verify_token)
+                config.messenger.webhook_path = ms.get("webhook_path", config.messenger.webhook_path)
+                config.messenger.auto_reply = ms.get("auto_reply", config.messenger.auto_reply)
+                if isinstance(ms.get("reply_rules"), dict):
+                    config.messenger.reply_rules = ms.get("reply_rules", config.messenger.reply_rules)
+                config.messenger.comment_reply_enabled = ms.get(
+                    "comment_reply_enabled", config.messenger.comment_reply_enabled
+                )
+                if isinstance(ms.get("comment_platforms"), list):
+                    config.messenger.comment_platforms = ms.get(
+                        "comment_platforms", config.messenger.comment_platforms
+                    )
+                config.messenger.proxy = ms.get("proxy", config.messenger.proxy)
+
+        # Facebook Page (Page-scoped publishing via Facebook Login for Business)
+        if "accounts" in file_config and "facebook" in file_config["accounts"]:
+            fb = file_config["accounts"]["facebook"]
+            if fb and isinstance(fb, dict):
+                config.facebook.enabled = fb.get("enabled", config.facebook.enabled)
+                config.facebook.page_id = fb.get("page_id", config.facebook.page_id)
+                config.facebook.page_name = fb.get("page_name", config.facebook.page_name)
+                config.facebook.page_access_token = fb.get(
+                    "page_access_token", config.facebook.page_access_token
+                )
+                config.facebook.app_id = fb.get("app_id", config.facebook.app_id)
+                config.facebook.app_secret = fb.get("app_secret", config.facebook.app_secret)
+                config.facebook.graph_user_token = fb.get(
+                    "graph_user_token", config.facebook.graph_user_token
+                )
+                config.facebook.login_config_id = fb.get(
+                    "login_config_id", config.facebook.login_config_id
+                )
+                config.facebook.proxy = fb.get("proxy", config.facebook.proxy)
+
+        # Rumble (OPT-IN, integration-uncertain: partner-gated upload API)
+        if "accounts" in file_config and "rumble" in file_config["accounts"]:
+            rb = file_config["accounts"]["rumble"]
+            if rb and isinstance(rb, dict):
+                config.rumble.enabled = rb.get("enabled", config.rumble.enabled)
+                config.rumble.api_key = rb.get("api_key", config.rumble.api_key)
+                config.rumble.api_url = rb.get("api_url", config.rumble.api_url)
+                config.rumble.manual_handoff_dir = rb.get(
+                    "manual_handoff_dir", config.rumble.manual_handoff_dir
+                )
+                config.rumble.upload_page_url = rb.get("upload_page_url", config.rumble.upload_page_url)
+                config.rumble.proxy = rb.get("proxy", config.rumble.proxy)
+
+        # Local
+        if "accounts" in file_config and "local" in file_config["accounts"]:
+            local_cfg = file_config["accounts"]["local"]
+            if local_cfg and isinstance(local_cfg, dict):
+                config.local.path = local_cfg.get("path", config.local.path)
+
+        # Video
+        if "video" in file_config:
+            vid = file_config["video"]
+            if vid and isinstance(vid, dict):
+                config.video.download_dir = vid.get("download_dir", config.video.download_dir)
+                config.video.cleanup_after_post = vid.get("cleanup_after_post", config.video.cleanup_after_post)
+
+                if "encoding" in vid:
+                    enc = vid["encoding"]
+                    if enc and isinstance(enc, dict):
+                        if "youtube" in enc and enc["youtube"] and isinstance(enc["youtube"], dict):
+                            config.video.encoding_youtube = EncodingConfig(**{k: v for k, v in enc["youtube"].items() if k in EncodingConfig.__dataclass_fields__})
+                        if "instagram" in enc and enc["instagram"] and isinstance(enc["instagram"], dict):
+                            config.video.encoding_instagram = EncodingConfig(**{k: v for k, v in enc["instagram"].items() if k in EncodingConfig.__dataclass_fields__})
+                        if "x" in enc and enc["x"] and isinstance(enc["x"], dict):
+                            config.video.encoding_x = EncodingConfig(**{k: v for k, v in enc["x"].items() if k in EncodingConfig.__dataclass_fields__})
+                        if "tiktok" in enc and enc["tiktok"] and isinstance(enc["tiktok"], dict):
+                            config.video.encoding_tiktok = EncodingConfig(**{k: v for k, v in enc["tiktok"].items() if k in EncodingConfig.__dataclass_fields__})
+
+        # Reliability
+        if "reliability" in file_config:
+            rel = file_config["reliability"]
+            if rel and isinstance(rel, dict):
+                config.reliability = ReliabilityConfig(**{k: v for k, v in rel.items() if k in ReliabilityConfig.__dataclass_fields__})
+
+        # Monitoring
+        if "monitoring" in file_config:
+            mon = file_config["monitoring"]
+            if mon and isinstance(mon, dict):
+                config.monitoring = MonitoringConfig(**{k: v for k, v in mon.items() if k in MonitoringConfig.__dataclass_fields__})
+
+        # Schedule
+        if "schedule" in file_config:
+            sched = file_config["schedule"]
+            if sched and isinstance(sched, dict):
+                config.schedule = ScheduleConfig(**{k: v for k, v in sched.items() if k in ScheduleConfig.__dataclass_fields__})
+
+        # Notifications
+        if "notifications" in file_config and isinstance(file_config["notifications"], dict):
+            notif = file_config["notifications"]
+            config.notifications.enabled = notif.get("enabled", config.notifications.enabled)
+            config.notifications.on_success = notif.get("on_success", config.notifications.on_success)
+            config.notifications.on_failure = notif.get("on_failure", config.notifications.on_failure)
+            if "discord" in notif:
+                config.notifications.discord_webhook_url = notif["discord"].get("webhook_url", config.notifications.discord_webhook_url)
+            if "telegram" in notif:
+                config.notifications.telegram_bot_token = notif["telegram"].get("bot_token", config.notifications.telegram_bot_token)
+                config.notifications.telegram_chat_id = notif["telegram"].get("chat_id", config.notifications.telegram_chat_id)
+
+        # Rate Limits
+        if "rate_limits" in file_config:
+            rl = file_config["rate_limits"]
+            if rl and isinstance(rl, dict):
+                config.rate_limits.youtube = rl.get("youtube", config.rate_limits.youtube)
+                config.rate_limits.instagram = rl.get("instagram", config.rate_limits.instagram)
+                config.rate_limits.x = rl.get("x", config.rate_limits.x)
+                config.rate_limits.tiktok = rl.get("tiktok", config.rate_limits.tiktok)
+                config.rate_limits.threads = rl.get("threads", config.rate_limits.threads)
+                config.rate_limits.facebook = rl.get("facebook", config.rate_limits.facebook)
+
+        # Bio (link-in-bio page)
+        if "bio" in file_config:
+            bio = file_config["bio"]
+            if bio and isinstance(bio, dict):
+                config.bio.handle = str(bio.get("handle", config.bio.handle) or "")
+                if isinstance(bio.get("links"), list):
+                    links = []
+                    for item in bio["links"]:
+                        if not isinstance(item, dict):
+                            continue
+                        label = str(item.get("label", "") or "").strip()
+                        url = str(item.get("url", "") or "").strip()
+                        if label and url:
+                            links.append({"label": label, "url": url})
+                    config.bio.links = links
+
+        # Read-only live chat: which channels the merged timeline watches.
+        if "chat" in file_config and isinstance(file_config["chat"], dict):
+            chat_cfg = file_config["chat"]
+            if isinstance(chat_cfg.get("twitch_channels"), list):
+                config.chat.twitch_channels = [
+                    str(item).strip() for item in chat_cfg["twitch_channels"] if str(item).strip()
+                ]
+            if isinstance(chat_cfg.get("kick_channels"), list):
+                config.chat.kick_channels = [
+                    str(item).strip() for item in chat_cfg["kick_channels"] if str(item).strip()
+                ]
+            config.chat.youtube_video_id = str(chat_cfg.get("youtube_video_id", config.chat.youtube_video_id) or "")
+            try:
+                config.chat.max_messages = int(chat_cfg.get("max_messages", config.chat.max_messages))
+            except (TypeError, ValueError):
+                pass
+            try:
+                config.chat.youtube_poll_interval_s = float(
+                    chat_cfg.get("youtube_poll_interval_s", config.chat.youtube_poll_interval_s)
+                )
+            except (TypeError, ValueError):
+                pass
+
+        # Anti-bot behaviour switches. Caption variation rewrites published
+        # copy, so it is opt-in: an absent key leaves the default (off).
+        if "anti_bot" in file_config and isinstance(file_config["anti_bot"], dict):
+            anti_bot_cfg = file_config["anti_bot"]
+            if "caption_variation" in anti_bot_cfg:
+                config.anti_bot.caption_variation = bool(anti_bot_cfg["caption_variation"])
+
+        # Shortcuts (stored in config_dir as raw dict)
+        if "shortcuts" in file_config and isinstance(file_config["shortcuts"], dict):
+            config._shortcuts = file_config["shortcuts"]
+
+        # Phase 5.1: first-run onboarding flag (top-level boolean).
+        if "first_run_complete" in file_config:
+            config.first_run_complete = bool(file_config["first_run_complete"])
+
+        # Provider mode (official/community)
+        if "provider_mode" in file_config:
+            config.provider_mode = str(file_config["provider_mode"])
+
+        return config
+
+    @classmethod
+    def _rebase_credential_paths(cls, config: "XPSTConfig") -> "XPSTConfig":
+        """Re-point default credential paths at an explicit config-dir profile.
+
+        ``XPST_CONFIG_DIR`` selects the config directory, and
+        ``config.config_dir`` + ``CredentialStore`` honor it — but the shipped
+        per-platform defaults are absolute ``~/.xpst/credentials/...`` paths that
+        stayed put, so a sandboxed run read and rewrote the real user's
+        credentials.
+
+        Only paths that still sit under the DEFAULT config dir are rebased: a
+        value the user set deliberately (config file or env var) is never moved,
+        and without an override this is a no-op.
+        """
+        if not _config_dir_override():
+            return config
+        default_root = Path(os.path.expanduser("~/.xpst"))
+        active_root = Path(os.path.expanduser(config.config_dir))
+        if active_root == default_root:
+            return config
+        for section, field_name in _REBASABLE_CREDENTIAL_FIELDS:
+            holder = getattr(config, section, None)
+            if holder is None:
+                continue
+            raw = getattr(holder, field_name, None)
+            if not raw or not isinstance(raw, str):
+                continue
+            candidate = Path(os.path.expanduser(raw))
+            try:
+                rel = candidate.relative_to(default_root)
+            except ValueError:
+                # Not under the default home — an explicit choice. Leave it.
+                continue
+            setattr(holder, field_name, str(active_root / rel))
+        return config
+
+    @classmethod
+    def _fix_legacy_paths(cls, config: "XPSTConfig") -> "XPSTConfig":
+        """Auto-replace stale .crosspstr path references with .xpst.
+
+        Handles configs written by older versions before the rename.
+        """
+        def _fix(path: str) -> str:
+            return path.replace(".crosspstr", ".xpst").replace("crosspstr", "xpst")
+
+        config.video.download_dir = _fix(config.video.download_dir)
+        config.monitoring.log_file = _fix(config.monitoring.log_file)
+        if config.tiktok.cookies_file:
+            config.tiktok.cookies_file = _fix(config.tiktok.cookies_file)
+        if config.instagram.session_file:
+            config.instagram.session_file = _fix(config.instagram.session_file)
+        if config.x.cookies_file:
+            config.x.cookies_file = _fix(config.x.cookies_file)
+        if config.youtube.token_file:
+            config.youtube.token_file = _fix(config.youtube.token_file)
+        if config.youtube.client_secrets:
+            config.youtube.client_secrets = _fix(config.youtube.client_secrets)
+        return config
+
+    @classmethod
+    def _apply_env_vars(cls, config: "XPSTConfig") -> "XPSTConfig":
+        """Override configuration values with environment variables.
+
+        All env vars use the ``XPST_`` prefix. Boolean values accept
+        ``true/1/yes`` (case-insensitive). This is the highest priority
+        config source, overriding both defaults and file values.
+
+        Args:
+            config: Config object to override.
+
+        Returns:
+            Config object with env var overrides applied.
+        """
+
+        # TikTok
+        if v := os.getenv("XPST_TIKTOK_USERNAME"):
+            config.tiktok.username = v
+        if v := os.getenv("XPST_TIKTOK_COOKIES_FROM_BROWSER"):
+            config.tiktok.cookies_from_browser = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_TIKTOK_PROXY"):
+            config.tiktok.proxy = v
+
+        # YouTube
+        if v := os.getenv("XPST_YOUTUBE_ENABLED"):
+            config.youtube.enabled = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_YOUTUBE_CLIENT_SECRETS"):
+            config.youtube.client_secrets = v
+        if v := os.getenv("XPST_YOUTUBE_TOKEN_FILE"):
+            config.youtube.token_file = v
+        if v := os.getenv("XPST_YOUTUBE_PROXY"):
+            config.youtube.proxy = v
+
+        # X
+        if v := os.getenv("XPST_X_ENABLED"):
+            config.x.enabled = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_X_COOKIES_FILE"):
+            config.x.cookies_file = v
+        if v := os.getenv("XPST_X_PROXY"):
+            config.x.proxy = v
+        if v := os.getenv("XPST_X_AUTH_MODE"):
+            config.x.auth_mode = v
+        if v := os.getenv("XPST_X_API_KEY"):
+            config.x.api_key = v
+        if v := os.getenv("XPST_X_API_SECRET"):
+            config.x.api_secret = v
+        if v := os.getenv("XPST_X_ACCESS_TOKEN"):
+            config.x.access_token = v
+        if v := os.getenv("XPST_X_ACCESS_TOKEN_SECRET"):
+            config.x.access_token_secret = v
+        if v := os.getenv("XPST_X_BEARER_TOKEN"):
+            config.x.bearer_token = v
+
+        # Instagram
+        if v := os.getenv("XPST_INSTAGRAM_ENABLED"):
+            config.instagram.enabled = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_INSTAGRAM_SESSION_FILE"):
+            config.instagram.session_file = v
+        if v := os.getenv("XPST_INSTAGRAM_USERNAME"):
+            config.instagram.username = v
+        if v := os.getenv("XPST_INSTAGRAM_PROXY"):
+            config.instagram.proxy = v
+        if v := os.getenv("XPST_INSTAGRAM_AUTH_MODE"):
+            config.instagram.auth_mode = v
+        if v := os.getenv("XPST_INSTAGRAM_GRAPH_ACCESS_TOKEN"):
+            config.instagram.graph_access_token = v
+        if v := os.getenv("XPST_INSTAGRAM_GRAPH_IG_USER_ID"):
+            config.instagram.graph_ig_user_id = v
+        if v := os.getenv("XPST_INSTAGRAM_APP_ID"):
+            config.instagram.app_id = v
+        if v := os.getenv("XPST_INSTAGRAM_APP_SECRET"):
+            config.instagram.app_secret = v
+
+        # TikTok Content Posting API (destination mode)
+        if v := os.getenv("XPST_TIKTOK_CLIENT_KEY"):
+            config.tiktok.client_key = v
+        if v := os.getenv("XPST_TIKTOK_CLIENT_SECRET"):
+            config.tiktok.client_secret = v
+        if v := os.getenv("XPST_TIKTOK_ACCESS_TOKEN"):
+            config.tiktok.access_token = v
+        if v := os.getenv("XPST_TIKTOK_REFRESH_TOKEN"):
+            config.tiktok.refresh_token = v
+        if v := os.getenv("XPST_TIKTOK_SANDBOX"):
+            config.tiktok.sandbox = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_TIKTOK_PUBLISH_MODE"):
+            mode = v.strip().lower()
+            if mode in ("auto", "browser", "browser_only"):
+                config.tiktok.publish_mode = mode
+        if v := os.getenv("XPST_TIKTOK_BROWSER_HEADLESS"):
+            config.tiktok.browser_headless = v.lower() in ("true", "1", "yes")
+
+        # Bluesky (AT Protocol). The app password is a secret and is read from
+        # the encrypted store, not from the environment; the identifier and the
+        # service host are configuration, so they may come from env vars.
+        if v := os.getenv("XPST_BLUESKY_ENABLED"):
+            config.bluesky.enabled = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_BLUESKY_IDENTIFIER"):
+            config.bluesky.identifier = v
+        if v := os.getenv("XPST_BLUESKY_SERVICE"):
+            config.bluesky.service = v
+        if v := os.getenv("XPST_BLUESKY_PROXY"):
+            config.bluesky.proxy = v
+
+        # Threads
+        if v := os.getenv("XPST_THREADS_ENABLED"):
+            config.threads.enabled = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_THREADS_GRAPH_ACCESS_TOKEN"):
+            config.threads.graph_access_token = v
+        if v := os.getenv("XPST_THREADS_USER_ID"):
+            config.threads.threads_user_id = v
+        if v := os.getenv("XPST_THREADS_APP_ID"):
+            config.threads.app_id = v
+        if v := os.getenv("XPST_THREADS_APP_SECRET"):
+            config.threads.app_secret = v
+        if v := os.getenv("XPST_THREADS_PROXY"):
+            config.threads.proxy = v
+
+        # Messenger
+        if v := os.getenv("XPST_MESSENGER_ENABLED"):
+            config.messenger.enabled = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_MESSENGER_PAGE_ACCESS_TOKEN"):
+            config.messenger.page_access_token = v
+        if v := os.getenv("XPST_MESSENGER_APP_ID"):
+            config.messenger.app_id = v
+        if v := os.getenv("XPST_MESSENGER_APP_SECRET"):
+            config.messenger.app_secret = v
+        if v := os.getenv("XPST_MESSENGER_VERIFY_TOKEN"):
+            config.messenger.verify_token = v
+        if v := os.getenv("XPST_MESSENGER_PAGE_ID"):
+            config.messenger.page_id = v
+        if v := os.getenv("XPST_MESSENGER_AUTO_REPLY"):
+            config.messenger.auto_reply = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_MESSENGER_REPLY_RULES"):
+            import json
+
+            try:
+                parsed = json.loads(v)
+            except json.JSONDecodeError:
+                parsed = {}
+            if isinstance(parsed, dict):
+                config.messenger.reply_rules = parsed
+        if v := os.getenv("XPST_MESSENGER_COMMENT_REPLY_ENABLED"):
+            config.messenger.comment_reply_enabled = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_MESSENGER_COMMENT_PLATFORMS"):
+            config.messenger.comment_platforms = [p.strip() for p in v.split(",") if p.strip()]
+        if v := os.getenv("XPST_MESSENGER_PROXY"):
+            config.messenger.proxy = v
+
+        # X username
+        if v := os.getenv("XPST_X_USERNAME"):
+            config.x.username = v
+
+        # YouTube channel
+        if v := os.getenv("XPST_YOUTUBE_CHANNEL_ID"):
+            config.youtube.channel_id = v
+        if v := os.getenv("XPST_YOUTUBE_USERNAME"):
+            config.youtube.username = v
+
+        # Local
+        if v := os.getenv("XPST_LOCAL_PATH"):
+            config.local.path = v
+
+        # Reliability
+        if v := os.getenv("XPST_MAX_RETRIES"):
+            config.reliability.max_retries = int(v)
+
+        # Schedule / analytics snapshots
+        if v := os.getenv("XPST_ANALYTICS_SNAPSHOT_ENABLED"):
+            config.schedule.analytics_snapshot_enabled = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_ANALYTICS_SNAPSHOT_INTERVAL"):
+            config.schedule.analytics_snapshot_interval = int(v)
+
+        # Monitoring
+        if v := os.getenv("XPST_LOG_LEVEL"):
+            config.monitoring.log_level = v
+        if v := os.getenv("XPST_LOG_FILE"):
+            config.monitoring.log_file = v
+
+        # Notifications
+        if v := os.getenv("XPST_NOTIFICATIONS_ENABLED"):
+            config.notifications.enabled = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_DISCORD_WEBHOOK_URL"):
+            config.notifications.discord_webhook_url = v
+        if v := os.getenv("XPST_TELEGRAM_BOT_TOKEN"):
+            config.notifications.telegram_bot_token = v
+        if v := os.getenv("XPST_TELEGRAM_CHAT_ID"):
+            config.notifications.telegram_chat_id = v
+
+        # Provider mode
+        if v := os.getenv("XPST_PROVIDER_MODE"):
+            config.provider_mode = v.lower()
+
+        return config
+
+    @classmethod
+    def _expand_paths(cls, config: "XPSTConfig") -> "XPSTConfig":
+        """Expand ``~`` and environment variables in all path fields.
+
+        Args:
+            config: Config object with potentially unexpanded paths.
+
+        Returns:
+            Config object with all paths expanded to absolute form.
+        """
+
+        config.config_dir = os.path.expandvars(os.path.expanduser(config.config_dir))
+        config.video.download_dir = os.path.expandvars(os.path.expanduser(config.video.download_dir))
+        config.monitoring.log_file = os.path.expandvars(os.path.expanduser(config.monitoring.log_file))
+        config.tiktok.cookies_file = (
+            os.path.expandvars(os.path.expanduser(config.tiktok.cookies_file))
+            if config.tiktok.cookies_file
+            else None
+        )
+        config.youtube.client_secrets = os.path.expandvars(os.path.expanduser(config.youtube.client_secrets))
+        config.youtube.token_file = os.path.expandvars(os.path.expanduser(config.youtube.token_file))
+        config.x.cookies_file = os.path.expandvars(os.path.expanduser(config.x.cookies_file))
+        config.instagram.session_file = os.path.expandvars(os.path.expanduser(config.instagram.session_file))
+        return config
+
+    def _validate(self) -> None:
+        """Validate configuration values and raise on errors.
+
+        Checks: minimum check interval (60s), minimum catchup window (1h),
+        valid resolutions (360-2160), valid CRF (0-51), valid FPS (24/25/30/60).
+
+        Raises:
+            ValueError: If any configuration value is invalid, with details.
+        """
+
+        errors = []
+
+        # Validate intervals
+        if self.schedule.check_interval < 60:
+            errors.append("Check interval must be at least 60 seconds")
+
+        if self.schedule.catchup_window < 3600:
+            errors.append("Catchup window must be at least 1 hour")
+
+        if not MIN_ANALYTICS_SNAPSHOT_INTERVAL <= self.schedule.analytics_snapshot_interval <= MAX_ANALYTICS_SNAPSHOT_INTERVAL:
+            errors.append(
+                "Analytics snapshot interval must be between "
+                f"{MIN_ANALYTICS_SNAPSHOT_INTERVAL} and {MAX_ANALYTICS_SNAPSHOT_INTERVAL} seconds"
+            )
+
+        # Validate encoding configs
+        for name, enc in [("youtube", self.video.encoding_youtube), ("instagram", self.video.encoding_instagram), ("x", self.video.encoding_x), ("tiktok", self.video.encoding_tiktok)]:
+            if enc.resolution and enc.resolution not in (360, 480, 720, 1080, 1440, 1920, 2160):
+                errors.append(f"Invalid resolution for {name}: {enc.resolution}")
+            if enc.crf is not None and not (0 <= enc.crf <= 51):
+                errors.append(f"Invalid CRF for {name}: {enc.crf}")
+            if enc.fps and enc.fps not in (24, 25, 30, 60):
+                errors.append(f"Invalid FPS for {name}: {enc.fps}")
+
+        if errors:
+            raise ValueError("Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors))
+
+    def _serialized_password_hash(self) -> str:
+        """Return the bcrypt password hash for serialization."""
+        return self.monitoring.dashboard_password_hash
+
+    def is_community_platform(self, platform_name: str) -> bool:
+        """Return True if the platform uses an unofficial/community API.
+
+        Platforms are considered "community" when their current auth_mode
+        routes through an unofficial integration (instagrapi, twikit, etc.).
+        Official API platforms (YouTube, TikTok Content Posting API, Threads,
+        IG Graph API, X API v2) return False.
+
+        The registry in :mod:`xpst.auth_path_risk` is the single definition of
+        "unofficial", so visibility decisions here and the ban-risk advisories
+        doctor/readiness/preflight report cannot disagree about which mode is
+        unofficial.
+        """
+        from xpst.auth_path_risk import UNOFFICIAL_AUTH_PATHS
+
+        name = str(platform_name).strip().lower()
+        entry = UNOFFICIAL_AUTH_PATHS.get(name)
+        if entry is None:
+            return False
+        account = getattr(self, name, None)
+        return str(getattr(account, "auth_mode", "") or "").strip().lower() == entry.auth_mode
+
+    def should_show_platform(self, platform_name: str) -> bool:
+        """Return True if a platform should be visible given the provider mode.
+
+        In ``official`` mode, community platforms are hidden.
+        In ``community`` mode, all platforms are visible.
+        """
+        if self.provider_mode == "community":
+            return True
+        return not self.is_community_platform(platform_name)
+
+    def save(self, config_path: str | None = None) -> None:
+        """Save current configuration to a YAML file.
+
+        Creates parent directories if needed. Serializes all config
+        sections including encoding profiles and notification settings.
+
+        Args:
+            config_path: Output path. Defaults to ``~/.xpst/config.yaml``.
+        """
+
+        if config_path is None:
+            config_path = os.path.join(self.config_dir, "config.yaml")
+
+        config_path = Path(config_path)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Convert to dict
+        from xpst.config_migration import ConfigMigration
+
+        config_dict = {
+            # Persist the schema version: without it every load treated the
+            # file as v1 and ran the migration chain again, rewriting the
+            # user's config and dropping a backup on every save/load cycle.
+            "version": ConfigMigration.CURRENT_VERSION,
+            "accounts": {
+                "tiktok": {
+                    "username": self.tiktok.username,
+                    "cookies_from_browser": self.tiktok.cookies_from_browser,
+                    "cookies_file": self.tiktok.cookies_file,
+                    "proxy": self.tiktok.proxy,
+                    "enabled": self.tiktok.enabled,
+                    "client_key": self.tiktok.client_key,
+                    "client_secret": self.tiktok.client_secret,
+                    "access_token": self.tiktok.access_token,
+                    "refresh_token": self.tiktok.refresh_token,
+                    "sandbox": self.tiktok.sandbox,
+                    "draft_mode": self.tiktok.draft_mode,
+                    "publish_mode": self.tiktok.publish_mode,
+                    "browser_headless": self.tiktok.browser_headless,
+                },
+                "youtube": {
+                    "enabled": self.youtube.enabled,
+                    "client_secrets": self.youtube.client_secrets,
+                    "token_file": self.youtube.token_file,
+                    "channel_id": self.youtube.channel_id,
+                    "username": self.youtube.username,
+                    "proxy": self.youtube.proxy,
+                },
+                "x": {
+                    "enabled": self.x.enabled,
+                    "cookies_file": self.x.cookies_file,
+                    "username": self.x.username,
+                    "proxy": self.x.proxy,
+                    "auth_mode": self.x.auth_mode,
+                },
+                "instagram": {
+                    "enabled": self.instagram.enabled,
+                    "session_file": self.instagram.session_file,
+                    "username": self.instagram.username,
+                    "proxy": self.instagram.proxy,
+                    "auth_mode": self.instagram.auth_mode,
+                    "device_id": self.instagram.device_id,
+                    # BYO app id is not a secret; its secret lives only in the
+                    # encrypted store, so it is deliberately NOT serialized.
+                    # The graph token/user id ride the same 0600 config file
+                    # the Threads section already uses (store stays canonical;
+                    # this is the write-through convenience the uploader reads).
+                    "graph_access_token": self.instagram.graph_access_token,
+                    "graph_ig_user_id": self.instagram.graph_ig_user_id,
+                    "app_id": self.instagram.app_id,
+                    # Account type is a verified fact about the account, not a
+                    # secret — safe to serialize, and the UI renders it so the
+                    # publish-readiness state is never ambiguous.
+                    "account_type": self.instagram.account_type,
+                    "account_type_source": self.instagram.account_type_source,
+                },
+                "threads": {
+                    "enabled": self.threads.enabled,
+                    "graph_access_token": self.threads.graph_access_token,
+                    "threads_user_id": self.threads.threads_user_id,
+                    "proxy": self.threads.proxy,
+                    "app_id": self.threads.app_id,
+                },
+                "bluesky": {
+                    # The app password is deliberately ABSENT: it lives only in
+                    # the encrypted store. Serializing it here would put a
+                    # credential in a plaintext file.
+                    "enabled": self.bluesky.enabled,
+                    "identifier": self.bluesky.identifier,
+                    "service": self.bluesky.service,
+                    "proxy": self.bluesky.proxy,
+                },
+                "messenger": {
+                    "enabled": self.messenger.enabled,
+                    "page_id": self.messenger.page_id,
+                    "page_access_token": self.messenger.page_access_token,
+                    "app_id": self.messenger.app_id,
+                    "app_secret": self.messenger.app_secret,
+                    "verify_token": self.messenger.verify_token,
+                    "webhook_path": self.messenger.webhook_path,
+                    "auto_reply": self.messenger.auto_reply,
+                    "reply_rules": self.messenger.reply_rules,
+                    "proxy": self.messenger.proxy,
+                },
+                "facebook": {
+                    "enabled": self.facebook.enabled,
+                    "page_id": self.facebook.page_id,
+                    "page_name": self.facebook.page_name,
+                    "page_access_token": self.facebook.page_access_token,
+                    "app_id": self.facebook.app_id,
+                    "app_secret": self.facebook.app_secret,
+                    "graph_user_token": self.facebook.graph_user_token,
+                    "login_config_id": self.facebook.login_config_id,
+                    "proxy": self.facebook.proxy,
+                },
+                "local": {
+                    "path": self.local.path,
+                },
+            },
+            "video": {
+                "download_dir": self.video.download_dir,
+                "cleanup_after_post": self.video.cleanup_after_post,
+                "encoding": {
+                    "youtube": {
+                        "passthrough": self.video.encoding_youtube.passthrough,
+                        "resolution": self.video.encoding_youtube.resolution,
+                        "bitrate": self.video.encoding_youtube.bitrate,
+                        "maxrate": self.video.encoding_youtube.maxrate,
+                        "bufsize": self.video.encoding_youtube.bufsize,
+                        "profile": self.video.encoding_youtube.profile,
+                        "gop": self.video.encoding_youtube.gop,
+                        "fps": self.video.encoding_youtube.fps,
+                        "color": self.video.encoding_youtube.color,
+                        "pix_fmt": self.video.encoding_youtube.pix_fmt,
+                    },
+                    "instagram": {
+                        "resolution": self.video.encoding_instagram.resolution,
+                        "crf": self.video.encoding_instagram.crf,
+                        "maxrate": self.video.encoding_instagram.maxrate,
+                        "profile": self.video.encoding_instagram.profile,
+                        "level": self.video.encoding_instagram.level,
+                        "gop": self.video.encoding_instagram.gop,
+                        "fps": self.video.encoding_instagram.fps,
+                        "color": self.video.encoding_instagram.color,
+                        "pix_fmt": self.video.encoding_instagram.pix_fmt,
+                    },
+                    "x": {
+                        "resolution": self.video.encoding_x.resolution,
+                        "bitrate": self.video.encoding_x.bitrate,
+                        "maxrate": self.video.encoding_x.maxrate,
+                        "profile": self.video.encoding_x.profile,
+                        "level": self.video.encoding_x.level,
+                        "gop": self.video.encoding_x.gop,
+                        "fps": self.video.encoding_x.fps,
+                        "color": self.video.encoding_x.color,
+                        "pix_fmt": self.video.encoding_x.pix_fmt,
+                    },
+                    "tiktok": {
+                        "resolution": self.video.encoding_tiktok.resolution,
+                        "crf": self.video.encoding_tiktok.crf,
+                        "maxrate": self.video.encoding_tiktok.maxrate,
+                        "bufsize": self.video.encoding_tiktok.bufsize,
+                        "profile": self.video.encoding_tiktok.profile,
+                        "level": self.video.encoding_tiktok.level,
+                        "fps": self.video.encoding_tiktok.fps,
+                        "color": self.video.encoding_tiktok.color,
+                        "pix_fmt": self.video.encoding_tiktok.pix_fmt,
+                        "hw_encoder": self.video.encoding_tiktok.hw_encoder,
+                    },
+                },
+            },
+            "reliability": {
+                "max_retries": self.reliability.max_retries,
+                "retry_backoff": self.reliability.retry_backoff,
+                "circuit_breaker_threshold": self.reliability.circuit_breaker_threshold,
+                "circuit_breaker_reset": self.reliability.circuit_breaker_reset,
+            },
+            "monitoring": {
+                "log_level": self.monitoring.log_level,
+                "log_file": self.monitoring.log_file,
+                "log_rotation": self.monitoring.log_rotation,
+                "healthcheck_port": self.monitoring.healthcheck_port,
+                "enable_metrics": self.monitoring.enable_metrics,
+                "dashboard_username": self.monitoring.dashboard_username,
+                "dashboard_password_hash": self._serialized_password_hash(),
+                "health_check_interval": self.monitoring.health_check_interval,
+            },
+            "anti_bot": {
+                "caption_variation": self.anti_bot.caption_variation,
+            },
+            "schedule": {
+                "check_interval": self.schedule.check_interval,
+                "catchup_window": self.schedule.catchup_window,
+                "catchup_times_per_day": self.schedule.catchup_times_per_day,
+                "analytics_snapshot_enabled": self.schedule.analytics_snapshot_enabled,
+                "analytics_snapshot_interval": self.schedule.analytics_snapshot_interval,
+                # Round-trips: a pause set by whoever paused the deployment must
+                # survive a config save (it is the only thing stopping implicit
+                # queueing).
+                "posting_paused": self.schedule.posting_paused,
+            },
+            "chat": {
+                "twitch_channels": list(self.chat.twitch_channels),
+                "kick_channels": list(self.chat.kick_channels),
+                "youtube_video_id": self.chat.youtube_video_id,
+                "max_messages": self.chat.max_messages,
+                "youtube_poll_interval_s": self.chat.youtube_poll_interval_s,
+            },
+            "notifications": {
+                "enabled": self.notifications.enabled,
+                "on_success": self.notifications.on_success,
+                "on_failure": self.notifications.on_failure,
+                "discord": {
+                    "webhook_url": self.notifications.discord_webhook_url,
+                },
+                "telegram": {
+                    "bot_token": self.notifications.telegram_bot_token,
+                    "chat_id": self.notifications.telegram_chat_id,
+                },
+            },
+            "rate_limits": {
+                "youtube": self.rate_limits.youtube,
+                "instagram": self.rate_limits.instagram,
+                "x": self.rate_limits.x,
+                "tiktok": self.rate_limits.tiktok,
+                "threads": self.rate_limits.threads,
+                "facebook": self.rate_limits.facebook,
+            },
+            "bio": {
+                "handle": self.bio.handle,
+                "links": self.bio.links,
+            },
+            "shortcuts": self._shortcuts,
+            "first_run_complete": self.first_run_complete,
+            "provider_mode": self.provider_mode,
+        }
+
+        # Secrets belong in the encrypted credential store: the YAML keeps the
+        # (empty) slot so the file shape is stable, and load() reads the value
+        # back. When the store cannot be written (no cryptography/keyring) the
+        # value stays in the file rather than being lost.
+        for (section, field_name), store_key in _SECRET_CONFIG_FIELDS.items():
+            section_values = config_dict.get("accounts", {}).get(section)
+            if not isinstance(section_values, dict):
+                continue
+            secret = str(section_values.get(field_name) or "")
+            store_dir = str(Path(str(config_path)).parent)
+            if secret and _store_config_secret(store_dir, store_key, secret):
+                section_values[field_name] = ""
+
+        # Serialize first, then publish atomically: a dump failure must not
+        # truncate the existing config (data-loss vector on disk-full).
+        try:
+            payload = yaml.safe_dump(config_dict, default_flow_style=False, sort_keys=False)
+        except yaml.YAMLError as e:  # pragma: no cover - non-serializable value
+            logger.error("Failed to serialize config for %s: %s", config_path, e)
+            return
+
+        try:
+            _atomic_write_text(config_path, payload)
+        except OSError as e:
+            logger.error(
+                "Failed to save config to %s: %s. The previous file was left "
+                "unchanged; check free disk space and write permission on %s.",
+                config_path,
+                e,
+                config_path.parent,
+            )

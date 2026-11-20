@@ -1,0 +1,11 @@
+{
+  "errors": [
+    {
+      "message": "Query: Unspecified",
+      "code": 214,
+      "extensions": {
+        "code": "GRAPHQL_VALIDATION_FAILED"
+      }
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+[package]
+name = "xpst-api"
+description = "axum dashboard API serving the existing ui/dist (P4)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+tokio = { version = "1", features = ["rt", "net", "time", "macros"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.10"
+getrandom = "0.2"
+# The engine, not a copy of it: the HTTP surface reads the same planning,
+# pacing, configuration, state and pipeline crates the rest of the tree uses.
+xpst-core = { path = "../xpst-core" }
+xpst-pipeline = { path = "../xpst-pipeline" }
+xpst-config = { path = "../xpst-config" }
+xpst-state = { path = "../xpst-state" }
+xpst-limits = { path = "../xpst-limits" }
+xpst-media = { path = "../xpst-media" }
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+# cargo-audit policy.
+#
+# cargo-audit reads `.cargo/audit.toml`; a file at the repository root is
+# ignored, which is why this lives here.
+#
+# Every ignore below must name the advisory, the reason it does not apply to
+# what this repository builds, and the condition that removes it. An ignore
+# without those three things is how a real vulnerability gets buried.
+
+[advisories]
+ignore = [
+    # Both rmcp ignores are gone as of 3.11.0 (RUSTSEC-2026-0189 fixed in 1.4.0,
+    # RUSTSEC-2026-0462 fixed in 3.9.0). `xpst-mcp` still builds only `server` +
+    # `transport-io`, and crates/xpst-core/tests/advisory_policy.rs still fails
+    # the build if an HTTP transport is ever enabled.
+    #
+    # The long form, including the unmaintained-only advisories cargo audit
+    # reports as warnings, is docs/technical/security-advisories.md — that file
+    # and deny.toml are the authority, and
+    # crates/xpst-core/tests/advisory_policy.rs keeps them true.
+]

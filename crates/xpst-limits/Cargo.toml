@@ -1,0 +1,22 @@
+[package]
+name = "xpst-limits"
+description = "Publishing rate discipline: per-platform envelope, jittered intervals, durable cooldown ladder (P2)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+fd-lock = "4.0.4"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# The parity fixture is JSON, and the cross-process tests re-exec this binary.
+serde_json.workspace = true

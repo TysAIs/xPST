@@ -1,0 +1,517 @@
+{
+  "schema_version": 1,
+  "source": "src/xpst/cli.py",
+  "note": "Per-command audit of whether the shipped Python path makes an outbound network call. 'none' = the callback and the modules it reaches only read local files; 'yes' = it contacts a platform or provider API on every run that does its job; 'possible' = it depends on arguments or configuration. This is a reviewed judgement with the deciding call named as evidence, not a runtime capture \u2014 tests/parity_ledger.rs fails when a manifest command has no row, so a new command cannot enter the tree unclassified.",
+  "entries": [
+    {
+      "path": "analytics",
+      "network": "none",
+      "evidence": "reads the local analytics SQLite store (analytics.py); no platform call"
+    },
+    {
+      "path": "analytics export",
+      "network": "none",
+      "evidence": "formats the local analytics store into a file"
+    },
+    {
+      "path": "app",
+      "network": "none",
+      "evidence": "spawns the installed desktop binary; this process makes no call"
+    },
+    {
+      "path": "auth",
+      "network": "yes",
+      "evidence": "OAuth/token flows exchange credentials with the platform"
+    },
+    {
+      "path": "backfill",
+      "network": "yes",
+      "evidence": "re-uploads missing posts through the engine"
+    },
+    {
+      "path": "best-time",
+      "network": "none",
+      "evidence": "reads local engagement history (best_time.py)"
+    },
+    {
+      "path": "bio",
+      "network": "none",
+      "evidence": "prints the local link-in-bio URL"
+    },
+    {
+      "path": "byo",
+      "network": "none",
+      "evidence": "per-platform app credential store under the config dir"
+    },
+    {
+      "path": "byo clear",
+      "network": "none",
+      "evidence": "deletes a stored app credential"
+    },
+    {
+      "path": "byo set",
+      "network": "possible",
+      "evidence": "stores the credential; validation may reach the provider's token endpoint"
+    },
+    {
+      "path": "byo status",
+      "network": "none",
+      "evidence": "reads the credential store"
+    },
+    {
+      "path": "capabilities",
+      "network": "none",
+      "evidence": "prints the local capability registry (content.py, media/specs.py)"
+    },
+    {
+      "path": "chat",
+      "network": "yes",
+      "evidence": "live chat connectors (Twitch/YouTube/Kick) open network sessions"
+    },
+    {
+      "path": "chat platforms",
+      "network": "none",
+      "evidence": "reports the local chat capability registry"
+    },
+    {
+      "path": "chat timeline",
+      "network": "yes",
+      "evidence": "reads live chat from the requested platforms"
+    },
+    {
+      "path": "config",
+      "network": "none",
+      "evidence": "config file only"
+    },
+    {
+      "path": "config export",
+      "network": "none",
+      "evidence": "writes the config file to a target path"
+    },
+    {
+      "path": "config fix",
+      "network": "none",
+      "evidence": "rewrites local config defaults and directories"
+    },
+    {
+      "path": "config import",
+      "network": "none",
+      "evidence": "reads a config file from disk"
+    },
+    {
+      "path": "config set",
+      "network": "none",
+      "evidence": "edits the local config document"
+    },
+    {
+      "path": "config show",
+      "network": "none",
+      "evidence": "reads the local config document"
+    },
+    {
+      "path": "config validate",
+      "network": "none",
+      "evidence": "validates the local config document"
+    },
+    {
+      "path": "connect",
+      "network": "yes",
+      "evidence": "browser OAuth + token exchange with the platform"
+    },
+    {
+      "path": "dashboard",
+      "network": "none",
+      "evidence": "binds a local port; no outbound call"
+    },
+    {
+      "path": "delete",
+      "network": "yes",
+      "evidence": "deletes the post on the platform"
+    },
+    {
+      "path": "devices",
+      "network": "none",
+      "evidence": "reads the local device pairing store"
+    },
+    {
+      "path": "diagnostics",
+      "network": "possible",
+      "evidence": "bundles local state; included doctor probes may reach platforms"
+    },
+    {
+      "path": "disconnect",
+      "network": "yes",
+      "evidence": "revokes credentials with the platform where supported"
+    },
+    {
+      "path": "doctor",
+      "network": "yes",
+      "evidence": "live auth/quota probes when credentials exist"
+    },
+    {
+      "path": "failures",
+      "network": "none",
+      "evidence": "group command; reads the local dead-letter queue"
+    },
+    {
+      "path": "failures clear",
+      "network": "none",
+      "evidence": "edits state.json"
+    },
+    {
+      "path": "failures list",
+      "network": "none",
+      "evidence": "reads state.json"
+    },
+    {
+      "path": "failures retry",
+      "network": "yes",
+      "evidence": "re-posts the failed upload"
+    },
+    {
+      "path": "followers",
+      "network": "yes",
+      "evidence": "fetches follower counts from each platform"
+    },
+    {
+      "path": "generate",
+      "network": "none",
+      "evidence": "group command"
+    },
+    {
+      "path": "generate caption",
+      "network": "possible",
+      "evidence": "works offline; uses the configured LLM when one is set"
+    },
+    {
+      "path": "generate ideas",
+      "network": "possible",
+      "evidence": "works offline; uses the configured LLM when one is set"
+    },
+    {
+      "path": "health",
+      "network": "yes",
+      "evidence": "connectivity probes to every configured platform"
+    },
+    {
+      "path": "kb",
+      "network": "none",
+      "evidence": "group command"
+    },
+    {
+      "path": "kb add",
+      "network": "possible",
+      "evidence": "local file ingest is offline; a URL source is fetched"
+    },
+    {
+      "path": "kb areas",
+      "network": "none",
+      "evidence": "reads the local knowledge store"
+    },
+    {
+      "path": "kb course",
+      "network": "none",
+      "evidence": "reads the local knowledge store"
+    },
+    {
+      "path": "kb doctor",
+      "network": "none",
+      "evidence": "local store/dependency checks"
+    },
+    {
+      "path": "kb migrate-store",
+      "network": "none",
+      "evidence": "copies the JSON store into LanceDB locally"
+    },
+    {
+      "path": "kb organize",
+      "network": "possible",
+      "evidence": "local tagging; may embed through a provider when configured"
+    },
+    {
+      "path": "kb query",
+      "network": "none",
+      "evidence": "local vector store query with substring fallback"
+    },
+    {
+      "path": "kb reembed",
+      "network": "possible",
+      "evidence": "re-embeds through the configured embedding provider"
+    },
+    {
+      "path": "logs",
+      "network": "none",
+      "evidence": "reads the local log file"
+    },
+    {
+      "path": "mcp",
+      "network": "none",
+      "evidence": "group command"
+    },
+    {
+      "path": "mcp list",
+      "network": "none",
+      "evidence": "prints the local MCP tool registry"
+    },
+    {
+      "path": "mcp start",
+      "network": "none",
+      "evidence": "stdio server; each tool decides about its own calls"
+    },
+    {
+      "path": "media",
+      "network": "none",
+      "evidence": "group command"
+    },
+    {
+      "path": "media fetch",
+      "network": "yes",
+      "evidence": "downloads ffmpeg/ffprobe artifacts"
+    },
+    {
+      "path": "media status",
+      "network": "none",
+      "evidence": "resolves local binaries"
+    },
+    {
+      "path": "messenger",
+      "network": "none",
+      "evidence": "group command"
+    },
+    {
+      "path": "messenger check-comments",
+      "network": "yes",
+      "evidence": "fetches comments and posts replies through the Graph API"
+    },
+    {
+      "path": "messenger status",
+      "network": "none",
+      "evidence": "reports local token/switch state"
+    },
+    {
+      "path": "onboard",
+      "network": "yes",
+      "evidence": "runs the connect flows"
+    },
+    {
+      "path": "pair",
+      "network": "none",
+      "evidence": "writes a local one-time pairing code"
+    },
+    {
+      "path": "plugins",
+      "network": "none",
+      "evidence": "group command"
+    },
+    {
+      "path": "plugins docs",
+      "network": "none",
+      "evidence": "renders local plugin manifests"
+    },
+    {
+      "path": "plugins list",
+      "network": "none",
+      "evidence": "reads the local plugin directory"
+    },
+    {
+      "path": "post",
+      "network": "yes",
+      "evidence": "uploads to the resolved destinations"
+    },
+    {
+      "path": "preflight",
+      "network": "none",
+      "evidence": "resolves the plan locally; its docstring states 'Network calls: none'"
+    },
+    {
+      "path": "providers",
+      "network": "none",
+      "evidence": "reads local provider manifests"
+    },
+    {
+      "path": "quota",
+      "network": "none",
+      "evidence": "reads the local quota store"
+    },
+    {
+      "path": "readiness",
+      "network": "none",
+      "evidence": "local config/auth-file inspection"
+    },
+    {
+      "path": "refresh-tokens",
+      "network": "yes",
+      "evidence": "refreshes expiring provider tokens"
+    },
+    {
+      "path": "run",
+      "network": "yes",
+      "evidence": "check-and-post pipeline"
+    },
+    {
+      "path": "schedule",
+      "network": "none",
+      "evidence": "group command"
+    },
+    {
+      "path": "schedule add",
+      "network": "none",
+      "evidence": "writes schedule.json"
+    },
+    {
+      "path": "schedule install",
+      "network": "none",
+      "evidence": "writes an OS scheduler unit"
+    },
+    {
+      "path": "schedule list",
+      "network": "none",
+      "evidence": "reads schedule.json and the pause marker"
+    },
+    {
+      "path": "schedule pause",
+      "network": "none",
+      "evidence": "writes the pause marker"
+    },
+    {
+      "path": "schedule remove",
+      "network": "none",
+      "evidence": "edits schedule.json"
+    },
+    {
+      "path": "schedule resume",
+      "network": "none",
+      "evidence": "removes the pause marker"
+    },
+    {
+      "path": "schedule run",
+      "network": "yes",
+      "evidence": "publishes due entries"
+    },
+    {
+      "path": "search",
+      "network": "none",
+      "evidence": "local knowledge base search"
+    },
+    {
+      "path": "security-audit",
+      "network": "none",
+      "evidence": "local file/permission audit"
+    },
+    {
+      "path": "serve",
+      "network": "yes",
+      "evidence": "supervisor loop publishes due entries"
+    },
+    {
+      "path": "setup",
+      "network": "yes",
+      "evidence": "runs the connect flows"
+    },
+    {
+      "path": "state",
+      "network": "none",
+      "evidence": "group command"
+    },
+    {
+      "path": "state backup",
+      "network": "none",
+      "evidence": "copies state.json into backups/"
+    },
+    {
+      "path": "state export",
+      "network": "none",
+      "evidence": "writes a validated copy of state.json"
+    },
+    {
+      "path": "state import",
+      "network": "none",
+      "evidence": "restores state.json from a local file"
+    },
+    {
+      "path": "status",
+      "network": "none",
+      "evidence": "reads state.json only"
+    },
+    {
+      "path": "stream",
+      "network": "none",
+      "evidence": "group command"
+    },
+    {
+      "path": "stream app-credentials",
+      "network": "none",
+      "evidence": "local credential store"
+    },
+    {
+      "path": "stream clear-key",
+      "network": "none",
+      "evidence": "local credential store"
+    },
+    {
+      "path": "stream destinations",
+      "network": "none",
+      "evidence": "reports stored keys and local routes"
+    },
+    {
+      "path": "stream fetch-key",
+      "network": "yes",
+      "evidence": "fetches the account's ingest key from the platform"
+    },
+    {
+      "path": "stream live",
+      "network": "yes",
+      "evidence": "queries each platform's live status"
+    },
+    {
+      "path": "stream relay-config",
+      "network": "none",
+      "evidence": "builds the relay config from stored keys"
+    },
+    {
+      "path": "stream set-key",
+      "network": "none",
+      "evidence": "local credential store"
+    },
+    {
+      "path": "suggest-caption",
+      "network": "possible",
+      "evidence": "works offline; uses the configured LLM when one is set"
+    },
+    {
+      "path": "transcript",
+      "network": "possible",
+      "evidence": "serves a stored transcript; fetches one when it is missing"
+    },
+    {
+      "path": "ui",
+      "network": "none",
+      "evidence": "starts the local dashboard and opens a browser"
+    },
+    {
+      "path": "update",
+      "network": "yes",
+      "evidence": "checks for and downloads releases/dependencies"
+    },
+    {
+      "path": "verify-media",
+      "network": "none",
+      "evidence": "local ffprobe measurement against platform specs"
+    },
+    {
+      "path": "version",
+      "network": "none",
+      "evidence": "reads installed package metadata"
+    },
+    {
+      "path": "watch",
+      "network": "yes",
+      "evidence": "long-running check-and-post loop"
+    },
+    {
+      "path": "wizard",
+      "network": "possible",
+      "evidence": "compatibility view of the setup transaction; connect steps reach platforms"
+    }
+  ]
+}

@@ -1,0 +1,1273 @@
+"""
+Video processing utilities for xPST
+
+Handles FFmpeg-based video encoding with platform-specific profiles.
+Each platform has research-verified optimal settings for maximum quality
+after re-encoding by the platform.
+
+Research sources:
+- Instagram: dev.to/alfg/ffmpeg-for-instagram (reverse-engineered specs)
+- X/Twitter: gehrcke.de + gist.github.com/transkatgirl (official requirements)
+- YouTube: Upscale to 1080p + re-encode at 8 Mbps to avoid low-bitrate tier
+
+Key findings (updated 2026-06-11, fidelity-first):
+- Scaling is ORIENTATION-AWARE, targeting the LONG edge (1920). The old
+  height-keyed `scale=-2:{res}` crushed 1080x1920 portrait video to 608x1080
+  (Instagram: 406x720) — the direct cause of degraded upload quality.
+- Instagram Reels: 1080x1920 @ CRF 20, High@L4.0, fixed GOP 72, bt.709, yuv420p
+- TikTok: dedicated profile — 1080x1920 @ CRF 20, maxrate 10M/bufsize 20M,
+  GOP = 2*source fps (30fps→60, 60fps→120), +faststart, yuv420p, AAC 128k
+  @ 44.1kHz; hardware encoder auto-detection with libx264 fallback
+- X/Twitter: up to 1920 long edge @ 10 Mbps, High@L4.0, yuv420p (REQUIRED), keyint=90
+- YouTube: long edge 1920 (upscaled if smaller, to avoid the low-bitrate tier),
+  8 Mbps, High Profile, closed GOP 15, bt.709, yuv420p
+- Frame rate is a CAP (`-fpsmax`), never a force: 60fps sources stay 60fps;
+  the old forced `-r 30` halved them.
+"""
+
+import os
+import re
+import subprocess
+import sys
+import time
+import uuid
+from pathlib import Path
+
+from xpst.config import EncodingConfig
+from xpst.utils.logger import get_logger
+from xpst.utils.platform import (
+    get_ffmpeg_name,
+    get_ffprobe_name,
+    resolve_ffmpeg_path,
+    resolve_ffprobe_path,
+)
+
+logger = get_logger(__name__)
+
+# Hardware H.264 encoders probed via `ffmpeg -encoders`, in preference order.
+# On macOS VideoToolbox is the native path; elsewhere NVIDIA NVENC wins,
+# then Intel QSV, then VAAPI.
+HW_ENCODER_CANDIDATES: tuple[str, ...] = (
+    "h264_videotoolbox",
+    "h264_nvenc",
+    "h264_qsv",
+    "h264_vaapi",
+)
+
+HW_ENCODER_ENV_VAR = "XPST_HW_ENCODER"
+
+
+def detect_hardware_encoder(ffmpeg_path: str | None = None) -> str | None:
+    """Probe ffmpeg for an available hardware H.264 encoder.
+
+    Runs ``ffmpeg -encoders`` and returns the first candidate present, in
+    platform-preference order (videotoolbox first on macOS, nvenc first
+    elsewhere). Returns ``None`` when no hardware encoder is available —
+    callers fall back to libx264.
+    """
+    ordered = (
+        ("h264_videotoolbox", "h264_nvenc", "h264_qsv", "h264_vaapi")
+        if sys.platform == "darwin"
+        else ("h264_nvenc", "h264_qsv", "h264_vaapi", "h264_videotoolbox")
+    )
+    available = _available_hw_encoders(ffmpeg_path)
+    for name in ordered:
+        if name in available:
+            return name
+    return None
+
+
+def _available_hw_encoders(ffmpeg_path: str | None = None) -> set[str]:
+    """Return the set of hardware H.264 encoder names ffmpeg exposes."""
+    binary = ffmpeg_path or resolve_ffmpeg_path() or get_ffmpeg_name()
+    try:
+        result = subprocess.run(
+            [binary, "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (FileNotFoundError, PermissionError, OSError, subprocess.TimeoutExpired):
+        return set()
+    if result.returncode != 0:
+        return set()
+    names: set[str] = set()
+    for line in result.stdout.splitlines():
+        m = re.match(r"\s*[A-Za-z\.]+\s+(\S+)", line)
+        if m and m.group(1) in HW_ENCODER_CANDIDATES:
+            names.add(m.group(1))
+    return names
+
+
+def resolve_encoder(
+    ffmpeg_path: str | None = None,
+    config_hw_encoder: str | None = None,
+) -> str:
+    """Resolve which encoder to use.
+
+    Priority: XPST_HW_ENCODER env var > ``config.hw_encoder`` field >
+    auto-detection. "libx264" (or "none"/"software"/"cpu") forces software
+    encoding. An explicit override ffmpeg does not actually expose falls back
+    to auto-detection with a warning rather than failing at encode time.
+    """
+    override = (os.environ.get(HW_ENCODER_ENV_VAR, "") or config_hw_encoder or "").strip()
+    available = _available_hw_encoders(ffmpeg_path)
+    if override:
+        if override.lower() in ("libx264", "none", "software", "cpu"):
+            return "libx264"
+        if override in HW_ENCODER_CANDIDATES and override in available:
+            logger.info("Using hardware encoder (override): %s", override)
+            return override
+        logger.warning(
+            "Encoder override %s=%s not available in ffmpeg; falling back to auto-detection",
+            HW_ENCODER_ENV_VAR,
+            override,
+        )
+    detected = detect_hardware_encoder(ffmpeg_path)
+    if detected:
+        logger.info("Using hardware encoder: %s", detected)
+        return detected
+    return "libx264"
+
+
+def _uses_hw_encoder(cmd: list[str]) -> bool:
+    """Whether an ffmpeg command line encodes video with a hardware encoder."""
+    return any(name in cmd for name in HW_ENCODER_CANDIDATES)
+
+
+def build_scale_filter(long_edge: int, *, upscale: bool = False, flags: str = "") -> str:
+    """Build an orientation-aware ffmpeg scale filter targeting the long edge.
+
+    Sizes the LONG edge of the video to ``long_edge`` while preserving aspect
+    ratio, so portrait (9:16), landscape (16:9), and square sources all keep
+    their native orientation. With ``upscale=False`` a smaller source passes
+    through at native size — quality is never invented (fidelity invariant).
+
+    The previous height-keyed filter (``scale=-2:{res}``) treated the target
+    as a height, crushing 1080x1920 portrait video to 608x1080.
+    """
+    if upscale:
+        w_target = str(long_edge)
+        h_target = str(long_edge)
+    else:
+        w_target = f"trunc(min({long_edge},iw)/2)*2"
+        h_target = f"trunc(min({long_edge},ih)/2)*2"
+    flag_part = f":flags={flags}" if flags else ""
+    return f"scale=w='if(gt(a,1),{w_target},-2)':h='if(gt(a,1),-2,{h_target})'{flag_part}"
+
+
+def double_rate(rate: str) -> str:
+    """Double an ffmpeg rate string ('3500k' → '7000k', '3.5M' → '7M').
+
+    Used to derive bufsize from maxrate. Handles fractional values that the
+    previous ``int()`` parse rejected.
+    """
+    m = re.fullmatch(r"([0-9.]+)\s*([kKmM]?)", rate.strip())
+    if not m:
+        return rate
+    doubled = float(m.group(1)) * 2
+    value: int | float = int(doubled) if doubled.is_integer() else doubled
+    return f"{value}{m.group(2)}"
+
+
+def _parse_frame_rate(raw: str) -> float | None:
+    """Parse an ffprobe frame-rate fraction ('30000/1001', '60/1') to float."""
+    try:
+        if "/" in raw:
+            num, den = raw.split("/", 1)
+            denominator = float(den)
+            return float(num) / denominator if denominator else None
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _rate_to_bps(rate: str) -> int | None:
+    """Convert an ffmpeg rate string ('10M', '3500k') to bits per second."""
+    m = re.fullmatch(r"([0-9.]+)\s*([kKmM]?)", rate.strip())
+    if not m:
+        return None
+    multiplier = {"k": 1_000, "m": 1_000_000}.get(m.group(2).lower(), 1)
+    return int(float(m.group(1)) * multiplier)
+
+
+# HDR transfer characteristics that must be tone-mapped before an SDR
+# (bt.709 / yuv420p) upload encode. Without this, re-tagging HDR pixel
+# data with SDR color flags silently ships washed-out / crushed colors —
+# the single worst fidelity failure mode for the platforms.
+_HDR_TRANSFERS = frozenset({"smpte2084", "arib-std-b67"})
+
+# SDR conversion chain applied AFTER the platform scale filter and BEFORE
+# the terminal ``format={pix_fmt}``: linearize → tone-map → bt.709 matrix.
+# Verified working with libzimg (zscale) + tonemap; gated on availability.
+_HDR_TONEMAP_CHAIN = (
+    "zscale=t=linear:npl=100,format=gbrpf32le,tonemap=hable:desat=0,zscale=p=bt709:t=bt709:m=bt709:r=tv"
+)
+
+
+def _pick_video_stream(streams: list[dict]) -> dict | None:
+    """Return the REAL video stream, ignoring cover-art / thumbnail streams.
+
+    Audio files routinely carry an mjpeg/png ``attached_pic`` stream (album
+    art, podcast cover). Treating that as "the video" makes the encoder
+    fabricate a 1-frame video and silently upload a still image.
+    """
+    for stream in streams:
+        if stream.get("codec_type") != "video":
+            continue
+        disposition = stream.get("disposition") or {}
+        if disposition.get("attached_pic"):
+            continue
+        if stream.get("codec_name") in ("mjpeg", "png", "bmp", "gif") and not disposition:
+            # Untagged still-image codecs in a media container are cover art
+            # in practice; real video tracks use h264/hevc/av1/mpeg4/vp9...
+            continue
+        return stream
+    return None
+
+
+def _has_real_video_stream(video_path: Path) -> bool:
+    """Whether the file carries an actual video track (not just cover art)."""
+    try:
+        info = get_video_info_standalone(video_path)
+    except Exception:  # noqa: BLE001 - probe failure → let ffmpeg decide downstream
+        return True
+    return _pick_video_stream(info.get("streams", [])) is not None
+
+
+def get_video_info_standalone(video_path: Path) -> dict:
+    """ffprobe a file without a VideoProcessor instance (shared helper)."""
+    cmd = [
+        resolve_ffprobe_path() or get_ffprobe_name(),
+        "-v",
+        "quiet",
+        "-print_format",
+        "json",
+        "-show_format",
+        "-show_streams",
+        str(video_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffprobe failed: {result.stderr}")
+    import json
+
+    return json.loads(result.stdout)
+
+
+def ffmpeg_install_hint() -> str:
+    """Return a platform-specific, actionable FFmpeg install instruction."""
+    if sys.platform == "darwin":
+        return "Run `xpst media fetch` (downloads a verified static build into ~/.xpst/bin), or: brew install ffmpeg (macOS)"
+    if sys.platform == "win32":
+        return "Run `xpst media fetch` (downloads a verified static build into %USERPROFILE%\\.xpst\\bin), or download it from https://ffmpeg.org/download.html and add it to PATH (Windows)"
+    return (
+        "Run `xpst media fetch` (downloads a verified static build), or install it with your "
+        "package manager (Linux), e.g. apt install ffmpeg, dnf install ffmpeg, or pacman -S ffmpeg"
+    )
+
+
+class FFmpegNotFoundError(RuntimeError):
+    """Raised when the FFmpeg binary cannot be found or run.
+
+    Subclasses RuntimeError so existing callers that catch RuntimeError keep
+    working, while carrying an actionable, platform-specific install hint so
+    the desktop app can surface a friendly first-run message instead of a raw
+    traceback (W3-3).
+    """
+
+    def __init__(self, ffmpeg_path: str, hint: str | None = None) -> None:
+        self.ffmpeg_path = ffmpeg_path
+        self.hint = hint or ffmpeg_install_hint()
+        super().__init__(
+            f"FFmpeg not found at '{ffmpeg_path}'. "
+            "FFmpeg is required for video encoding. "
+            f"{self.hint}, set XPST_FFMPEG_PATH to the ffmpeg binary "
+            f"(or point it at a directory containing one), or see "
+            f"https://ffmpeg.org/download.html"
+        )
+
+
+class VideoProcessor:
+    """
+    Video processing with FFmpeg.
+
+    Handles platform-specific encoding for optimal quality preservation.
+    """
+
+    def __init__(self, ffmpeg_path: str | None = None):
+        """
+        Initialize video processor.
+
+        Args:
+            ffmpeg_path: Path to ffmpeg binary. Defaults to platform-specific name.
+        """
+        self.ffmpeg_path = ffmpeg_path or resolve_ffmpeg_path() or get_ffmpeg_name()
+        self._verify_ffmpeg()
+
+    def _verify_ffmpeg(self) -> None:
+        """Verify FFmpeg is installed and accessible on PATH.
+
+        Raises:
+            FFmpegNotFoundError: If FFmpeg binary is not found or returns
+                error. Subclasses RuntimeError, so existing RuntimeError
+                handlers keep working while gaining an actionable install hint.
+        """
+
+        try:
+            result = subprocess.run(
+                [self.ffmpeg_path, "-version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                raise FFmpegNotFoundError(self.ffmpeg_path)
+        except (FileNotFoundError, PermissionError, OSError):
+            raise FFmpegNotFoundError(self.ffmpeg_path) from None
+
+    def get_video_info(self, video_path: Path) -> dict:
+        """
+        Get video file information.
+
+        Args:
+            video_path: Path to video file
+
+        Returns:
+            Dictionary with video info (width, height, duration, etc.)
+        """
+        cmd = [
+            resolve_ffprobe_path() or get_ffprobe_name(),
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            str(video_path),
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+        if result.returncode != 0:
+            raise RuntimeError(f"ffprobe failed: {result.stderr}")
+
+        import json
+
+        return json.loads(result.stdout)
+
+    def is_platform_compliant(
+        self,
+        video_path: Path,
+        platform: str,
+        config: EncodingConfig,
+    ) -> tuple[bool, str]:
+        """Probe whether a source already satisfies a platform's profile.
+
+        Returns ``(True, summary)`` when uploading the source as-is loses
+        nothing, so the pipeline can skip the re-encode entirely. Fidelity
+        invariant: never spend a quality generation on compliant media.
+        """
+        # TikTok uses its own dedicated profile for compliance checks;
+        # Threads and any other platform fall back to Instagram's.
+        check_platform = platform if platform in ("youtube", "instagram", "x", "tiktok") else "instagram"
+        info = self.get_video_info(video_path)
+        streams = info.get("streams", [])
+        video = _pick_video_stream(streams)
+        audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+        if video is None:
+            return False, "no real video stream (cover art or audio only)"
+
+        if video.get("codec_name") != "h264":
+            return False, f"codec {video.get('codec_name')} != h264"
+        pix_fmt = config.pix_fmt or "yuv420p"
+        if video.get("pix_fmt") != pix_fmt:
+            return False, f"pix_fmt {video.get('pix_fmt')} != {pix_fmt}"
+
+        width = int(video.get("width") or 0)
+        height = int(video.get("height") or 0)
+        long_edge_target = config.resolution or 1920
+        if max(width, height) > long_edge_target:
+            return False, f"long edge {max(width, height)} > {long_edge_target}"
+
+        fps_cap = config.fps or 60
+        fps = _parse_frame_rate(video.get("avg_frame_rate") or video.get("r_frame_rate") or "")
+        if fps and fps > fps_cap + 0.1:
+            return False, f"fps {fps:.1f} > cap {fps_cap}"
+
+        if config.maxrate:
+            max_bps = _rate_to_bps(config.maxrate)
+            bit_rate = int(video.get("bit_rate") or info.get("format", {}).get("bit_rate") or 0)
+            if max_bps and bit_rate > max_bps * 1.25:
+                return False, f"bitrate {bit_rate} exceeds {config.maxrate} (+25% tolerance)"
+
+        if audio is not None and audio.get("codec_name") != "aac":
+            return False, f"audio {audio.get('codec_name')} != aac"
+
+        return True, f"h264/{pix_fmt} {width}x{height} within {check_platform} profile"
+
+    def encode_for_platform(
+        self,
+        input_path: Path,
+        output_path: Path,
+        platform: str,
+        config: EncodingConfig,
+        loudnorm_filter: str | None = None,
+    ) -> Path:
+        """
+        Encode video for a specific platform.
+
+        Args:
+            input_path: Source video path
+            output_path: Output video path
+            platform: Platform name (youtube, instagram, x)
+            config: Encoding configuration
+            loudnorm_filter: Optional audio filter chain (e.g. a linear-mode
+                EBU R128 loudnorm built from a measurement pass). Applied on
+                top of the profile's audio settings.
+
+        Returns:
+            Path to encoded video
+
+        Raises:
+            RuntimeError: If encoding fails
+        """
+        logger.info(f"Encoding for {platform}: {input_path.name}")
+
+        # Fidelity guard: refuse to fabricate video from cover art. Audio
+        # files with an attached_pic thumbnail would otherwise be encoded
+        # into a 1-frame "video" and silently uploaded as a still.
+        if not _has_real_video_stream(input_path):
+            raise ValueError(
+                f"No real video stream in {input_path.name} (cover art / audio only) — refusing to fabricate video"
+            )
+
+        # Build FFmpeg command based on platform
+        if platform == "youtube":
+            cmd = self._build_youtube_cmd(input_path, output_path, config)
+        elif platform == "instagram" or platform == "threads" or platform == "facebook":
+            cmd = self._build_instagram_cmd(input_path, output_path, config)
+        elif platform == "x":
+            cmd = self._build_x_cmd(input_path, output_path, config)
+        elif platform == "tiktok":
+            cmd = self._build_tiktok_cmd(input_path, output_path, config)
+        else:
+            raise ValueError(f"Unknown platform: {platform}")
+
+        # HDR fidelity guard: an HDR10/HLG source re-encoded with plain SDR
+        # bt.709 color flags (no tone-map) ships washed-out colors. Inject
+        # the linearize→tonemap→bt.709 chain when the source is HDR and the
+        # ffmpeg build has zscale.
+        if self._source_is_hdr(input_path):
+            if self._has_filter("zscale"):
+                cmd = self._inject_hdr_tonemap(cmd)
+            else:
+                # Fidelity guard: without a tone-mapping filter we would ship
+                # PQ/HLG pixels half-converted (8-bit container, HDR transfer
+                # left intact) — i.e. silently degraded colors. Refuse loudly
+                # instead of uploading known-degraded output.
+                raise RuntimeError(
+                    f"HDR source {input_path.name} cannot be converted safely: "
+                    f"ffmpeg at '{self.ffmpeg_path}' lacks the zscale filter. "
+                    "Install an ffmpeg built with libzimg, or tone-map the "
+                    "source to SDR (bt.709) before uploading. "
+                    "(HDR_TONEMAP_UNAVAILABLE)"
+                )
+
+        # Loudness normalization: apply the caller-built linear-mode EBU R128
+        # filter on top of the profile's audio settings.
+        if loudnorm_filter:
+            cmd = self._inject_audio_filter(cmd, loudnorm_filter)
+
+        # Atomic encode: write to a unique temp sibling and rename into
+        # place. Two concurrent encodes of the same source then never write
+        # the same output path, and a killed/disk-full encode can never
+        # leave a corrupt file at the final (cacheable) path.
+        tmp_output = output_path.with_name(
+            f"{output_path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp{output_path.suffix}"
+        )
+        cmd = [arg if arg != str(output_path) else str(tmp_output) for arg in cmd]
+
+        try:
+            if self._should_two_pass(cmd, config):
+                result = self._run_two_pass(cmd, tmp_output)
+            else:
+                result = self._run_encode_with_fallback(
+                    cmd,
+                    tmp_output,
+                    platform,
+                    config,
+                    input_path,
+                    sw_preset="slow",
+                    audio_filter=loudnorm_filter,
+                )
+        except Exception:
+            self._safe_unlink(tmp_output)
+            raise
+
+        if result.returncode != 0:
+            logger.error(f"FFmpeg failed for {platform}: {result.stderr[:500]}")
+            self._safe_unlink(tmp_output)
+            raise RuntimeError(f"FFmpeg encoding failed: {result.stderr[:200]}")
+
+        if not tmp_output.exists() or tmp_output.stat().st_size < 1000:
+            self._safe_unlink(tmp_output)
+            raise RuntimeError(f"Encoded video is empty or too small: {tmp_output}")
+
+        self._replace_encoded_output(tmp_output, output_path)
+
+        size_mb = output_path.stat().st_size / 1024 / 1024
+        logger.info(f"Encoded for {platform}: {output_path.name} ({size_mb:.1f} MB)")
+
+        return output_path
+
+    @staticmethod
+    def _replace_encoded_output(tmp_output: Path, output_path: Path) -> None:
+        """Replace an encoded output, retrying transient Windows file locks."""
+        backoff = (0.05, 0.1, 0.2)
+        for attempt in range(len(backoff) + 1):
+            try:
+                os.replace(tmp_output, output_path)
+                return
+            except PermissionError:
+                if attempt >= len(backoff):
+                    raise
+                time.sleep(backoff[attempt])
+
+    def _run_encode_with_fallback(
+        self,
+        cmd: list[str],
+        output_path: Path,
+        platform: str,
+        config: EncodingConfig,
+        input_path: Path,
+        sw_preset: str = "slow",
+        audio_filter: str | None = None,
+    ) -> subprocess.CompletedProcess:
+        """Run ffmpeg, falling back to libx264 when a hardware encoder fails.
+
+        Quality guard: if a hardware encoder failed at runtime, fall back
+        to libx264 (preset slow, then medium) so the upload still ships.
+        """
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5 minute timeout
+        )
+
+        if result.returncode != 0 and _uses_hw_encoder(cmd):
+            logger.warning(
+                "Hardware encoder failed for %s (%s); falling back to libx264: %s",
+                platform,
+                next(n for n in HW_ENCODER_CANDIDATES if n in cmd),
+                result.stderr[-200:] if result.stderr else "no stderr",
+            )
+            self._safe_unlink(output_path)
+            for preset in ("slow", "medium"):
+                fallback_cmd = self._build_tiktok_cmd(
+                    input_path, output_path, config, encoder="libx264", sw_preset=preset
+                )
+                if audio_filter:
+                    fallback_cmd = self._inject_audio_filter(fallback_cmd, audio_filter)
+                result = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=300)
+                if result.returncode == 0:
+                    break
+        return result
+
+    @staticmethod
+    def _safe_unlink(path: Path) -> None:
+        """Delete a file, ignoring missing/unremovable targets."""
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError:
+            pass
+
+    @staticmethod
+    def _inject_audio_filter(cmd: list[str], audio_filter: str) -> list[str]:
+        """Insert ``-af`` into an ffmpeg command (before the output path).
+
+        The platform builders never set ``-af`` themselves, so a simple
+        insert before the final (output) argument is safe and keeps the
+        builders free of loudness concerns.
+        """
+        return [*cmd[:-1], "-af", audio_filter, cmd[-1]]
+
+    @staticmethod
+    def _should_two_pass(cmd: list[str], config: EncodingConfig) -> bool:
+        """Two-pass only applies to bitrate-targeted libx264 encodes.
+
+        CRF profiles have no bitrate target to converge on, and hardware
+        encoders do not support x264's stats-file mechanism.
+        """
+        if not getattr(config, "two_pass", False):
+            return False
+        if "-b:v" not in cmd or "-c:v" not in cmd:
+            return False
+        return cmd[cmd.index("-c:v") + 1] == "libx264"
+
+    def _run_two_pass(self, cmd: list[str], tmp_output: Path) -> subprocess.CompletedProcess:
+        """Run a two-pass x264 encode for exact-bitrate outputs.
+
+        Pass 1 analyzes (audio dropped, output discarded); pass 2 reuses the
+        stats file for frame-exact bitrate decisions. Pass-log artifacts are
+        cleaned up in all paths.
+        """
+        passlog_base = tmp_output.parent / f"{tmp_output.stem}_passlog"
+        pass1 = cmd[:-1] + ["-pass", "1", "-passlogfile", str(passlog_base), "-an", "-f", "null", "-"]
+        pass2 = cmd[:-1] + ["-pass", "2", "-passlogfile", str(passlog_base), cmd[-1]]
+        try:
+            result = subprocess.run(pass1, capture_output=True, text=True, timeout=600)
+            if result.returncode != 0:
+                logger.error("Two-pass encode pass 1 failed: %s", result.stderr[-300:])
+                return result
+            result = subprocess.run(pass2, capture_output=True, text=True, timeout=900)
+            if result.returncode != 0:
+                logger.error("Two-pass encode pass 2 failed: %s", result.stderr[-300:])
+            return result
+        finally:
+            for artifact in passlog_base.parent.glob(f"{passlog_base.name}*"):
+                self._safe_unlink(artifact)
+
+    def remux_for_platform(self, input_path: Path, output_path: Path) -> Path:
+        """Stream-copy compatible streams into an MP4 (zero generation loss).
+
+        Used by the decision tree when the source streams already satisfy the
+        platform profile but the container does not (MKV/WebM/AVI/…): remux
+        costs no quality, a re-encode always does. ``-ignore_editlist`` drops
+        edit lists the platforms reject and ``+faststart`` fronts the moov
+        atom for progressive ingest.
+        """
+        logger.info("Remuxing for platform compatibility: %s", input_path.name)
+        tmp_output = output_path.with_name(
+            f"{output_path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp{output_path.suffix}"
+        )
+        cmd = [
+            self.ffmpeg_path,
+            "-y",
+            "-i",
+            str(input_path),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a:0?",
+            "-c",
+            "copy",
+            "-ignore_editlist",
+            "1",
+            "-movflags",
+            "+faststart",
+            "-sn",
+            str(tmp_output),
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self._safe_unlink(tmp_output)
+            raise RuntimeError(f"Remux failed to run: {exc}") from exc
+        if result.returncode != 0:
+            self._safe_unlink(tmp_output)
+            raise RuntimeError(f"Remux failed: {result.stderr[-200:]}")
+        if not tmp_output.exists() or tmp_output.stat().st_size < 1000:
+            self._safe_unlink(tmp_output)
+            raise RuntimeError(f"Remuxed video is empty or too small: {tmp_output}")
+        os.replace(tmp_output, output_path)
+        size_mb = output_path.stat().st_size / 1024 / 1024
+        logger.info("Remuxed for %s ingest: %s (%.1f MB)", input_path.suffix, output_path.name, size_mb)
+        return output_path
+
+    def _has_filter(self, name: str) -> bool:
+        """Whether the ffmpeg build exposes ``name`` among its filters."""
+        cached = getattr(self, "_filter_cache", None)
+        if cached is None:
+            try:
+                result = subprocess.run(
+                    [self.ffmpeg_path, "-hide_banner", "-filters"],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                cached = set(re.findall(r"\s[a-zA-Z.]+\s+(\w+)\s+", result.stdout))
+            except (OSError, subprocess.TimeoutExpired):
+                cached = set()
+            self._filter_cache = cached
+        return name in cached
+
+    def _source_is_hdr(self, video_path: Path) -> bool:
+        """True when the source uses an HDR transfer (HDR10 / HLG)."""
+        try:
+            info = self.get_video_info(video_path)
+        except Exception:  # noqa: BLE001 - probe failure → assume SDR
+            return False
+        video = _pick_video_stream(info.get("streams", []))
+        if video is None:
+            return False
+        transfer = (video.get("color_transfer") or "").lower()
+        return transfer in _HDR_TRANSFERS
+
+    @staticmethod
+    def _inject_hdr_tonemap(cmd: list[str]) -> list[str]:
+        """Insert the HDR→SDR tone-map chain into a command's -vf filter."""
+        try:
+            idx = cmd.index("-vf")
+        except ValueError:
+            return cmd
+        vf = cmd[idx + 1]
+        cmd = list(cmd)
+        cmd[idx + 1] = vf.replace(",setsar=1,", f",setsar=1,{_HDR_TONEMAP_CHAIN},", 1)
+        logger.info("HDR source detected: injecting tone-map chain")
+        return cmd
+
+    def _build_instagram_cmd(
+        self,
+        input_path: Path,
+        output_path: Path,
+        config: EncodingConfig,
+    ) -> list[str]:
+        """
+        Build FFmpeg command for Instagram encoding.
+
+        Instagram Reels optimal settings (fidelity-first, updated 2026-06-11):
+        - Long edge 1920 (1080x1920 portrait preserved; never upscaled)
+        - CRF 20 quality floor (~8-10 Mbps for Reels-grade detail)
+        - H.264 High Profile @ Level 4.0
+        - Fixed GOP 72
+        - Frame rate capped at 60 (source rate preserved below the cap)
+        - yuv420p pixel format
+        - bt.709 color space
+        - AAC 256k audio
+        """
+        resolution = config.resolution or 1920
+        crf = config.crf or 20
+        maxrate = config.maxrate or "10M"
+        profile = config.profile or "high"
+        level = config.level or "4.0"
+        gop = config.gop or 72
+        fps_cap = config.fps or 60
+        color = config.color or "bt709"
+        pix_fmt = config.pix_fmt or "yuv420p"
+
+        return [
+            self.ffmpeg_path,
+            "-y",  # Overwrite output
+            "-i",
+            str(input_path),
+            "-vf",
+            f"{build_scale_filter(resolution)},setsar=1,format={pix_fmt}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "slow",  # Better quality
+            "-profile:v",
+            profile,
+            "-level:v",
+            level,
+            "-x264-params",
+            f"scenecut=0:open_gop=0:min-keyint={gop}:keyint={gop}:ref=4",
+            "-crf",
+            str(crf),
+            "-maxrate",
+            maxrate,
+            "-bufsize",
+            double_rate(maxrate),
+            "-color_primaries",
+            color,
+            "-color_trc",
+            color,
+            "-colorspace",
+            color,
+            "-fpsmax",
+            str(fps_cap),
+            "-c:a",
+            "aac",
+            "-b:a",
+            "256k",
+            "-ar",
+            "44100",
+            "-movflags",
+            "+faststart",
+            "-sn",  # No subtitles
+            str(output_path),
+        ]
+
+    def _build_tiktok_cmd(
+        self,
+        input_path: Path,
+        output_path: Path,
+        config: EncodingConfig,
+        encoder: str | None = None,
+        sw_preset: str = "slow",
+    ) -> list[str]:
+        """
+        Build FFmpeg command for TikTok encoding.
+
+        TikTok optimal settings (dedicated profile — no longer shared with
+        Instagram):
+        - Long edge 1920 (1080x1920 portrait preserved; never upscaled)
+        - CRF 20 quality floor, maxrate 10M / bufsize 20M
+        - GOP = 2 * source fps (30fps→60, 60fps→120), probed per encode and
+          capped at 2 * fps_cap
+        - H.264 High Profile @ Level 4.0, closed GOP
+        - Frame rate capped at 60 (source rate preserved below the cap)
+        - yuv420p pixel format, bt.709 color space
+        - AAC 128k @ 44.1 kHz audio
+        - movflags +faststart for progressive playback
+        - Hardware encoder auto-detection (XPST_HW_ENCODER env or
+          config.hw_encoder); hardware runs bitrate-capped (CRF does not
+          apply); libx264 preset slow is the fallback.
+        """
+        resolution = config.resolution or 1920
+        fps_cap = config.fps or 60
+        color = config.color or "bt709"
+        pix_fmt = config.pix_fmt or "yuv420p"
+        chosen = encoder or resolve_encoder(self.ffmpeg_path, config.hw_encoder)
+        source_fps = self._source_fps(input_path)
+        gop = config.gop or self._tiktok_gop(source_fps, fps_cap)
+
+        return [
+            self.ffmpeg_path,
+            "-y",  # Overwrite output
+            "-i",
+            str(input_path),
+            "-vf",
+            f"{build_scale_filter(resolution)},setsar=1,format={pix_fmt}",
+            *self._encoder_video_args(chosen, config, gop, sw_preset=sw_preset),
+            "-color_primaries",
+            color,
+            "-color_trc",
+            color,
+            "-colorspace",
+            color,
+            "-fpsmax",
+            str(fps_cap),
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-ar",
+            "44100",
+            "-movflags",
+            "+faststart",
+            "-sn",  # No subtitles
+            str(output_path),
+        ]
+
+    def _source_fps(self, video_path: Path) -> float | None:
+        """Probe a source video's frame rate (None when probing fails)."""
+        try:
+            info = self.get_video_info(video_path)
+        except Exception as e:  # noqa: BLE001 - probe failure must not break encoding
+            logger.debug("Source fps probe failed: %s", e)
+            return None
+        video = _pick_video_stream(info.get("streams", []))
+        if video is None:
+            return None
+        return _parse_frame_rate(video.get("avg_frame_rate") or video.get("r_frame_rate") or "")
+
+    @staticmethod
+    def _tiktok_gop(source_fps: float | None, fps_cap: int) -> int:
+        """TikTok GOP = 2 * effective fps (30fps→60, 60fps→120).
+
+        Unknown frame rate defaults to 30fps → GOP 60; the effective rate is
+        the source fps capped at the profile's fps cap.
+        """
+        effective = min(source_fps, float(fps_cap)) if source_fps else 30.0
+        return max(int(round(2 * effective)), 1)
+
+    def _encoder_video_args(
+        self,
+        encoder: str,
+        config: EncodingConfig,
+        gop: int,
+        sw_preset: str = "slow",
+    ) -> list[str]:
+        """Video codec args for the chosen encoder.
+
+        libx264: CRF quality mode with the profile's maxrate/bufsize ceiling.
+        Hardware: CRF does not apply — bitrate-capped mode at the profile's
+        maxrate with an equivalent bufsize.
+        """
+        profile = config.profile or "high"
+        maxrate = config.maxrate or "10M"
+        bufsize = config.bufsize or double_rate(maxrate)
+        if encoder == "libx264":
+            crf = config.crf if config.crf is not None else 20
+            level = config.level or "4.0"
+            return [
+                "-c:v",
+                "libx264",
+                "-preset",
+                sw_preset,
+                "-profile:v",
+                profile,
+                "-level:v",
+                level,
+                "-x264-params",
+                f"scenecut=0:open_gop=0:min-keyint={gop}:keyint={gop}:ref=4",
+                "-crf",
+                str(crf),
+                "-maxrate",
+                maxrate,
+                "-bufsize",
+                bufsize,
+            ]
+        return [
+            "-c:v",
+            encoder,
+            "-b:v",
+            maxrate,
+            "-maxrate",
+            maxrate,
+            "-bufsize",
+            bufsize,
+            "-profile:v",
+            profile,
+            "-g",
+            str(gop),
+            "-keyint_min",
+            str(gop),
+        ]
+
+    def _build_x_cmd(
+        self,
+        input_path: Path,
+        output_path: Path,
+        config: EncodingConfig,
+    ) -> list[str]:
+        """
+        Build FFmpeg command for X/Twitter encoding.
+
+        X/Twitter optimal settings (fidelity-first, updated 2026-06-11):
+        - Long edge 1920 (portrait and landscape preserved; never upscaled)
+        - 10 Mbps (up to 25 Mbps supported)
+        - H.264 High Profile @ Level 4.0
+        - Fixed GOP 90
+        - Frame rate capped at 60 (source rate preserved below the cap)
+        - yuv420p pixel format (REQUIRED - X rejects other formats!)
+        - bt.709 color space
+        - AAC 256k audio
+        - Lanczos scaling (high quality)
+        """
+        resolution = config.resolution or 1920
+        bitrate = config.bitrate or "10M"
+        maxrate = config.maxrate or "12M"
+        profile = config.profile or "high"
+        level = config.level or "4.0"
+        gop = config.gop or 90
+        fps_cap = config.fps or 60
+        color = config.color or "bt709"
+        pix_fmt = config.pix_fmt or "yuv420p"
+
+        return [
+            self.ffmpeg_path,
+            "-y",  # Overwrite output
+            "-i",
+            str(input_path),
+            "-vf",
+            f"{build_scale_filter(resolution, flags='lanczos')},setsar=1,format={pix_fmt}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "slow",  # Better quality
+            "-profile:v",
+            profile,
+            "-level:v",
+            level,
+            "-x264-params",
+            f"scenecut=0:open_gop=0:min-keyint={gop}:keyint={gop}:ref=4",
+            "-b:v",
+            bitrate,
+            "-maxrate",
+            maxrate,
+            "-bufsize",
+            double_rate(maxrate),
+            "-color_primaries",
+            color,
+            "-color_trc",
+            color,
+            "-colorspace",
+            color,
+            "-fpsmax",
+            str(fps_cap),
+            "-c:a",
+            "aac",
+            "-b:a",
+            "256k",
+            "-ar",
+            "44100",
+            "-movflags",
+            "+faststart",
+            "-sn",  # No subtitles
+            str(output_path),
+        ]
+
+    def _build_youtube_cmd(
+        self,
+        input_path: Path,
+        output_path: Path,
+        config: EncodingConfig,
+    ) -> list[str]:
+        """
+        Build FFmpeg command for YouTube encoding.
+
+        YouTube optimal settings (fidelity-first, updated 2026-06-11):
+        - Long edge scaled to 1920 (Lanczos; upscaled if smaller, to avoid
+          YouTube's low-resolution bitrate tier — orientation preserved)
+        - 8 Mbps (maxrate 10M, bufsize 12M)
+        - H.264 High Profile
+        - Closed GOP 15 frames
+        - Frame rate capped at 60 (source rate preserved below the cap)
+        - yuv420p pixel format
+        - bt.709 color space
+        - AAC 48kHz 256k audio
+        - movflags +faststart for progressive playback
+        """
+        resolution = config.resolution or 1920
+        bitrate = config.bitrate or "8M"
+        maxrate = config.maxrate or "10M"
+        bufsize = config.bufsize or "12M"
+        profile = config.profile or "high"
+        gop = config.gop or 15
+        fps_cap = config.fps or 60
+        color = config.color or "bt709"
+        pix_fmt = config.pix_fmt or "yuv420p"
+
+        return [
+            self.ffmpeg_path,
+            "-y",
+            "-i",
+            str(input_path),
+            "-vf",
+            f"{build_scale_filter(resolution, upscale=True, flags='lanczos')},setsar=1,format={pix_fmt}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "slow",
+            "-profile:v",
+            profile,
+            "-x264-params",
+            f"scenecut=0:open_gop=0:min-keyint={gop}:keyint={gop}:ref=4",
+            "-b:v",
+            bitrate,
+            "-maxrate",
+            maxrate,
+            "-bufsize",
+            bufsize,
+            "-color_primaries",
+            color,
+            "-color_trc",
+            color,
+            "-colorspace",
+            color,
+            "-fpsmax",
+            str(fps_cap),
+            "-c:a",
+            "aac",
+            "-b:a",
+            "256k",
+            "-ar",
+            "48000",
+            "-movflags",
+            "+faststart",
+            "-sn",
+            str(output_path),
+        ]
+
+    def generate_thumbnail(
+        self,
+        video_path: Path,
+        output_path: Path,
+        timestamp: str = "00:00:01",
+    ) -> Path | None:
+        """
+        Generate a thumbnail from a video.
+
+        Args:
+            video_path: Source video
+            output_path: Output thumbnail path
+            timestamp: Timestamp to capture
+
+        Returns:
+            Path to thumbnail or None if failed
+        """
+        cmd = [
+            self.ffmpeg_path,
+            "-y",
+            "-i",
+            str(video_path),
+            "-ss",
+            timestamp,
+            "-vframes",
+            "1",
+            "-q:v",
+            "2",
+            str(output_path),
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+        if result.returncode == 0 and output_path.exists():
+            return output_path
+
+        return None
+
+    def stitch_carousel_to_video(
+        self,
+        media_paths: list[Path],
+        output_path: Path,
+        fps: int = 30,
+        duration_per_image: float = 3.0,
+        max_duration: float = 60.0,
+    ) -> Path:
+        """
+        Combine images and videos into a single 1080x1920 vertical video.
+
+        Args:
+            media_paths: List of paths to images and/or videos
+            output_path: Where to write the output video
+            fps: Output frame rate
+            duration_per_image: Seconds to show each image
+            max_duration: Maximum output duration in seconds (YouTube Shorts limit)
+
+        Returns:
+            Path to the stitched video
+
+        Raises:
+            RuntimeError: If stitching fails
+            ValueError: If no valid media files provided
+        """
+        if not media_paths:
+            raise ValueError("No media files provided")
+
+        for p in media_paths:
+            if not p.exists():
+                raise FileNotFoundError(f"Media file not found: {p}")
+
+        # Separate images and videos
+        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+        images = [p for p in media_paths if p.suffix.lower() in image_exts]
+        videos = [p for p in media_paths if p.suffix.lower() not in image_exts]
+
+        if not images and not videos:
+            raise ValueError("No valid media files found")
+
+        # Build FFmpeg inputs and filter complex
+        inputs = []
+        filter_parts = []
+
+        for _i, path in enumerate(media_paths):
+            inputs.extend(["-i", str(path)])
+
+        target_w, target_h = 1080, 1920
+        crossfade_duration = 0.5 if len(media_paths) > 1 else 0.0
+
+        scaled_labels = []
+        durations = []
+
+        for _i, path in enumerate(media_paths):
+            is_image = path.suffix.lower() in image_exts
+            label = f"[v{_i}]"
+            if is_image:
+                # Image: loop for duration_per_image seconds
+                filter_parts.append(
+                    f"[{_i}:v]loop=loop=-1:size={int(fps * duration_per_image)}:start=0,"
+                    f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
+                    f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black,"
+                    f"setsar=1,format=yuv420p,{label}"
+                )
+                durations.append(duration_per_image)
+            else:
+                # Video: scale to target
+                try:
+                    info = self.get_video_info(path)
+                    vid_duration = float(info.get("format", {}).get("duration", str(duration_per_image)))
+                except Exception as e:
+                    logger.debug("Unexpected error: %s", e)
+                    vid_duration = duration_per_image
+                filter_parts.append(
+                    f"[{_i}:v]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
+                    f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black,"
+                    f"setsar=1,format=yuv420p,{label}"
+                )
+                durations.append(vid_duration)
+            scaled_labels.append(label)
+
+        # Calculate total duration
+        total_duration = sum(durations) - crossfade_duration * max(0, len(media_paths) - 1)
+        if total_duration > max_duration:
+            total_duration = max_duration
+
+        if len(scaled_labels) == 1:
+            # Single input — just map directly
+            video_map = "[v0]"
+            filter_str = ";".join(filter_parts)
+        else:
+            # Chain xfade transitions
+            prev_label = scaled_labels[0]
+            offset = durations[0] - crossfade_duration
+
+            for idx in range(1, len(scaled_labels)):
+                next_label = scaled_labels[idx]
+                out_label = f"[xf{idx}]" if idx < len(scaled_labels) - 1 else "[vout]"
+                filter_parts.append(
+                    f"{prev_label}{next_label}xfade=transition=fade:"
+                    f"duration={crossfade_duration}:offset={offset:.3f}{out_label}"
+                )
+                prev_label = out_label
+                if idx < len(scaled_labels) - 1:
+                    offset += durations[idx] - crossfade_duration
+
+            video_map = "[vout]"
+            filter_str = ";".join(filter_parts)
+
+        # Build FFmpeg command with silent audio track
+        cmd = [
+            self.ffmpeg_path,
+            "-y",
+            *inputs,
+            "-filter_complex",
+            f"{filter_str};anullsrc=r=44100:cl=stereo[a]",
+            "-map",
+            video_map,
+            "-map",
+            "[a]",
+            "-t",
+            str(total_duration),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "slow",
+            "-profile:v",
+            "high",
+            "-crf",
+            "20",
+            "-r",
+            str(fps),
+            "-c:a",
+            "aac",
+            "-b:a",
+            "256k",
+            "-ar",
+            "44100",
+            "-movflags",
+            "+faststart",
+            "-shortest",
+            str(output_path),
+        ]
+
+        logger.info(f"Stitching {len(media_paths)} media files into carousel video ({total_duration:.1f}s)")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+
+        if result.returncode != 0:
+            logger.error(f"FFmpeg stitch failed: {result.stderr[:500]}")
+            if output_path.exists():
+                output_path.unlink()
+            raise RuntimeError(f"Carousel stitching failed: {result.stderr[:200]}")
+
+        if not output_path.exists() or output_path.stat().st_size < 1000:
+            raise RuntimeError(f"Stitched video is empty or too small: {output_path}")
+
+        size_mb = output_path.stat().st_size / 1024 / 1024
+        logger.info(f"Carousel video created: {output_path.name} ({size_mb:.1f} MB, {total_duration:.1f}s)")
+        return output_path

@@ -1,0 +1,461 @@
+{
+  "captured_from": "src/xpst/dashboard/server.py::_create_app",
+  "routes": [
+    {
+      "kind": "floor",
+      "methods": [
+        "GET"
+      ],
+      "name": "health_check",
+      "path": "/health"
+    },
+    {
+      "kind": "floor",
+      "methods": [
+        "POST"
+      ],
+      "name": "oauth_callback",
+      "path": "/oauth/callback"
+    },
+    {
+      "kind": "floor",
+      "methods": [
+        "GET"
+      ],
+      "name": "metrics",
+      "path": "/metrics"
+    },
+    {
+      "kind": "floor",
+      "methods": [
+        "GET"
+      ],
+      "name": "state",
+      "path": "/state"
+    },
+    {
+      "kind": "floor",
+      "methods": [
+        "GET"
+      ],
+      "name": "dashboard_index",
+      "path": "/"
+    },
+    {
+      "kind": "floor",
+      "methods": [
+        "GET"
+      ],
+      "name": "messenger_webhook_verify",
+      "path": "/webhook/messenger"
+    },
+    {
+      "kind": "floor",
+      "methods": [
+        "POST"
+      ],
+      "name": "messenger_webhook",
+      "path": "/webhook/messenger"
+    },
+    {
+      "kind": "floor",
+      "methods": [
+        "GET"
+      ],
+      "name": "bio_page",
+      "path": "/bio"
+    },
+    {
+      "kind": "floor",
+      "methods": [
+        "GET"
+      ],
+      "name": "bio_edit_form",
+      "path": "/bio/edit"
+    },
+    {
+      "kind": "floor",
+      "methods": [
+        "POST"
+      ],
+      "name": "bio_edit_save",
+      "path": "/bio/edit"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_onboarding",
+      "path": "/api/onboarding"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_onboarding_save",
+      "path": "/api/onboarding"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_onboarding_complete",
+      "path": "/api/onboarding/complete"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_media",
+      "path": "/api/media"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_media_stream",
+      "path": "/api/media/stream"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_media_thumb",
+      "path": "/api/media/thumb"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_connect",
+      "path": "/api/connect/{platform}"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_post",
+      "path": "/api/post"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_media_upload",
+      "path": "/api/media"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_media_get",
+      "path": "/api/media/{media_id}"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_pair",
+      "path": "/api/pair"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_devices",
+      "path": "/api/devices"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "api_device_revoke",
+      "path": "/api/devices/{device_id}"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_plan_create",
+      "path": "/api/plans"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_plan_get",
+      "path": "/api/plans/{plan_id}"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_plan_confirm",
+      "path": "/api/plans/{plan_id}/confirm"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_plan_publish",
+      "path": "/api/plans/{plan_id}/publish"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_plan_readback",
+      "path": "/api/plans/{plan_id}/readback"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_summary",
+      "path": "/api/summary"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_analytics_outcomes",
+      "path": "/api/analytics/outcomes"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_videos",
+      "path": "/api/videos"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_video_detail",
+      "path": "/api/videos/{video_id}"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_health_status",
+      "path": "/api/health-status"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_providers",
+      "path": "/api/providers"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_refresh_tokens",
+      "path": "/api/refresh-tokens"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_schedules",
+      "path": "/api/schedules"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_schedule_cancel",
+      "path": "/api/schedules/{entry_id}/cancel"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_failure_retry",
+      "path": "/api/failures/{video_id}/{platform}/retry"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_activity",
+      "path": "/api/activity"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_library",
+      "path": "/api/library"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_drafts",
+      "path": "/api/drafts"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_drafts_save",
+      "path": "/api/drafts"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_draft_detail",
+      "path": "/api/drafts/{draft_id}"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "api_draft_delete",
+      "path": "/api/drafts/{draft_id}"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_post_delete",
+      "path": "/api/posts/{video_id}/delete"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_preflight",
+      "path": "/api/preflight"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_signin_active",
+      "path": "/api/auth/signin"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_signin_start",
+      "path": "/api/auth/signin/{platform}"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_signin_status",
+      "path": "/api/auth/signin/{session_id}"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_signin_cancel",
+      "path": "/api/auth/signin/{session_id}/cancel"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_byo_status",
+      "path": "/api/byo"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_byo_set",
+      "path": "/api/byo/{platform}"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_stream",
+      "path": "/api/stream"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_chat",
+      "path": "/api/chat"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api_chat_channels",
+      "path": "/api/chat/channels"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_capabilities",
+      "path": "/api/capabilities"
+    },
+    {
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api_settings",
+      "path": "/api/settings"
+    }
+  ]
+}

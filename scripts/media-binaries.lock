@@ -1,0 +1,44 @@
+# xPST media-binary provenance lock  (scripts/fetch-media-binaries.sh reads this)
+#
+# Every media binary that gets bundled into a release is named here by an
+# IMMUTABLE url (a version tag, never `latest`) plus the SHA-256 of the exact
+# file that url serves. The fetch script refuses to install anything whose bytes
+# do not hash to the value below, so a release lane cannot silently ship a
+# different binary and a moving-target mirror cannot break the lane.
+#
+# What is bundled: yt-dlp only. ffmpeg/ffprobe are deliberately NOT bundled any
+# more (~87 MB of a 192 MB app); the engine resolves them at runtime
+# (`XPST_FFMPEG_PATH` > system ffmpeg > a pinned, checksum-verified copy fetched
+# on first use) and pins its own ffmpeg/ffprobe artifacts in
+# src/xpst/media/binaries.py. This lock covers BUNDLE inputs, so it carries no
+# ffmpeg rows: nothing here should describe a binary the lane does not ship.
+#
+# Candidate lines for the same (platform, artifact) are tried in file order;
+# the first candidate that BOTH downloads and passes its checksum wins. A
+# candidate that fails its checksum is a hard failure and is NOT skipped in
+# silence - see the report at the end of scripts/fetch-media-binaries.sh.
+#
+# Columns (TAB separated):
+#   platform  artifact  kind  member  sha256  url
+#     platform  macos-arm64 | macos-x64 | linux-x64 | linux-arm64 | win-x64
+#     artifact  yt-dlp   (win-x64 installs <artifact>.exe)
+#     kind      raw | zip | tar.xz
+#     member    path inside the archive (kind != raw); "-" for raw downloads
+#     sha256    lowercase hex of the downloaded file
+#     url       immutable download url
+#
+# Refresh procedure: scripts/update-media-binaries-lock.py --check (verifies
+# every line against the upstream release API) then --write (re-pins hashes and
+# records the pinned tags). See docs/media-binary-provenance.md.
+
+# --- yt-dlp -----------------------------------------------------------------
+# yt-dlp 2026.08.19. sha256 values cross-check against the release's own
+# SHA2-256SUMS asset (sha256 a63701f30755cb4d9317950d69703e9d751d490cb1b7059e1bb501a353fe7dcb).
+# The macOS/Linux x64 candidates are the python-zipapp (needs a >=3.10
+# interpreter, see the shebang fix in fetch-media-binaries.sh); linux-arm64 and
+# win-x64 use the standalone builds.
+macos-arm64	yt-dlp	raw	-	1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6	https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp
+macos-x64	yt-dlp	raw	-	1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6	https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp
+linux-x64	yt-dlp	raw	-	1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6	https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp
+linux-arm64	yt-dlp	raw	-	b16e4dab368a816cd05d477d698a605a6ae87ccee1c8ffd38fa21d7254141fcc	https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp_linux_aarch64
+win-x64	yt-dlp	raw	-	66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a	https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp.exe

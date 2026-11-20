@@ -1,0 +1,457 @@
+#!/usr/bin/env python3
+"""Capture the shipped Python engine's answers for the local-surface slice.
+
+Runs the real `xpst` CLI (`src/xpst/cli.py`) against scratch profiles and writes
+what it printed, so `crates/xpst-cli/tests/local_surface.rs` can hold the Rust
+engine to the shipped behaviour instead of to somebody's reading of it.
+
+    PYTHONPATH=src XPST_PYTHON=<venv>/bin/python python xtask/scripts/capture_local_surface.py
+
+Notes on determinism (the fixture is checked in and runs on every OS):
+
+* every `scheduled_time` in the fixture carries an explicit UTC offset *and* a
+  `timezone` field, so `scheduled_time_local` renders identically in any machine
+  zone;
+* a snapshot's `modified_at` is machine-local by definition, so it is stripped
+  from the recorded payload and the epoch it was set to is recorded instead —
+  the test asserts the string round-trips to that instant;
+* `failures list` rows use a null `timestamp` (age `null`), because `age_hours`
+  is measured from the wall clock at call time.
+
+The script refuses to write a fixture with no scenarios, and asserts the
+recorded count, so an emptied fixture cannot silently turn the parity test into
+a no-op.
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+FIXTURE = REPO / "crates/xpst-cli/tests/fixtures/local_surface.json"
+SNAPSHOT_EPOCH = 1767225600  # 2026-01-01T00:00:00Z
+
+RICH_STATE = {
+    "version": 2,
+    "posted_videos": {
+        "v1": {
+            "source_platform": "tiktok",
+            "source_url": "https://example.invalid/v1",
+            "posted_to": {
+                "youtube": {"id": "a", "deleted": True},
+                "x": {"id": "b"},
+                "bluesky": {"id": "c"},
+            },
+            "errors": {"instagram": {"error": "boom", "timestamp": None, "count": 2}},
+        },
+        "v2": {"posted_to": {}, "errors": {}},
+    },
+    "health": {
+        "total_processed": 5,
+        "last_check": "2026-01-02T03:04:05",
+        "last_wake_check": None,
+        "platforms": {
+            "youtube": {"status": "ok", "last_success": "2026-01-01T00:00:00", "failures": 0},
+            "x": {"status": "error", "failures": 3},
+        },
+    },
+}
+
+SCHEDULE_ENTRIES = [
+    {
+        "id": "id-late",
+        "video_path": "/media/clip.mp4",
+        "caption": "later",
+        "scheduled_time": "2026-02-01T12:00:00+00:00",
+        "timezone": "UTC",
+        "platforms": ["youtube", "x"],
+        "status": "pending",
+    },
+    {
+        "id": "id-early",
+        "video_path": "",
+        "caption": "text post",
+        "scheduled_time": "2026-01-15T09:30:00+00:00",
+        "timezone": "America/New_York",
+        "platforms": [],
+        "status": "completed",
+    },
+    {"id": "id-bad", "caption": "no time", "status": "weird"},
+    7,
+]
+
+SCENARIOS = [
+    {
+        "name": "status_empty_profile",
+        "argv": ["status", "--json"],
+        "seed": {},
+        "compare": "json",
+    },
+    {
+        "name": "status_rich_state",
+        "argv": ["status", "--json"],
+        "seed": {"state.json": json.dumps(RICH_STATE, indent=2)},
+        "compare": "json",
+    },
+    {
+        "name": "status_corrupt_state",
+        "argv": ["status", "--json"],
+        "seed": {"state.json": "{not json"},
+        "compare": "json",
+    },
+    {
+        "name": "status_legacy_v1",
+        "argv": ["status", "--json"],
+        "seed": {
+            "state.json": json.dumps(
+                {
+                    "posted_videos": {"old": {"posted_to": {"youtube": {"id": "x"}}}},
+                    "health": {
+                        "total_processed": 1,
+                        "platforms": {"youtube": {"status": "ok", "failures": 0}},
+                    },
+                }
+            )
+        },
+        "compare": "json",
+    },
+    {
+        # Python raises KeyError('platforms') and exits 1 on this shape; the
+        # Rust reader fills the default platform table and reports it. Recorded
+        # as a named divergence rather than quietly differing.
+        "name": "status_health_without_platforms",
+        "argv": ["status", "--json"],
+        "seed": {
+            "state.json": json.dumps(
+                {"version": 2, "posted_videos": {}, "health": {"total_processed": 3}}
+            )
+        },
+        "compare": "divergence",
+        "rust_exit_code": 0,
+        "why": (
+            "Python's get_statistics() indexes health['platforms'] directly and raises "
+            "KeyError (exit 1, traceback, no JSON). The Rust reader fills the same "
+            "default platform table the loader creates for a missing health block, so "
+            "status answers instead of crashing."
+        ),
+    },
+    {
+        "name": "status_legacy_cross_posted",
+        "argv": ["status", "--json"],
+        "seed": {
+            "state.json": json.dumps(
+                {
+                    "cross_posted": {
+                        "tiktok:abc": {"youtube": {"post_id": "p1", "url": "u", "timestamp": "t"}}
+                    }
+                }
+            )
+        },
+        "compare": "json",
+    },
+    {
+        "name": "status_backup_recovery",
+        "argv": ["status", "--json"],
+        "seed": {
+            "state.json": "[]",
+            "backups/state_0000000000000000100.json": json.dumps(
+                {"version": 2, "posted_videos": {"b": {"posted_to": {"x": {"id": "1"}}}}}
+            ),
+        },
+        "compare": "json",
+    },
+    {
+        "name": "failures_list_rich",
+        "argv": ["failures", "list", "--json"],
+        "seed": {"state.json": json.dumps(RICH_STATE, indent=2)},
+        "compare": "json",
+    },
+    {
+        "name": "failures_list_empty",
+        "argv": ["failures", "list", "--json"],
+        "seed": {},
+        "compare": "json",
+    },
+    {
+        "name": "schedule_list_missing_store",
+        "argv": ["schedule", "list", "--json"],
+        "seed": {},
+        "compare": "json",
+    },
+    {
+        "name": "schedule_list_empty_store",
+        "argv": ["schedule", "list", "--json"],
+        "seed": {"schedule.json": "[]"},
+        "compare": "json",
+    },
+    {
+        "name": "schedule_list_entries",
+        "argv": ["schedule", "list", "--json"],
+        "seed": {"schedule.json": json.dumps(SCHEDULE_ENTRIES)},
+        "compare": "json",
+    },
+    {
+        "name": "schedule_list_paused",
+        "argv": ["schedule", "list", "--json"],
+        "seed": {
+            "schedule.json": json.dumps(SCHEDULE_ENTRIES[:2]),
+            "schedule.paused.json": json.dumps(
+                {"paused_at": "2026-01-01T00:00:00+00:00", "reason": "operator pause"}
+            ),
+        },
+        "compare": "json",
+    },
+    {
+        "name": "schedule_list_snapshots",
+        "argv": ["schedule", "list", "--json"],
+        "seed": {
+            "schedule.json": "[]",
+            "schedule.json.paused-20260101-000000": json.dumps([{"id": "s1"}, {"id": "s2"}]),
+        },
+        "snapshot_epoch": SNAPSHOT_EPOCH,
+        "compare": "json",
+    },
+    {
+        "name": "schedule_list_non_array",
+        "argv": ["schedule", "list", "--json"],
+        "seed": {"schedule.json": "{}"},
+        "compare": "json",
+    },
+    {
+        "name": "schedule_list_unreadable_pause",
+        "argv": ["schedule", "list", "--json"],
+        "seed": {"schedule.paused.json": "[1,2,3]"},
+        "compare": "json",
+    },
+    {
+        "name": "status_explicit_config_missing",
+        # `--config` is a root option in both engines: it must precede the
+        # subcommand, or Click rejects it as an unknown option.
+        "argv": ["--config", "MISSING", "status", "--json"],
+        "seed": {},
+        "compare": "exit",
+    },
+    {
+        # The state directory is the config file's parent, so an explicit
+        # --config must read state from beside that file, not from the profile.
+        "name": "status_reads_state_from_the_config_directory",
+        "argv": ["--config", "ALT", "status", "--json"],
+        "substitutions": {"ALT": "alt/config.yaml"},
+        "seed": {
+            "alt/config.yaml": "version: 4\n",
+            "alt/state.json": json.dumps(
+                {
+                    "version": 2,
+                    "posted_videos": {"z": {"posted_to": {"threads": {"id": "t"}}}},
+                }
+            ),
+            "state.json": json.dumps(
+                {"version": 2, "posted_videos": {"ignored": {"posted_to": {}}}}
+            ),
+        },
+        "compare": "json",
+    },
+    {
+        "name": "schedule_list_ignores_root_config",
+        "argv": ["--config", "MISSING", "schedule", "list", "--json"],
+        "seed": {"schedule.json": json.dumps(SCHEDULE_ENTRIES[:1])},
+        "compare": "json",
+    },
+]
+
+
+def seed_profile(scenario: dict, profile: Path) -> None:
+    for relative, text in scenario["seed"].items():
+        target = profile / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    if "snapshot_epoch" in scenario:
+        for path in profile.glob("schedule.json.paused-*"):
+            os.utime(path, (scenario["snapshot_epoch"], scenario["snapshot_epoch"]))
+
+
+def argv_for(scenario: dict, profile: Path) -> list[str]:
+    argv = [
+        argument.replace("MISSING", str(profile / "does-not-exist.yaml"))
+        for argument in scenario["argv"]
+    ]
+    for token, relative in scenario.get("substitutions", {}).items():
+        argv = [argument.replace(token, str(profile / relative)) for argument in argv]
+    return argv
+
+
+def normalize(payload):
+    """Strip the two values that cannot be compared across machines."""
+    if isinstance(payload, dict) and "paused_snapshots" in payload:
+        for snapshot in payload["paused_snapshots"]:
+            snapshot.pop("modified_at", None)
+            # The path is this scratch profile's; compare the file name.
+            if isinstance(snapshot.get("file"), str):
+                snapshot["file"] = Path(snapshot["file"]).name
+    return payload
+
+
+def observe(scenario: dict, prefix: list[str]) -> dict:
+    """Run one scenario against one engine and return what it answered."""
+    profile = Path(tempfile.mkdtemp(prefix="xpst-observe-"))
+    try:
+        seed_profile(scenario, profile)
+        env = dict(os.environ)
+        env["XPST_CONFIG_DIR"] = str(profile)
+        env["PYTHONPATH"] = str(REPO / "src")
+        proc = subprocess.run(
+            [*prefix, *argv_for(scenario, profile)],
+            cwd=str(REPO),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        payload = None
+        if scenario["compare"] == "json":
+            try:
+                payload = normalize(json.loads(proc.stdout.strip()))
+            except json.JSONDecodeError:
+                payload = None
+        return {
+            "exit_code": proc.returncode,
+            "payload": payload,
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+        }
+    finally:
+        shutil.rmtree(profile, ignore_errors=True)
+
+
+def run_scenario(scenario: dict, python: str) -> dict:
+    observed = observe(scenario, [python, "-m", "xpst"])
+    record = {
+        "name": scenario["name"],
+        "argv": scenario["argv"],
+        "seed": scenario["seed"],
+        "compare": scenario["compare"],
+        "exit_code": observed["exit_code"],
+    }
+    if scenario.get("substitutions"):
+        record["substitutions"] = scenario["substitutions"]
+    if "snapshot_epoch" in scenario:
+        record["snapshot_epoch"] = scenario["snapshot_epoch"]
+    if scenario["compare"] == "divergence":
+        record["rust_exit_code"] = scenario["rust_exit_code"]
+        record["why"] = scenario["why"]
+        return record
+    if scenario["compare"] == "json":
+        if observed["payload"] is None:
+            raise SystemExit(
+                f"scenario {scenario['name']}: stdout is not JSON:\n"
+                f"{observed['stdout']}\n{observed['stderr']}"
+            )
+        record["stdout_json"] = observed["payload"]
+    return record
+
+
+def compare_scenarios(python: str, binary: str) -> int:
+    """Run both engines over every scenario and diff them, live.
+
+    This is the same comparison the fixture encodes, performed directly so CI
+    catches a Python-side change the moment it lands rather than at the next
+    fixture refresh.
+    """
+    mismatches: list[str] = []
+    for scenario in SCENARIOS:
+        name = scenario["name"]
+        expected = observe(scenario, [python, "-m", "xpst"])
+        actual = observe(scenario, [binary])
+        mode = scenario["compare"]
+
+        if mode == "json":
+            if actual["payload"] is None:
+                mismatches.append(
+                    f"{name}: rust stdout is not JSON\n  {actual['stdout']}\n  {actual['stderr']}"
+                )
+                continue
+            if expected["exit_code"] != actual["exit_code"]:
+                mismatches.append(
+                    f"{name}: exit {expected['exit_code']} (python) != "
+                    f"{actual['exit_code']} (rust)"
+                )
+            if expected["payload"] != actual["payload"]:
+                mismatches.append(
+                    f"{name}: payload differs\n  python: {json.dumps(expected['payload'])}\n"
+                    f"  rust:   {json.dumps(actual['payload'])}"
+                )
+        elif mode == "exit":
+            if expected["exit_code"] != actual["exit_code"]:
+                mismatches.append(
+                    f"{name}: exit {expected['exit_code']} (python) != "
+                    f"{actual['exit_code']} (rust)"
+                )
+        elif mode == "divergence":
+            if actual["exit_code"] != scenario["rust_exit_code"]:
+                mismatches.append(
+                    f"{name}: rust exit {actual['exit_code']}, recorded "
+                    f"{scenario['rust_exit_code']}"
+                )
+            if expected["exit_code"] == actual["exit_code"]:
+                mismatches.append(
+                    f"{name}: recorded as a divergence but both engines exit {actual['exit_code']}"
+                )
+        else:
+            mismatches.append(f"{name}: unknown compare mode `{mode}`")
+
+    if mismatches:
+        print(f"{len(mismatches)} mismatch(es) across {len(SCENARIOS)} scenarios:")
+        for mismatch in mismatches:
+            print(f"  - {mismatch}")
+        return 1
+    print(f"local surface: {len(SCENARIOS)} scenarios match between the Python and Rust engines")
+    return 0
+
+
+def main() -> None:
+    python = os.environ.get("XPST_PYTHON") or sys.executable
+    if "--check-with" in sys.argv:
+        index = sys.argv.index("--check-with")
+        try:
+            binary = str(Path(sys.argv[index + 1]).resolve())
+        except IndexError:
+            raise SystemExit("--check-with needs the path to the rust binary")
+        raise SystemExit(compare_scenarios(python, binary))
+
+    records = [run_scenario(scenario, python) for scenario in SCENARIOS]
+    if not records:
+        raise SystemExit("refusing to write an empty fixture")
+    for record in records:
+        if record["compare"] == "json" and record["exit_code"] != 0:
+            raise SystemExit(
+                f"scenario {record['name']} exited {record['exit_code']}; "
+                "a capturing failure must not be recorded as behaviour"
+            )
+        if record["compare"] == "divergence" and record["exit_code"] == record["rust_exit_code"]:
+            raise SystemExit(
+                f"scenario {record['name']} is recorded as a divergence but both engines "
+                f"exit {record['exit_code']}; the note is stale"
+            )
+    payload = {
+        "schema_version": 1,
+        "captured_from": {"repo": "TysAIs/xPST", "source": "src/xpst/cli.py"},
+        "note": (
+            "Captured by running the shipped Python CLI against scratch profiles. "
+            "scheduled_time values carry an explicit offset plus a timezone field so "
+            "the local rendering is machine-independent; snapshot modified_at is "
+            "stripped and its epoch recorded instead."
+        ),
+        "scenario_count": len(records),
+        "scenarios": records,
+    }
+    FIXTURE.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    print(f"wrote {FIXTURE} ({len(records)} scenarios)")
+
+
+if __name__ == "__main__":
+    main()

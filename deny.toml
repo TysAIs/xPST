@@ -1,0 +1,80 @@
+# cargo-deny policy — docs/technical/licence-policy.md, in executable form.
+#
+# Enforced by the "Licence policy" job in .github/workflows/ci.yml, which runs
+# `cargo deny check licenses bans sources advisories` for the engine workspace
+# and for the Tauri shell (src-tauri/, its own lockfile).
+#
+# Kept in step with scripts/check_licences.py, which implements the licence
+# half without needing the cargo-deny binary; that script fails if this `allow`
+# list and its own accept list disagree, so the two cannot drift apart.
+#
+# Adding a licence here is a policy change: update
+# docs/technical/licence-policy.md in the same commit, and say why.
+
+[graph]
+# The gate prices what we actually build, not a subset of features.
+all-features = true
+
+[advisories]
+version = 2
+# A yanked crate in a lockfile is either an accident or an unreviewed pin.
+yanked = "deny"
+# Reviewed exceptions. An ignore is a decision, so each one carries the reason
+# it does not apply to what this repository builds and the date it was reviewed;
+# the long form is docs/technical/security-advisories.md, and
+# crates/xpst-core/tests/advisory_policy.rs fails if the two disagree or if one
+# of these entries loses its reason.
+ignore = [
+    # Unmaintained, not vulnerable: no upstream fix exists for any version, so an
+    # upgrade cannot clear them. Each is transitive or used narrowly.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained (no safe upgrade; every version is affected). This workspace no longer calls it: the direct uses were replaced with jiff, and the only remaining graph edge is third-party — atrium-api (Bluesky record timestamps), schemars and rmcp. No chrono type appears in any API of ours. Reviewed 2026-11-18. Removed when atrium-api/rmcp/schemars drop it." },
+    # Tauri shell (src-tauri/): all three are upstream-bound, none is reachable
+    # from xPST code, and none has a fixed release to move to.
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is a proc-macro dependency of glib-macros/gtk3-macros (Tauri's GTK3 stack): it runs at compile time and is never linked into the shipped binary. Blocked on gtk-rs > 0.18 upstream. Reviewed 2026-11-18." },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained: merged into zbus 6, but tauri-plugin-single-instance 2.5.5 (newest 2.x) pins zbus ^5.9. Upstream-bound, no vulnerable code. Reviewed 2026-11-18." },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained: merged into zbus 6, same upstream blocker (tauri-plugin-single-instance pins zbus ^5.9). Reviewed 2026-11-18." },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained: merged into zbus 6, same upstream blocker. Compile-time derive only. Reviewed 2026-11-18." },
+]
+
+[licenses]
+version = 2
+# A crate whose licence cannot be identified confidently is a rejection, not a
+# pass: the whole point of the gate is that "unknown" never ships.
+confidence-threshold = 0.9
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unlicense",
+    "CDLA-Permissive-2.0",
+    "Unicode-3.0",
+    # Public-domain dedication (tiny-keccak, via the Tauri stack): strictly less
+    # restrictive than MIT, so nothing to disclose.
+    "CC0-1.0",
+    # The policy accepts `Apache-2.0 WITH LLVM-exception` (target-lexicon). The
+    # exception is part of the grant, so it is named here, not implied.
+    "Apache-2.0 WITH LLVM-exception",
+    # MPL-2.0 is accepted only as an unmodified separate crate (policy). The
+    # current users are cssparser, cssparser-macros, dtoa-short, option-ext and
+    # selectors, reached through the Tauri/WebKit stack in src-tauri. Patching
+    # any of them turns a licence grant into a source-disclosure obligation:
+    # drop the crate, or publish the patch.
+    "MPL-2.0",
+]
+exceptions = []
+
+[bans]
+multiple-versions = "allow"
+# Never ship two versions of a crate that owns a protocol or a secret-handling
+# primitive; those are the duplicates where "which one ran?" becomes unanswerable.
+deny = []
+skip = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

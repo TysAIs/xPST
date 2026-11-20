@@ -1,0 +1,8623 @@
+"""
+CLI interface for xPST
+
+Provides commands for:
+- `xpst run` - One-time check and post
+- `xpst watch` - Monitor mode (every 15 minutes)
+- `xpst post` - Manual post
+- `xpst health` - Test connectivity to all platforms
+- `xpst status` - Health check
+- `xpst auth` - Authentication setup
+- `xpst backfill` - Retry failed posts
+- `xpst logs` - View logs
+- `xpst setup` - Interactive first-time setup wizard
+- `xpst update` - Update dependencies
+- `xpst version` - Show version and dependency info
+
+Uses Click for CLI framework with rich for beautiful output.
+"""
+
+import asyncio
+import importlib.metadata
+import json as _json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager, redirect_stdout
+from pathlib import Path
+from typing import Any
+
+import click
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
+from xpst.config import XPSTConfig
+from xpst.content import (
+    CONTENT_TYPES,
+    PUBLISH_ROUTE_CAROUSEL,
+    PUBLISH_ROUTE_IMAGE,
+    PUBLISH_ROUTE_TEXT,
+    PUBLISH_ROUTE_VIDEO,
+    ContentIssue,
+    ContentRequest,
+    blocking_issues,
+    capability_document,
+    content_verdict,
+    media_transport_blocker,
+)
+from xpst.engine import CrossPostEngine, CrossPostResult
+from xpst.services import batch_outcome as _batch_outcome
+from xpst.services.post_service import refusal_envelope
+from xpst.setup_transaction import SetupTransactionService
+from xpst.state import StateManager
+from xpst.utils.credentials import CredentialStore
+from xpst.utils.logger import get_logger, setup_logging
+from xpst.utils.platform import get_config_dir, stdin_is_interactive
+from xpst.utils.quota import QuotaManager
+from xpst.wizard import GUIDE_PLATFORMS
+
+console = Console()
+logger = get_logger(__name__)
+
+
+# ── Meaningful exit codes ───────────────────────
+# Defined once, in ``xpst.services.batch_outcome``, so the CLI, MCP and any
+# other surface name the same failure the same way; re-exported here because
+# scripts and tests import them from ``xpst.cli``.
+# Note: Click itself uses exit code 2 for usage errors (bad command/options),
+# so CONFIG_ERROR is aligned with 2 and 3/4 carry auth/rate-limit.
+EXIT_SUCCESS = _batch_outcome.EXIT_SUCCESS
+EXIT_GENERAL = _batch_outcome.EXIT_GENERAL
+EXIT_CONFIG_ERROR = _batch_outcome.EXIT_CONFIG_ERROR
+EXIT_AUTH_FAILURE = _batch_outcome.EXIT_AUTH_FAILURE
+EXIT_RATE_LIMIT = _batch_outcome.EXIT_RATE_LIMIT
+EXIT_PLATFORM_UNAVAILABLE = _batch_outcome.EXIT_PLATFORM_UNAVAILABLE
+
+# The one post/batch post rule (see ``xpst.services.batch_outcome``), under the
+# names the rest of this module and its tests use.
+_post_exit_code = _batch_outcome.post_exit_code
+_post_failure_exit_code = _batch_outcome.post_failure_exit_code
+_post_failure_message = _batch_outcome.post_failure_message
+_aggregate_post_exit_code = _batch_outcome.aggregate_batch_exit_code
+
+
+def _session_health(config) -> dict[str, dict]:
+    """Report stored-session presence/age per platform (G53). A stale or
+    challenged session otherwise fails silently at upload time.
+
+    The files checked are the plaintext library-native ones — the runtime reads
+    those (see ``PLAINTEXT_CREDENTIAL_FILES``), not the encrypted store.
+    """
+    import time
+    from pathlib import Path as _Path
+
+    from xpst.utils.secure_io import PLAINTEXT_CREDENTIAL_FILES
+
+    creds = _Path(config.config_dir).expanduser() / "credentials"
+    files = PLAINTEXT_CREDENTIAL_FILES
+    sessions: dict[str, dict] = {}
+    for name, filename in files.items():
+        path = creds / filename
+        info: dict = {"present": path.exists(), "age_days": None}
+        if info["present"]:
+            try:
+                # Age can never be negative: clock skew or coarse filesystem
+                # timestamps can put st_mtime marginally ahead of now.
+                info["age_days"] = max(
+                    0, int((time.time() - path.stat().st_mtime) // 86400)
+                )
+            except OSError:
+                pass
+        sessions[name] = info
+    return sessions
+
+
+def json_output(data: object, as_json: bool) -> None:
+    """Print *data* as JSON when ``--json`` is passed, otherwise Rich console.
+
+    Args:
+        data: Any JSON-serialisable object.
+        as_json: If ``True``, print compact JSON; otherwise print nothing
+            (caller is responsible for Rich output in the ``else`` branch).
+    """
+    if as_json:
+        click.echo(_json.dumps(data, default=str, ensure_ascii=False))
+
+
+@contextmanager
+def keep_stdout_json(enabled: bool) -> Iterator[None]:
+    """Route human-facing Rich prints to stderr while stdout carries JSON.
+
+    Some library helpers (``connect.test_connections``, ``updater.update_all``)
+    print Rich progress to stdout. In JSON mode that would corrupt the
+    machine-readable contract, so redirect stdout to stderr for the duration
+    of the call.
+
+    Args:
+        enabled: When ``True`` (i.e. JSON output requested), redirect.
+    """
+    if enabled:
+        with redirect_stdout(sys.stderr):
+            yield
+    else:
+        yield
+
+
+def _error_payload(code: str, message: str, **extra: object) -> dict:
+    """Build a stable, actionable error object for ``--json`` error output."""
+    payload: dict = {"ok": False, "error": {"code": code, "message": message}}
+    payload["error"].update(extra)
+    return payload
+
+
+def _mask_token(token: str | None) -> str | None:
+    """Short, unguessable preview of a credential (``tonu_K2xQ…9FEic``).
+
+    Enough to identify WHICH token a URL carries without printing the one
+    secret that authorises dashboard writes. ``None`` passes through so a
+    caller can build a token-less URL from the same expression.
+    """
+    if not token:
+        return None
+    if len(token) <= 12:
+        return f"{token[:4]}…"
+    return f"{token[:8]}…{token[-5:]}"
+
+
+# Canonical zero-destination refusal shared by `run`, `watch`, `serve` and
+# `post`. The code and message come from the preflight service so the CLI, the
+# MCP server and the HTTP API refuse with the *same* error instead of three
+# hand-written sentences. Exit code 2 is the documented "bad configuration"
+# slot; no new code is introduced.
+NO_DESTINATIONS_HINT = (
+    "Enable a destination (xpst connect) or pass --platforms youtube,x,instagram."
+)
+
+
+def _refuse_no_destinations(
+    ctx: click.Context,
+    as_json: bool,
+    quiet: bool,
+    *,
+    code: str | None = None,
+    message: str | None = None,
+    hint: str | None = None,
+) -> None:
+    """Refuse the command: nothing would be published, so nothing is started.
+
+    The code and message come from the resolver when it has a more specific
+    answer (``NO_CONNECTED_ACCOUNTS`` names the connect command; a format with
+    no connected destination names the format). Both are canonical strings, so
+    the CLI, MCP and HTTP surfaces refuse with the same error object.
+    """
+    from xpst.services.post_preflight import NO_DESTINATIONS_CODE, NO_DESTINATIONS_MESSAGE
+
+    code = code or NO_DESTINATIONS_CODE
+    message = message or NO_DESTINATIONS_MESSAGE
+    hint = hint or NO_DESTINATIONS_HINT
+
+    if as_json:
+        payload = _error_payload(code, message, hint=hint)
+        payload["status"] = "refused"
+        payload["blockers"] = [message]
+        payload["exit_code"] = EXIT_CONFIG_ERROR
+        json_output(payload, True)
+    elif not quiet:
+        console.print(f"[bold red]Error:[/bold red] {message}")
+        console.print("  Nothing would be published, so xPST did not start a run.")
+        console.print(f"  {hint}")
+    ctx.exit(EXIT_CONFIG_ERROR)
+
+
+def _resolved_destinations(
+    config,
+    requested: list[str] | None = None,
+    *,
+    content_type: str | None = None,
+    all_connected: bool = False,
+) -> list[str]:
+    """Resolve a post's destinations without building an engine.
+
+    There is no implied "all platforms" (R3): an explicit ``--platforms`` wins;
+    ``--all`` means every connected account that accepts this format; otherwise
+    the set is ``format route ∩ connected accounts``. Resolution lives in
+    :mod:`xpst.services.route_plan` so MCP, HTTP and the scheduler cannot
+    disagree with the CLI.
+    """
+    from xpst.services.post_preflight import resolve_destinations
+
+    return resolve_destinations(
+        config, requested, content_type=content_type, all_connected=all_connected
+    )
+
+
+def _refuse_unless_routed(
+    ctx: click.Context,
+    config,
+    as_json: bool,
+    quiet: bool,
+    *,
+    content_type: str | None = "video",
+) -> list[str]:
+    """Resolve the route for a whole-run command, or refuse with its own error.
+
+    ``run``/``watch``/``serve`` have no per-post destination argument, so their
+    set is the format route ∩ connected accounts (R3). Zero connected accounts
+    refuses with the ONE actionable error naming ``xpst connect`` — not a
+    generic "choose a destination" aimed at a command that takes none.
+    """
+    from xpst.services.route_plan import resolve_targets
+
+    resolution = resolve_targets(config, None, content_type=content_type)
+    if not resolution.targets:
+        error = resolution.errors[0] if resolution.errors else None
+        _refuse_no_destinations(
+            ctx,
+            as_json,
+            quiet,
+            code=(error or {}).get("code"),
+            message=(error or {}).get("message"),
+            hint=(error or {}).get("message"),
+        )
+    return list(resolution.targets)
+
+
+def _engine_can_publish(engine: CrossPostEngine, targets: list[str]) -> bool:
+    """True when at least one resolved destination has a live uploader.
+
+    ``engine._platforms`` holds only the uploaders that actually initialised, so
+    this is the authoritative "would anything be published" check — a platform
+    enabled in config whose uploader failed to import cannot publish either.
+
+    An engine that exposes no uploader map (a test double, a stand-in) is not
+    treated as empty: the config-level resolution already ran above and this
+    check is the refinement, so an unknown engine shape must not refuse a run on
+    its own.
+    """
+    platforms = getattr(engine, "_platforms", None)
+    if not isinstance(platforms, dict):
+        return True
+    return any(name in platforms for name in targets)
+
+
+def _maybe_show_onboarding_hint(config, as_json: bool, quiet: bool) -> None:
+    """Defensive first-run nudge for `run`/`status`.
+
+    Gates exclusively on the persisted ``first_run_complete`` flag (via
+    :func:`xpst.wizard.onboarding_required`) — never on the presence of
+    ``wizard_state.json``. A stale or missing progress file therefore cannot
+    re-trigger onboarding for an install that has genuinely completed, and an
+    install that *hasn't* completed gets a one-line pointer to
+    ``xpst wizard`` instead of silently skipping first-run setup.
+
+    Never emits on ``--json`` (keeps machine output parseable) or ``--quiet``.
+    """
+    if as_json or quiet:
+        return
+    from xpst.wizard import onboarding_required
+
+    if onboarding_required(config):
+        console.print(
+            "[yellow]First-run setup is not complete — run "
+            "[cyan]xpst wizard[/cyan] to connect your accounts.[/yellow]"
+        )
+
+
+# Shared Click decorator that adds ``--json`` to every command.
+# Respects group-level ``--json`` and auto-JSON-on-pipe (non-TTY).
+json_option = click.option(
+    "--json", "as_json", is_flag=True,
+    callback=lambda ctx, param, value: value or (ctx.obj.get("json", False) if ctx.obj else False),
+    help="Machine-readable JSON output"
+)
+
+
+def _stdout_is_tty() -> bool:
+    """Whether stdout is an interactive terminal (auto-JSON is off then)."""
+    return sys.stdout.isatty()
+
+
+def load_config(config_path: str | None = None) -> XPSTConfig:
+    """Load configuration from file with user-friendly error handling.
+
+    Args:
+        config_path: Optional path to config YAML file. Defaults to
+            ``~/.xpst/config.yaml``.
+
+    Returns:
+        Validated XPSTConfig instance.
+
+    Raises:
+        SystemExit: On configuration errors (displays error and exits).
+    """
+
+    try:
+        return XPSTConfig.load(config_path)
+    except ValueError as e:
+        console.print(f"[red]Configuration error:[/red] {e}")
+        sys.exit(EXIT_CONFIG_ERROR)
+    except Exception as e:
+        console.print(f"[red]Failed to load config:[/red] {e}")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+
+@click.group()
+@click.option("--config", "-c", help="Path to config file")
+@click.option("--verbose", "-v", is_flag=True, help="Enable verbose logging")
+@click.option("--quiet", "-q", is_flag=True, help="Suppress decorative output")
+@click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
+@click.version_option(version=importlib.metadata.version("xpst"), prog_name="xPST")
+@click.pass_context
+def main(ctx: click.Context, config: str | None, verbose: bool, quiet: bool, json_output: bool):
+    """
+    xPST - Enterprise-grade cross-posting for short-form video
+
+    Automatically distribute TikTok videos to YouTube Shorts, X/Twitter,
+    and Instagram Reels.
+    """
+    ctx.ensure_object(dict)
+    ctx.obj["config_path"] = config
+    ctx.obj["verbose"] = verbose
+    ctx.obj["quiet"] = quiet
+
+    # Windows console hardening: Rich decorates output with Unicode symbols
+    # (✓, ❌, →) that cp1252 (the default pipe/legacy-console codec) cannot
+    # encode — the encode error then escaped as a traceback and turned a
+    # clean refusal into exit code 1. Replacement chars keep the CLI alive;
+    # encoding is left untouched so pipes stay byte-compatible.
+    if sys.platform == "win32":
+        for _stream in (sys.stdout, sys.stderr):
+            try:
+                _stream.reconfigure(errors="replace")
+            except (AttributeError, ValueError, OSError):
+                pass
+
+    # Auto-enable JSON mode when stdout is not a TTY (piped)
+    ctx.obj["json"] = json_output or not _stdout_is_tty()
+
+    # Setup logging
+    log_level = "DEBUG" if verbose else "WARNING" if quiet else "INFO"
+    setup_logging(log_level=log_level)
+
+
+# ──────────────────────────────────────────────
+# Setup transaction commands
+# ──────────────────────────────────────────────
+
+
+def _setup_transaction_service(ctx: click.Context) -> SetupTransactionService:
+    """Return the one transaction service used by every setup entry point."""
+    config_path = ctx.obj.get("config_path") if ctx.obj else None
+    config_dir = Path(config_path).expanduser().parent if config_path else get_config_dir()
+    return SetupTransactionService(config_dir)
+
+
+def _setup_pending_payload(payload: dict[str, Any], command: str) -> dict[str, Any]:
+    """Add the compatibility error without hiding resumable state."""
+    payload["ok"] = False
+    payload["error"] = {
+        "code": "INTERACTIVE_REQUIRED",
+        "message": f"{command} cannot perform human approval actions in non-TTY JSON mode.",
+        "action": "Complete the listed human actions, then run the command again or use setup resume.",
+        "hint": f"xpst {command} --dry-run --json" if command == "onboard" else f"xpst {command} --resume",
+    }
+    return payload
+
+
+def _render_setup_transaction(payload: dict[str, Any], command: str) -> None:
+    """Render a terse human view while keeping the same JSON state underneath."""
+    transaction_id = payload.get("transaction_id")
+    completion = payload.get("completion") or {}
+    console.print(f"[bold blue]Setup transaction[/bold blue] {transaction_id or 'none'}")
+    console.print(f"  State: {completion.get('state', payload.get('state', 'not_started'))}")
+    actions = payload.get("pending_human_actions", [])
+    if actions:
+        console.print(f"  [yellow]{len(actions)} human action(s) pending.[/yellow]")
+        console.print(f"  Resume with: [cyan]xpst {command} --resume[/cyan]")
+    elif completion.get("complete"):
+        console.print("  [green]Setup readiness verified.[/green]")
+
+
+@main.command()
+@click.option("--status", "show_status", is_flag=True, help="Show the active setup transaction")
+@click.option("--resume", "resume_transaction", is_flag=True, help="Resume the active setup transaction")
+@click.option("--finish-later", is_flag=True, help="Save an explicit resumable finish-later state")
+@click.option("--reset", "reset_transaction", is_flag=True, help="Reset the active setup transaction")
+@json_option
+@click.pass_context
+def setup(
+    ctx: click.Context,
+    show_status: bool,
+    resume_transaction: bool,
+    finish_later: bool,
+    reset_transaction: bool,
+    as_json: bool,
+):
+    """Start or resume the canonical, durable setup transaction.
+
+    ``setup`` is canonical. ``onboard`` and ``wizard`` are compatibility
+    aliases that address this same transaction; they do not own separate state.
+    JSON/non-TTY mode never prompts or opens a browser and returns pending human
+    actions instead.
+    """
+    service = _setup_transaction_service(ctx)
+    if reset_transaction:
+        payload = service.reset_json(alias="setup")
+    elif show_status:
+        payload = service.status_json(alias="setup")
+    elif resume_transaction:
+        if service.status() is None:
+            service.start()
+        payload = service.resume_json(alias="setup")
+    elif finish_later:
+        if service.status() is None:
+            service.start()
+        payload = service.resume_json(alias="setup", finish_later=True)
+    else:
+        payload = service.start_json(alias="setup")
+
+    if as_json or not stdin_is_interactive():
+        if payload.get("transaction_id") and not (payload.get("completion") or {}).get("complete") and not reset_transaction and not show_status and not finish_later:
+            payload = _setup_pending_payload(payload, "setup")
+        json_output(payload, True)
+        if payload.get("error") and payload["error"].get("code") == "INTERACTIVE_REQUIRED":
+            ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    if reset_transaction or show_status or finish_later:
+        _render_setup_transaction(payload, "setup")
+        return
+
+    # Preserve the legacy interactive setup experience as the human-action
+    # executor. Its progress is now anchored by the shared transaction above;
+    # readiness completion is only recorded by an explicit live adapter.
+    from xpst.setup import run_setup
+
+    run_setup()
+    _render_setup_transaction(service.status_json(alias="setup"), "setup")
+
+
+# ──────────────────────────────────────────────
+# Update Commands
+# ──────────────────────────────────────────────
+
+@main.command()
+@click.option("--check", "check_only", is_flag=True, help="Check for updates without installing")
+@click.option("--components", is_flag=True, help="Show app, helper, and provider metadata update status")
+@click.option("--self", "self_update", is_flag=True, help="Update xPST ITSELF to the latest release (wheel installs do it in place; editable/frozen installs get the exact command for their install kind)")
+@json_option
+def update(check_only: bool, components: bool, self_update: bool, as_json: bool):
+    """Update xPST dependencies (and, with --self, xPST itself)"""
+    from xpst.updater import (
+        check_update_components,
+        check_updates,
+        detect_install_kind,
+        display_update_status,
+        get_latest_version,
+        self_update_report,
+        update_all,
+    )
+
+    if self_update:
+        latest = get_latest_version("xpst")
+        report = self_update_report(latest)
+        kind = detect_install_kind()
+        did_update = False
+        if latest is None:
+            report["action"] = (
+                "Could not check PyPI for xpst (package may not be published yet, "
+                "or the network is unavailable); update via your install method "
+                f"({kind['kind']} install)."
+            )
+        if report.get("up_to_date"):
+            if as_json:
+                json_output({**report, "updated": False, "reason": "already current"}, True)
+                return
+            console.print(f"[green]xPST {report['installed_version']} is the latest release.[/green]")
+            return
+        if kind["kind"] == "wheel" and latest and not check_only:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--upgrade", f"xpst=={latest}"],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            did_update = result.returncode == 0
+            report["error"] = None if did_update else result.stderr.strip()[:240]
+        report["updated"] = did_update
+        if as_json:
+            json_output(report, True)
+            if not did_update and not report.get("up_to_date"):
+                sys.exit(EXIT_GENERAL)
+            return
+        if did_update:
+            console.print(
+                f"[green]xPST updated to {latest}. Re-run xpst to use the new version.[/green]"
+            )
+        else:
+            console.print(
+                f"[yellow]Installed xPST is {report['installed_version']} ({kind['kind']} "
+                f"install); latest is {latest or 'unknown'}.[/yellow]"
+            )
+            console.print(f"[bold]→[/bold] {report.get('action')}")
+            if report.get("error"):
+                console.print(f"[red]{report['error']}[/red]")
+            sys.exit(EXIT_GENERAL if not report.get("up_to_date") else EXIT_SUCCESS)
+        return
+
+    if components:
+        status = check_update_components(include_network=check_only)
+        if as_json:
+            json_output(status, True)
+        else:
+            for section, items in status.items():
+                table = Table(title=section.replace("_", " ").title())
+                table.add_column("Name", style="cyan")
+                table.add_column("Type")
+                table.add_column("Installed")
+                table.add_column("Current")
+                table.add_column("Update Mode")
+                table.add_column("Status")
+                table.add_column("Action")
+                for item in items:
+                    table.add_row(
+                        str(item["name"]),
+                        str(item["component_type"]),
+                        "yes" if item["installed"] else "no",
+                        str(item["current_version"] or "unknown"),
+                        str(item["update_mode"]),
+                        str(item.get("status") or "unknown"),
+                        str(item.get("action") or ""),
+                    )
+                console.print(table)
+        return
+
+    if check_only:
+        if as_json:
+            packages = check_updates()
+            json_output([{"name": p.name, "installed": p.current_version, "latest": p.latest_version, "updatable": p.updatable, "action": p.error} for p in packages], True)
+            return
+        console.print("[bold blue]Checking for updates...[/bold blue]\n")
+        packages = check_updates()
+    else:
+        if as_json:
+            # update_all prints Rich progress to stdout — keep it off the
+            # machine-readable channel (stderr instead).
+            with keep_stdout_json(True):
+                packages = update_all(check_only=False)
+            json_output([{"name": p.name, "installed": p.current_version, "latest": p.latest_version, "updatable": p.updatable, "action": p.error} for p in packages], True)
+            return
+        console.print("[bold blue]Updating dependencies...[/bold blue]\n")
+        packages = update_all(check_only=False)
+
+    console.print()
+    display_update_status(packages)
+
+    # Summary
+    updatable = [p for p in packages if p.updatable]
+    if updatable:
+        console.print(f"\n[yellow]{len(updatable)} package(s) can be updated.[/yellow]")
+        if check_only:
+            console.print("[dim]Run 'xpst update' to install updates.[/dim]")
+    else:
+        console.print("\n[green]All packages are up to date![/green]")
+
+
+@main.command()
+@json_option
+def version(as_json: bool):
+    """Show xPST version and all dependency versions"""
+    if as_json:
+        from xpst.updater import PACKAGE_IMPORTS, get_installed_version, get_xpst_version
+        info = {
+            "xpst": get_xpst_version(),
+            "python": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        }
+        for name in PACKAGE_IMPORTS:
+            info[name] = get_installed_version(name)
+        json_output(info, True)
+    else:
+        from xpst.updater import display_version_info
+        display_version_info()
+
+
+# ──────────────────────────────────────────────
+# Core Commands
+# ──────────────────────────────────────────────
+
+_SOURCE_CHOICES = ["tiktok", "youtube", "x", "instagram", "local", "all"]
+
+
+@main.command()
+@click.option("--source", "-s", default="tiktok", type=click.Choice(_SOURCE_CHOICES), help="Video source to fetch from (default: tiktok). Use 'all' for bidirectional.")
+@click.option("--bidirectional", "-b", is_flag=True, help="Check ALL sources (not just TikTok) for bidirectional cross-posting")
+@click.option("--dry-run", "dry_run", is_flag=True, help="Show what would happen without uploading")
+@json_option
+@click.pass_context
+def run(ctx: click.Context, source: str, bidirectional: bool, dry_run: bool, as_json: bool):
+    """Check for new videos and post them"""
+    config = load_config(ctx.obj.get("config_path"))
+    quiet = ctx.obj.get("quiet", False)
+    setup_logging(
+        log_level=config.monitoring.log_level,
+        log_file=config.monitoring.log_file,
+    )
+
+    _maybe_show_onboarding_hint(config, as_json, quiet)
+
+    # Guard before the engine exists: a run with no destination publishes
+    # nothing, and building the engine would touch crash-recovery state for a
+    # cycle that cannot do anything. This used to report "No new videos to
+    # post" and exit 0 — an empty run that looked like a completed one.
+    targets = _refuse_unless_routed(ctx, config, as_json, quiet)
+
+    engine = CrossPostEngine(config)
+
+    # Second, authoritative check: the uploaders that actually initialised.
+    # A destination enabled in config whose uploader failed to load cannot
+    # publish either, so the run is refused rather than started empty.
+    if not _engine_can_publish(engine, targets):
+        _refuse_no_destinations(ctx, as_json, quiet)
+
+    # Single-instance guard via the shared pidfile helper (prevents
+    # double-posting when another run/watch/serve instance is active).
+    try:
+        engine.acquire_pidfile()
+    except Exception as e:
+        if not quiet:
+            console.print(f"[bold red]Error:[/bold red] Another xPST instance is already running. {e}")
+        ctx.exit(1)
+        return
+
+    # Connectivity is reported (never assumed): on a host with no network the
+    # source fetch cannot work and no upload can succeed, and a bare
+    # "username not configured" is a misleading explanation.
+    from xpst.utils.net import check_network
+
+    network = check_network()
+    if not network.online and not quiet:
+        console.print(
+            f"[bold red]xPST is offline:[/bold red] {network.detail}"
+        )
+        if not dry_run:
+            console.print(
+                "[dim]Nothing will be posted during this run. Local state is "
+                "readable; retry once connectivity returns.[/dim]"
+            )
+
+    exit_code = EXIT_SUCCESS
+    try:
+        exit_code = _run_check_and_post(
+            engine, source, bidirectional, dry_run, as_json, quiet, network=network
+        )
+    finally:
+        # Always release so a one-shot `run` never leaves a stale pidfile.
+        engine.release_pidfile()
+
+    if exit_code != EXIT_SUCCESS:
+        # A run that published nothing must not read as success to cron or to
+        # an agent wrapper — the exit status is what they branch on.
+        sys.exit(exit_code)
+
+
+def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool, as_json: bool, quiet: bool,
+                        network: Any = None) -> int:
+    """Execute a single check-and-post cycle.
+
+    Extracted from the ``run`` command so the pidfile guard in ``run`` can
+    release the shared lock in a ``finally`` block (a one-shot ``run`` must
+    never leave a stale pidfile behind).
+
+    Returns:
+        The exit code for this cycle (``_aggregate_post_exit_code``):
+        ``0`` when something was published or there was nothing to do,
+        otherwise the shared failure family of the results that failed.
+    """
+    # --source all implies bidirectional
+    if source == "all":
+        bidirectional = True
+
+    network_payload = network.to_dict() if network is not None else None
+
+    if dry_run:
+        if bidirectional:
+            monitor = engine._get_monitor()
+            new_posts = asyncio.run(monitor.check_all_sources(5))
+            if as_json:
+                json_output({"dry_run": True, "network": network_payload, "posts": [{"source": p.source_platform, "video_id": p.video_id, "caption": p.caption[:50], "targets": list(p.target_platforms)} for p in new_posts]}, True)
+            elif new_posts:
+                if not quiet:
+                    console.print("[bold blue]Dry run — would cross-post:[/bold blue]")
+                for p in new_posts:
+                    console.print(f"  {p.source_platform}:{p.video_id} → {', '.join(p.target_platforms)}")
+            else:
+                if not quiet:
+                    console.print("[green]No new videos to post[/green]")
+        else:
+            videos = asyncio.run(engine.source_service.fetch_new_videos(source, 5))
+            new_videos = engine.source_service.filter_new(videos, engine.state, engine._platforms) if videos else []
+            if as_json:
+                json_output({"dry_run": True, "network": network_payload, "videos": [{"video_id": v.video_id, "caption": v.caption[:50], "targets": list(engine._platforms.keys())} for v in new_videos]}, True)
+            elif new_videos:
+                if not quiet:
+                    console.print("[bold blue]Dry run — would post:[/bold blue]")
+                for v in new_videos:
+                    console.print(f"  {v.video_id}: {v.caption[:50]} → {', '.join(engine._platforms.keys())}")
+            else:
+                if not quiet:
+                    console.print("[green]No new videos to post[/green]")
+        return EXIT_SUCCESS
+
+    if bidirectional:
+        if not as_json and not quiet:
+            console.print("[bold blue]xPST - Bidirectional cross-posting check...[/bold blue]")
+        results = asyncio.run(engine.check_and_post_bidirectional())
+    else:
+        if not as_json and not quiet:
+            console.print(f"[bold blue]xPST - Checking {source} for new videos...[/bold blue]")
+        results = asyncio.run(engine.check_and_post(source=source))
+
+    if not results:
+        status = "offline_no_network" if (network_payload and not network_payload["online"]) else "no_new_videos"
+        if as_json:
+            json_output({"status": status, "network": network_payload, "results": []}, True)
+        elif not quiet:
+            console.print("[green]No new videos to post[/green]")
+        # Nothing was attempted because there was nothing to do (or no
+        # network) — the caller decides; this is not a failed post.
+        return EXIT_SUCCESS
+
+    exit_code = _aggregate_post_exit_code(results)
+
+    if as_json:
+        out = [_result_to_dict(r) for r in results]
+        payload = {"status": "ok", "network": network_payload, "results": out}
+        if exit_code != EXIT_SUCCESS:
+            # The payload keeps its shape; a failed batch names its exit code.
+            payload["exit_code"] = exit_code
+        json_output(payload, True)
+    else:
+        for result in results:
+            _display_result(result)
+        if exit_code != EXIT_SUCCESS and not quiet:
+            console.print(f"[bold red]{_post_failure_message(exit_code)}[/bold red]")
+
+    return exit_code
+
+
+@main.command()
+@click.option("--interval", "-i", default=None, type=int, help="Check interval in seconds")
+@click.option("--source", "-s", default="tiktok", type=click.Choice(_SOURCE_CHOICES), help="Video source to watch (default: tiktok). Use 'all' for bidirectional.")
+@click.option("--bidirectional", "-b", is_flag=True, help="Check ALL sources for bidirectional cross-posting")
+@click.pass_context
+def watch(ctx: click.Context, interval: int | None, source: str, bidirectional: bool):
+    """Watch for new videos (runs continuously). Delegates to Scheduler."""
+    from xpst.scheduler import Scheduler
+
+    config = load_config(ctx.obj.get("config_path"))
+    setup_logging(
+        log_level=config.monitoring.log_level,
+        log_file=config.monitoring.log_file,
+    )
+
+    # --source all implies bidirectional
+    if source == "all":
+        bidirectional = True
+
+    # A watch loop with no destination can never publish anything: refuse at
+    # startup instead of looping forever on an empty run (same canonical
+    # refusal the one-shot `run` and the MCP surface return).
+    watch_targets = _refuse_unless_routed(
+        ctx, config, as_json=False, quiet=ctx.obj.get("quiet", False)
+    )
+
+    check_interval = interval or config.schedule.check_interval
+    mode_label = "Bidirectional" if bidirectional else f"Source: {source}"
+    console.print(f"[bold blue]xPST - {mode_label} watching every {check_interval}s (Ctrl+C to stop)[/bold blue]")
+
+    engine = CrossPostEngine(config)
+
+    if not _engine_can_publish(engine, watch_targets):
+        _refuse_no_destinations(ctx, as_json=False, quiet=ctx.obj.get("quiet", False))
+
+    # Crash recovery check on startup
+    _check_crash_recovery(engine)
+
+    scheduler = Scheduler(engine, config)
+
+    # Single-instance guard via the shared pidfile helper: a long-running
+    # watch loop must not run concurrently with another watch/serve loop
+    # or it would double-post. Release on exit (incl. exceptions).
+    try:
+        engine.acquire_pidfile()
+    except Exception as e:
+        console.print(f"[bold red]Error:[/bold red] Another xPST instance is already running. {e}")
+        sys.exit(EXIT_GENERAL)
+
+    try:
+        # Display results after each scheduler cycle via a hook
+        import time as _time
+        while True:
+            try:
+                if bidirectional:
+                    # Use jittered interval for human-like timing
+                    jittered = engine.anti_bot.get_jittered_interval(check_interval)
+                    results = asyncio.run(engine.check_and_post_bidirectional())
+                else:
+                    if scheduler._needs_catch_up():
+                        console.print("[yellow]Mac was asleep. Running catch-up...[/yellow]")
+                        scheduler._run_check(catch_up=True, source=source)
+                    else:
+                        scheduler._run_check(catch_up=False, source=source)
+                    results = scheduler.last_results
+                    jittered = check_interval
+
+                for result in results:
+                    _display_result(result)
+
+                engine.state.update_last_wake_check()
+                engine.state.save()
+
+                console.print(f"[dim]Next check in {jittered:.0f}s...[/dim]")
+                _time.sleep(jittered)
+
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Stopped by user[/yellow]")
+                break
+            except Exception as e:
+                logger.error(f"Error in watch loop: {e}")
+                console.print(f"[red]Error:[/red] {e}")
+                _time.sleep(60)
+    finally:
+        engine.release_pidfile()
+
+
+# ── Post exit status: a failed post must not read as success ────────────────
+# ``xpst post`` reports the outcome twice: the JSON payload is the detailed
+# report, the exit status is the verdict. Shell scripts and agents branch on
+# the verdict (`xpst post … && echo ok`), so a post where nothing was published
+# must not exit 0. The rule itself lives in ``xpst.services.batch_outcome``
+# (imported above as ``_post_exit_code`` / ``_aggregate_post_exit_code`` /
+# ``_post_failure_exit_code`` / ``_post_failure_message``) so that MCP and every
+# other surface report the same family for the same outcome instead of keeping
+# a second copy of it. Documented in ``docs/TUTORIAL_CLI.md``.
+
+
+def _parse_caption_for(values: tuple[str, ...]) -> dict[str, str]:
+    """Parse repeatable ``--caption-for PLATFORM=TEXT`` into ``{platform: text}``.
+
+    The text is never trimmed or otherwise changed: a per-destination caption is
+    sent verbatim, exactly like ``--caption``. A value without ``=`` (or with an
+    empty platform) is a usage error, reported instead of silently posting the
+    shared caption to a destination the user thought they had customized.
+    """
+    captions: dict[str, str] = {}
+    for raw in values:
+        platform, separator, text = str(raw).partition("=")
+        if not separator or not platform.strip():
+            raise click.BadParameter(f"expected PLATFORM=TEXT, got {raw!r}")
+        captions[platform.strip().lower()] = text
+    return captions
+
+
+def _pre_upload_refusal_blockers(request: ContentRequest) -> list[ContentIssue]:
+    """The content blockers that refuse a post *before* any uploader runs.
+
+    Every content-type/capability finding is one of them (a destination with no
+    path for this type, text past a limit, a request shape the contract cannot
+    honour), because saying so before an uploader exists is the point of the
+    contract.
+
+    A media-transport refusal (``THREADS_NEEDS_URL``) is deliberately *not*:
+    the publishing pipeline reports it per destination — the row that says the
+    destination refused the local file — and main's exit-status contract
+    (``_post_exit_code``) reads it there, so it exits ``EXIT_PLATFORM_UNAVAILABLE``
+    with a row per requested destination. Gating it here too would pre-empt that
+    report with one envelope and change the documented exit code, so the refusal
+    is left to the pipeline that owns it. It is still part of the content verdict
+    every surface returns.
+    """
+    blockers: list[ContentIssue] = []
+    for issue in blocking_issues(request):
+        platform = str(issue.platform or "").strip().lower()
+        transport_issue = media_transport_blocker(platform, request.media) if platform else None
+        if transport_issue is not None and transport_issue.code == issue.code:
+            # Declared once in the destination profile; the pipeline and the
+            # uploader report this same code destination by destination.
+            continue
+        blockers.append(issue)
+    return blockers
+
+
+#: Whether a destination honours an upload-time visibility is NOT decided here:
+#: :mod:`xpst.visibility` owns that registry (YouTube writes ``privacyStatus``,
+#: TikTok Direct Post writes ``privacy_level``, X and the Meta destinations have
+#: no such mode at all), and the plan payload, the preflight service, the MCP
+#: tool and the uploaders read the same table. This helper only renders its
+#: answer for the CLI, so a surface cannot claim a destination honours a request
+#: the uploader would ignore.
+def _visibility_advisories(
+    targets: list[str], visibility: str | None, config: Any | None = None
+) -> list[str]:
+    """Say which destinations cannot honour ``--visibility``, if any.
+
+    Empty for the default (nothing requested — every destination publishes
+    publicly then): there is nothing to warn about. Otherwise the destinations
+    that would publish publicly anyway are named, because "post privately to
+    YouTube and X" is not a thing X can do. A destination whose *route* cannot
+    honour the request at all (TikTok's browser flow) is not an advisory but a
+    refusal, and it arrives as a plan blocker instead.
+    """
+    from xpst.visibility import advisories, publish_route
+
+    routes = {
+        str(platform).strip().lower(): publish_route(
+            config, platform, requested=visibility
+        )
+        for platform in targets or ()
+    }
+    return advisories(targets, visibility, routes=routes)
+
+
+def _print_visibility_advisories(advisories: list[str], *, indent: str = "  ") -> None:
+    for note in advisories:
+        console.print(f"{indent}[yellow]advisory[/yellow]: {note}")
+def _deferral_dry_run_note(config: Any, route: str, *, now: bool) -> dict[str, Any] | None:
+    """What a real run would do instead of publishing right now (dry run).
+
+    Two things can stop an immediate post, and they behave differently: outside
+    the anti-bot window the post is QUEUED (which creates ``schedule.json``),
+    while on a paused deployment it is REFUSED and nothing is written. The dry
+    run says which, because "would post" is not the whole answer (F3 — the
+    notice used to sit after the dry run's ``return``, so it never printed).
+    """
+    if now:
+        return None
+    from xpst.anti_bot import AntiBotProtection
+    from xpst.services.manual_defer import _DEFERRABLE_ROUTES, posting_pause_reason
+
+    if route not in _DEFERRABLE_ROUTES or AntiBotProtection().should_post_now():
+        return None
+    pause_reason = posting_pause_reason(config)
+    if pause_reason:
+        return {
+            "paused": True,
+            "deferred_would_apply": False,
+            "reason": "posting_paused",
+            "message": (
+                f"Outside the posting window (8am-11pm) and posting is paused "
+                f"({pause_reason}): a real run would REFUSE this post and queue "
+                "nothing. Use --now to publish deliberately."
+            ),
+        }
+    return {
+        "deferred_would_apply": True,
+        "reason": "outside_anti_bot_window",
+        "message": (
+            "Outside the posting window (8am-11pm): a real run would queue this "
+            "post to the schedule store instead of posting now (use --now to force)."
+        ),
+    }
+
+
+@main.command()
+@click.option("--video", "-v", required=False, multiple=True, type=click.Path(exists=True), help="Video/image file path (use multiple times for carousel)")
+@click.option("--caption", "-c", required=False, default=None, help="Post text/caption (required with --video)")
+@click.option(
+    "--caption-for",
+    "caption_for",
+    multiple=True,
+    metavar="PLATFORM=TEXT",
+    help=(
+        "Different caption for one destination (repeatable), e.g. "
+        "--caption-for x='short copy'. Destinations without one use --caption."
+    ),
+)
+@click.option(
+    "--text",
+    "-t",
+    default=None,
+    help=(
+        "Text of a text-only post (no media). Equivalent to --caption with "
+        "--content-type text; `xpst post --text \"...\" -p x,threads` publishes a "
+        "text post to every destination that has a text path."
+    ),
+)
+@click.option(
+    "--content-type",
+    "content_type",
+    default=None,
+    type=click.Choice([item.value for item in CONTENT_TYPES], case_sensitive=False),
+    help=(
+        "What this post is, in the canonical vocabulary: video/image/carousel/"
+        "text/thread. Defaults to what the media implies. A type the chosen "
+        "destination cannot publish is refused before anything is uploaded."
+    ),
+)
+@click.option(
+    "--platforms",
+    "--platform",
+    "-p",
+    default=None,
+    help=(
+        "Comma-separated destination platforms. Without it the post targets the "
+        "format route ∩ connected accounts (never an implied 'all')."
+    ),
+)
+@click.option(
+    "--all",
+    "all_connected",
+    is_flag=True,
+    help=(
+        "Explicitly target every connected account that accepts this format. "
+        "This is the only way to mean 'all' — it is never the default."
+    ),
+)
+@click.option(
+    "--visibility",
+    type=click.Choice(["public", "unlisted", "private"]),
+    default=None,
+    help=(
+        "Ask for an upload-time visibility. Honoured by YouTube and by TikTok's "
+        "Content Posting API (private → SELF_ONLY); a destination whose route "
+        "cannot honour it is refused, never silently posted publicly. Omit it "
+        "for the destination's default (public)."
+    ),
+)
+@click.option(
+    "--shorts",
+    "shorts",
+    is_flag=True,
+    help="Publish as short-form (YouTube: Shorts ≤ 60 s, square-or-vertical)",
+)
+@click.option(
+    "--long",
+    "long_form",
+    is_flag=True,
+    help="Publish as long-form (YouTube: watch URL, up to 12 h; X: needs a raised cap)",
+)
+@click.option("--dry-run", "dry_run", is_flag=True, help="Show what would happen without uploading")
+@click.option(
+    "--now",
+    "now",
+    is_flag=True,
+    help=(
+        "Post immediately even outside the anti-bot window (8am-11pm). "
+        "Without it, a media post fired outside the window is queued to the "
+        "schedule store and reported as deferred, not failed."
+    ),
+)
+@json_option
+@click.pass_context
+def post(
+    ctx: click.Context,
+    video: tuple[str, ...],
+    caption: str | None,
+    caption_for: tuple[str, ...],
+    text: str | None,
+    content_type: str | None,
+    platforms: str | None,
+    all_connected: bool,
+    visibility: str | None,
+    shorts: bool,
+    long_form: bool,
+    dry_run: bool,
+    now: bool,
+    as_json: bool,
+):
+    """Manually post a video, image, carousel, or text post.
+
+    One --video flag posts a single file; several build a carousel; --text (or
+    --content-type text) posts a text-only status. A content type the chosen
+    destination cannot publish is refused before anything is uploaded.
+    """
+    config = load_config(ctx.obj.get("config_path"))
+    quiet = ctx.obj.get("quiet", False)
+    setup_logging(
+        log_level=config.monitoring.log_level,
+        log_file=config.monitoring.log_file,
+    )
+
+    # --shorts / --long are separate flags (one parameter name each) so an
+    # accidental both-flags invocation is a usage error rather than a silent
+    # "last one wins", and so the Rust CLI's clap tree can model them.
+    if shorts and long_form:
+        raise click.UsageError("--shorts and --long are mutually exclusive; pick one.")
+    video_mode = "shorts" if shorts else "long" if long_form else None
+
+    per_platform_captions = _parse_caption_for(caption_for)
+    media_paths = [Path(v) for v in video]
+    platform_list = platforms.split(",") if platforms else None
+    if platform_list and all_connected:
+        raise click.UsageError("Use either --platforms or --all, not both.")
+
+    # --text is the text-post spelling of --caption; both name the same body.
+    body = text if text is not None else (caption or "")
+
+    if not media_paths and not content_type and text is not None:
+        # `--text` with no file IS a text post: state it rather than inferring
+        # it, so the content verdict and the route agree on every surface.
+        content_type = "text"
+
+    if not media_paths and not content_type:
+        raise click.UsageError(
+            "Provide --video (a file to post), --text (a text post), or "
+            "--content-type (what this post is, e.g. --content-type text)."
+        )
+    if media_paths and not body.strip():
+        raise click.UsageError("Provide --caption for the media you are posting.")
+
+    # Resolve destinations once, canonically: an explicit --platforms wins,
+    # --all means every connected account that accepts this format, and the
+    # default is the format route ∩ connected accounts (R3). Nothing is
+    # implied: a destination that cannot take this format is never added, and
+    # a requested-but-unconnected one is reported as skipped below.
+    from xpst.services.route_plan import (
+        build_route_plan,
+        classify_upload_result,
+        detect_content_type,
+        merge_plan_destinations,
+        outcome_state,
+        resolve_targets,
+    )
+
+    detected_type = detect_content_type(
+        [str(path) for path in media_paths], content_type=content_type
+    )
+    resolution = resolve_targets(
+        config,
+        platform_list,
+        content_type=detected_type,
+        all_connected=all_connected,
+    )
+    targets = list(resolution.targets)
+    resolution_error = dict(resolution.errors[0]) if resolution.errors else None
+
+    def refuse_resolution() -> None:
+        _refuse_no_destinations(
+            ctx,
+            as_json,
+            quiet,
+            code=(resolution_error or {}).get("code"),
+            message=(resolution_error or {}).get("message"),
+            hint=(
+                (resolution_error or {}).get("message")
+                or NO_DESTINATIONS_HINT
+            ),
+        )
+
+    if not targets:
+        # Nothing resolved: refuse before an engine exists, for the live run and
+        # the dry run alike (they must never disagree about the destination set).
+        refuse_resolution()
+
+    # F2: the plan accepts --visibility for the whole request, but only the
+    # destinations whose route can honour it actually apply it (the registry in
+    # ``xpst.visibility``). Say which destinations will publish publicly anyway
+    # on every surface (dry run and live run), so "post it privately" cannot
+    # read as a flag that silently covers destinations that publish publicly. A
+    # destination that CAN honour it but whose route cannot is refused as a plan
+    # blocker instead — never silently downgraded.
+    visibility_advisories = _visibility_advisories(targets, visibility, config)
+
+    # ONE content answer, from the contract module: the same request produces
+    # the same verdict on the CLI, in MCP, and over HTTP. Per-destination copy
+    # rides the request itself (``overrides``), so the text that is validated
+    # for each destination is the text that destination is sent — without this,
+    # `--caption-for x=<short>` planned clean and still exited 1 on the base
+    # caption's length.
+    request = ContentRequest.from_legacy(
+        media_paths,
+        body,
+        targets,
+        content_type=content_type,
+        overrides=per_platform_captions,
+    )
+    verdict = content_verdict(request)
+    # Transport refusals are the pipeline's to report, destination by
+    # destination (see _pre_upload_refusal_blockers).
+    refusal_blockers = _pre_upload_refusal_blockers(request)
+
+    if dry_run:
+        if not targets:
+            refuse_resolution()
+        # The resolved plan is produced before anything is published (R4) and
+        # is the same object the live path consumes: per-destination state
+        # (posted / skipped_unconnected / unsupported_format), the envelope it
+        # was measured against, and the reason. Nothing here uploads or writes.
+        route_payload = build_route_plan(
+            config,
+            media_paths=[str(path) for path in media_paths],
+            caption=body,
+            per_platform_captions=per_platform_captions,
+            content_type=detected_type,
+            # The user's own request, not the resolved list: the plan must keep
+            # reporting whether this set was explicit, --all, or the format
+            # route (R3), and must re-resolve identically.
+            requested=platform_list,
+            all_connected=all_connected,
+            include_transform=False,
+            visibility=visibility,
+        ).to_dict()
+        # D2: the dry run answers the same question the live run would face —
+        # "could this actually publish?" — not just "is the request shaped
+        # right?". The canonical planner adds the destination-level blockers
+        # (disabled destination, auth not configured, quota exhausted) that the
+        # content verdict alone cannot see. MCP's dry-run already merged these
+        # (same service, same fields); the CLI answering only the content
+        # verdict made a doomed dry run read as ready (TIKTOK_NOT_CONFIGURED
+        # on live vs `ready: true` in the plan was the defect). Transform plans
+        # are skipped here: this surface never prints them and the probe cost
+        # is not free.
+        from xpst.services.post_preflight import (
+            PostPlanRequest,
+            PostPreflightService,
+            plan_content_type,
+        )
+
+        plan_blockers: list[str] = []
+        try:
+            plan_payload = PostPreflightService(config).plan(
+                PostPlanRequest(
+                    media_paths=media_paths,
+                    target_platforms=targets,
+                    base_caption=body,
+                    per_platform_captions=per_platform_captions,
+                    content_type=plan_content_type(request),
+                    include_transform=False,
+                    visibility=visibility,
+                )
+            ).to_dict()
+            seen_blockers = set(verdict["blockers"])
+            plan_blockers = [
+                issue["message"]
+                for issue in plan_payload["hard_blockers"]
+                if issue["message"] not in seen_blockers
+            ]
+        except Exception as exc:  # noqa: BLE001 - report truthfully, never fake readiness
+            plan_payload = None
+            plan_blockers = [f"Preflight could not run: {str(exc)[:200]}"]
+
+        merged_blockers = list(verdict["blockers"]) + plan_blockers
+        # One invariant, the one HTTP preflight ("ready": not blockers) and the
+        # MCP dry run ("ready": not blockers and plan ready) already keep: a
+        # payload may not call a request publishable while it lists a hard
+        # blocker. ``ready`` used to be derived from the plan alone, so a
+        # request the content contract refused — a text post to a video-only
+        # destination — reported "ready": true, listed that blocker in the same
+        # object and then exited 1 (card t_b3ab7439). A gate reading the field
+        # passed a request the command itself would not publish.
+        ready = (
+            bool(plan_payload and plan_payload["ready"])
+            and not merged_blockers
+            and bool(route_payload["posting_destinations"])
+        )
+        # A requested upload-time level that the destination's route cannot
+        # honour is a REFUSAL of the request as written (never a silent public
+        # post), so the dry run refuses too — a gate must not read "would post"
+        # while a destination it named could only publish publicly.
+        visibility_refusals = [
+            str(item.get("reason") or "")
+            for item in route_payload.get("destinations") or []
+            if item.get("state") == "refused_visibility"
+        ]
+        info = {
+            "dry_run": True,
+            "video": str(media_paths[0]) if media_paths else None,
+            "caption": body[:80],
+            "text": body[:80],
+            "captions": {
+                target: per_platform_captions.get(target.strip().lower(), body) for target in targets
+            },
+            "carousel": len(media_paths) > 1,
+            "items": len(media_paths),
+            "targets": targets,
+            "target_source": resolution.source,
+            "route_plan": route_payload,
+            "visibility": visibility or "public",
+            "video_mode": video_mode,
+            "content_type": verdict["content_type"] or verdict["effective_content_type"],
+            "effective_content_type": verdict["effective_content_type"],
+            "route": verdict["route"],
+            "content": verdict,
+            "ready": ready,
+            "blockers": merged_blockers,
+            # Only when there is something to say: the shipped default
+            # (public visibility) keeps this payload unchanged, and the
+            # payload-shape contract test pins that shape.
+            **(
+                {"visibility_warnings": visibility_advisories}
+                if visibility_advisories
+                else {}
+            ),
+        }
+        # F3: what a real run would actually do instead of posting right now.
+        # This used to live in a branch after this block's `return`, so the
+        # deferral notice could never print — the dry run said nothing about a
+        # queue it would create (or, on a paused deployment, a refusal).
+        deferral_note = _deferral_dry_run_note(config, verdict["route"], now=now)
+        if deferral_note is not None:
+            info["deferral"] = deferral_note
+        if as_json:
+            json_output(info, True)
+        else:
+            if not quiet:
+                console.print("[bold blue]Dry run — would post:[/bold blue]")
+            if media_paths:
+                console.print(f"  File: {media_paths[0]}")
+                if len(media_paths) > 1:
+                    console.print(f"  Carousel: {len(media_paths)} items")
+            console.print(f"  Content type: {verdict['effective_content_type']}")
+            console.print(f"  Caption: {body[:80]}")
+            for target, override_text in info["captions"].items():
+                if target.strip().lower() in per_platform_captions:
+                    console.print(f"  Caption for {target}: {override_text[:80]}")
+            console.print(f"  Targets ({resolution.source}): {', '.join(targets)}")
+            _print_route_plan(route_payload)
+            console.print(f"  Visibility: {visibility or 'public (destination default)'}")
+            _print_visibility_advisories(visibility_advisories)
+            if deferral_note is not None:
+                console.print(f"  [yellow]Deferral:[/yellow] {deferral_note['message']}")
+            for blocker in merged_blockers:
+                console.print(f"  [red]Blocked:[/red] {blocker}")
+        if refusal_blockers or visibility_refusals:
+            sys.exit(EXIT_GENERAL)
+        return
+
+    if refusal_blockers:
+        # Refused before any upload, by the same rule every other surface uses.
+        # No engine is constructed and nothing is uploaded.
+        envelope = refusal_envelope(
+            request, [issue.message for issue in refusal_blockers], content=verdict
+        )
+        if as_json:
+            envelope["exit_code"] = EXIT_GENERAL
+            json_output(envelope, True)
+        else:
+            for issue in refusal_blockers:
+                console.print(f"[red]Refused:[/red] {issue.message}")
+        sys.exit(EXIT_GENERAL)
+
+    if not as_json and not quiet:
+        if len(media_paths) > 1:
+            console.print(f"[bold blue]Posting carousel ({len(media_paths)} items) to: {', '.join(targets)}[/bold blue]")
+        elif verdict["route"] == PUBLISH_ROUTE_TEXT:
+            console.print(f"[bold blue]Posting text to: {', '.join(targets)}[/bold blue]")
+        else:
+            console.print(
+                f"[bold blue]Posting to: {', '.join(targets)} "
+                f"(visibility: {visibility or 'destination default'})[/bold blue]"
+            )
+        _print_visibility_advisories(visibility_advisories)
+
+    # The same plan the dry run prints is what this run consumes (R4): only
+    # destinations the plan says will publish are attempted. The rest are
+    # reported with their canonical state (skipped_unconnected /
+    # unsupported_format) rather than handed to an uploader.
+    execution_plan = build_route_plan(
+        config,
+        media_paths=[str(path) for path in media_paths],
+        caption=body,
+        per_platform_captions=per_platform_captions,
+        content_type=detected_type,
+        requested=platform_list,
+        all_connected=all_connected,
+        include_transform=False,
+        visibility=visibility,
+    )
+    posting_targets = list(execution_plan.posting_destinations)
+
+    if not posting_targets:
+        # Nothing will publish, and nothing failed: every destination is
+        # unconnected or cannot take this format. Report the plan, exit 0 when
+        # it is all skips (R3) — the canonical refusal already ran above.
+        from xpst.engine import CrossPostResult
+
+        skipped_result = CrossPostResult(video_id=f"{detected_type}-plan", caption=body)
+        merge_plan_destinations(skipped_result, execution_plan)
+        states = {
+            platform: classify_upload_result(platform, upload)
+            for platform, upload in skipped_result.results.items()
+        }
+        status = outcome_state(states)
+        if status == "skipped":
+            # Nothing attempted, nothing failed: unconnected is not a failure.
+            plan_exit = EXIT_SUCCESS
+        elif status == "refused":
+            # Every destination was evaluated and refused the content.
+            plan_exit = EXIT_PLATFORM_UNAVAILABLE
+        else:
+            plan_exit = EXIT_GENERAL
+        if as_json:
+            out = _result_to_dict(skipped_result)
+            out["content_type"] = verdict["effective_content_type"]
+            out["content"] = verdict
+            out["destinations"] = list(states.values())
+            out["skipped_unconnected"] = list(execution_plan.skipped_unconnected)
+            out["status"] = status
+            if visibility_advisories:
+                out["visibility_warnings"] = visibility_advisories
+            out["exit_code"] = plan_exit
+            json_output(out, True)
+        else:
+            _print_route_plan(execution_plan.to_dict())
+            console.print("[yellow]Nothing was published — no destination was ready.[/yellow]")
+        if plan_exit != EXIT_SUCCESS:
+            sys.exit(plan_exit)
+        return
+
+    engine = CrossPostEngine(config)
+
+    # Nothing can be published unless a resolved destination has a live
+    # uploader. That is no longer a refusal when the caller named destinations:
+    # an unconnected account is reported as ``skipped_unconnected`` (R3), not
+    # as an empty run. A refusal is still correct when *no* destination
+    # resolved at all (handled above) or when the request has nothing to post.
+
+    # G11 at the manual surface (D2): a media post fired outside the anti-bot
+    # window is QUEUED to the schedule store and reported as deferred, not
+    # failed — the user's intent survives in a real, visible entry with the
+    # time it will fire. `--now` overrides for a deliberate midnight post;
+    # `--dry-run` must not mutate the store, so it only reports the verdict.
+    # A route with no live uploader is not deferred: there is nothing to retry.
+    publishable = _engine_can_publish(engine, targets)
+    if not now and publishable:
+        from xpst.services.manual_defer import defer_manual_post_to_schedule
+
+        deferral = defer_manual_post_to_schedule(config, request, verdict["route"])
+        if deferral is not None:
+            if deferral.get("paused"):
+                # Refused because the deployment is paused: nothing was
+                # queued and nothing was uploaded, so this is not a
+                # deferral and not a success — say it and exit non-zero.
+                if as_json:
+                    json_output(
+                        {
+                            "paused": True,
+                            "deferred": False,
+                            "reason": deferral["reason"],
+                            "message": deferral["message"],
+                            "content_type": verdict["effective_content_type"],
+                            "exit_code": EXIT_GENERAL,
+                        },
+                        True,
+                    )
+                else:
+                    console.print(f"[red]Refused:[/red] {deferral['message']}")
+                sys.exit(EXIT_GENERAL)
+            if as_json:
+                json_output(
+                    {
+                        "deferred": True,
+                        "reason": deferral["reason"],
+                        "resume_after": deferral["resume_after"],
+                        "scheduled": deferral["scheduled"],
+                        "message": deferral["message"],
+                        "content_type": verdict["effective_content_type"],
+                    },
+                    True,
+                )
+            else:
+                console.print(f"[yellow]Deferred:[/yellow] {deferral['message']}")
+            return
+
+    # Route through the shared pidfile helper: a manual post may run even
+    # while a daemon/watch instance holds the pidfile (advisory semantics —
+    # warn, never block a deliberate user action).
+    from xpst.utils.pidfile import PidfileLock
+
+    _pid = PidfileLock(config.config_dir)
+    if _pid.verify():
+        if not quiet:
+            console.print(
+                "[yellow]Note:[/yellow] Another xPST instance is running — "
+                "manual post proceeds."
+            )
+
+    if verdict["route"] == PUBLISH_ROUTE_TEXT:
+        # The text route reads one text per destination, so a per-destination
+        # override is honoured (and validated) here too. A text post is never
+        # window-gated, so `now` has nothing to bypass on this route.
+        per_destination = {
+            platform: request.text_for(platform)
+            for platform in request.platforms
+            if request.override_for(platform) is not None
+        }
+        result = asyncio.run(
+            engine.post_text(body, posting_targets, per_destination=per_destination or None)
+        )
+    elif verdict["route"] == PUBLISH_ROUTE_IMAGE:
+        # D1 fix: an image post takes the IMAGE route. The CLI used to branch
+        # on media count and send every single-file post — image included —
+        # through post_manual, the VIDEO path, so `xpst post -v photo.jpg`
+        # crashed inside the X video uploader ('NoneType' has no attribute
+        # 'mime') while the engine's own publish_request routed the same
+        # request correctly. The route decision is taken once, by the shared
+        # content contract, and the CLI follows it like every other surface.
+        result = asyncio.run(
+            engine.post_manual_image(media_paths[0], body, posting_targets, force_now=now)
+        )
+    elif verdict["route"] == PUBLISH_ROUTE_CAROUSEL:
+        result = asyncio.run(
+            engine.post_manual_carousel(media_paths, body, posting_targets, per_platform_captions,
+                                        force_now=now)
+        )
+    elif verdict["route"] == PUBLISH_ROUTE_VIDEO:
+        result = asyncio.run(
+            engine.post_manual(
+                media_paths[0],
+                body,
+                posting_targets,
+                per_platform_captions,
+                visibility=visibility,
+                video_mode=video_mode,
+                force_now=now,
+            )
+        )
+    else:
+        # No publishing path for this content type (a plugin destination, or a
+        # type no uploader implements). Refuse with one row per destination,
+        # exactly like the engine's own contract entry point and the MCP
+        # surface — never upload a file "as a video just in case".
+        result = asyncio.run(engine.post_request(request))
+
+    # Complete the report with the destinations the plan did not attempt, so an
+    # unconnected/unsupported destination is visible (never a silent drop).
+    merge_plan_destinations(result, execution_plan)
+
+    quota_blocked = [
+        p for p, ur in result.results.items()
+        if not ur.success and "QUOTA_EXHAUSTED" in (ur.error or "")
+    ]
+
+    # The verdict: one rule for every post path (see _post_exit_code above).
+    exit_code = _post_exit_code(result, targets)
+    states = {
+        platform: classify_upload_result(platform, upload)
+        for platform, upload in result.results.items()
+    }
+    status = outcome_state(states)
+
+    if as_json:
+        out = _result_to_dict(result)
+        # The copy each destination actually received, so a per-destination
+        # override is visible in the machine-readable outcome.
+        if result.captions:
+            out["captions"] = dict(result.captions)
+        out["content_type"] = verdict["effective_content_type"]
+        out["content"] = verdict
+        # The canonical destination states (R3): a requested-but-unconnected
+        # destination is `skipped_unconnected` — visible, and not a failure.
+        out["destinations"] = [states[platform] for platform in targets if platform in states]
+        out["skipped_unconnected"] = [
+            platform for platform, state in states.items() if state["state"] == "skipped_unconnected"
+        ]
+        out["status"] = status
+        # F2: the machine-readable outcome says who ignored --visibility too —
+        # a caller must not have to read human text to learn that the post is
+        # public on a destination with no private mode. Emitted only when there
+        # is something to say, so the default path's payload shape is unchanged
+        # (pinned by test_cli_post_exit_status).
+        if visibility_advisories:
+            out["visibility_warnings"] = visibility_advisories
+        if quota_blocked:
+            out["error"] = {
+                "code": "QUOTA_EXHAUSTED",
+                "message": "Daily upload quota exhausted; no upload was attempted",
+                "platforms": quota_blocked,
+            }
+        if exit_code != EXIT_SUCCESS:
+            out["exit_code"] = exit_code
+        json_output(out, True)
+    else:
+        _display_result(result)
+        if quota_blocked and not quiet:
+            console.print(
+                f"[red]Error: QUOTA_EXHAUSTED — daily upload quota exhausted for: "
+                f"{', '.join(quota_blocked)}. No upload was attempted. "
+                f"Quota resets at midnight.[/red]"
+            )
+        elif exit_code != EXIT_SUCCESS and not quiet:
+            console.print(f"[red]Error:[/red] {_post_failure_message(exit_code)}")
+
+    # Exit non-zero when nothing was published, so scripts, schedulers, and
+    # MCP/agent wrappers detect the failure instead of reading a failed post as
+    # success. A partial success still exits 0; the per-platform detail lives in
+    # the JSON payload (unchanged).
+    if exit_code != EXIT_SUCCESS:
+        sys.exit(exit_code)
+
+
+@main.command("preflight")
+@click.argument("media", nargs=-1, type=click.Path())
+@click.option("--caption", "-c", default="", help="Caption/body the post would carry")
+@click.option("--text", "-t", default=None, help="Text body of a text-only post")
+@click.option(
+    "--format",
+    "format_",
+    default="auto",
+    show_default=True,
+    type=click.Choice(["auto", "video", "image", "carousel", "text", "thread"], case_sensitive=False),
+    help="Format to route. 'auto' classifies the media the same way a post would.",
+)
+@click.option(
+    "--platforms",
+    "--platform",
+    "-p",
+    default=None,
+    help="Explicit destinations. Without it: format route ∩ connected accounts.",
+)
+@click.option(
+    "--all",
+    "all_connected",
+    is_flag=True,
+    help="Explicitly plan for every connected account that accepts this format.",
+)
+@click.option("--transform", "show_transform", is_flag=True, help="Include the per-destination rendition plan (needs ffmpeg)")
+@click.option(
+    "--visibility",
+    type=click.Choice(["public", "unlisted", "private"]),
+    default=None,
+    help=(
+        "Ask for an upload-time visibility in this plan. A destination whose "
+        "route cannot honour it is refused (refused_visibility) instead of "
+        "being planned as a public post."
+    ),
+)
+@json_option
+@click.pass_context
+def preflight_cmd(
+    ctx: click.Context,
+    media: tuple[str, ...],
+    caption: str,
+    text: str | None,
+    format_: str,
+    platforms: str | None,
+    all_connected: bool,
+    show_transform: bool,
+    visibility: str | None,
+    as_json: bool,
+):
+    """Resolve the per-destination plan BEFORE anything is published.
+
+    Prints the capability-driven route (R4): for each destination, whether it
+    will publish (posted), is not connected (skipped_unconnected, with the
+    connect command), or cannot take this format (unsupported_format, with the
+    envelope). Makes no network call and uploads nothing.
+    """
+    from xpst.services.route_plan import build_route_plan
+
+    config = load_config(ctx.obj.get("config_path"))
+    quiet = ctx.obj.get("quiet", False)
+    setup_logging(log_level=config.monitoring.log_level, log_file=None)
+
+    platform_list = platforms.split(",") if platforms else None
+    if platform_list and all_connected:
+        raise click.UsageError("Use either --platforms or --all, not both.")
+    body = text if text is not None else caption
+    content_type = None if format_ == "auto" else format_
+    if text is not None and format_ == "auto":
+        content_type = "text"
+
+    plan = build_route_plan(
+        config,
+        media_paths=[str(item) for item in media],
+        caption=body,
+        content_type=content_type if content_type is not None else "auto",
+        requested=platform_list,
+        all_connected=all_connected,
+        include_transform=show_transform,
+        visibility=visibility,
+    )
+    payload = plan.to_dict()
+
+    if as_json:
+        json_output(payload, True)
+    else:
+        if not quiet:
+            console.print("[bold blue]Preflight — resolved route[/bold blue]")
+        console.print(
+            f"  Format: {payload['content_type']}   "
+            f"Target source: {payload['source']}   "
+            f"Network calls: none"
+        )
+        if payload["destinations"]:
+            for item in payload["destinations"]:
+                state = item["state"]
+                colour = {"posted": "green", "skipped_unconnected": "yellow"}.get(state, "red")
+                console.print(
+                    f"  • {item['platform']}: [{colour}]{state}[/{colour}] — {item['reason']}"
+                )
+                envelope = item.get("envelope") or {}
+                video = envelope.get("video") or {}
+                image = envelope.get("image") or {}
+                limits = []
+                if video.get("max_duration_seconds"):
+                    limits.append(f"video ≤{video['max_duration_seconds']}s")
+                if video.get("max_bytes"):
+                    limits.append(f"≤{_human_size(int(video['max_bytes']))}")
+                if image.get("max_bytes"):
+                    limits.append(f"image ≤{_human_size(int(image['max_bytes']))}")
+                if (envelope.get("caption") or {}).get("max_characters"):
+                    limits.append(f"caption ≤{envelope['caption']['max_characters']} chars")
+                # A refusal already carries the envelope in its reason.
+                if limits and item["state"] == "posted":
+                    console.print(f"      envelope: {', '.join(limits)}")
+                # Advisories and the rendition plan are shown for every state:
+                # a human deciding whether to fire the post needs to know the
+                # destination will re-encode (soft ceiling) or that nothing
+                # was computed, not only what the JSON says.
+                _print_destination_advisories(item)
+        else:
+            console.print("  [red]No destination resolved.[/red]")
+        if payload.get("error"):
+            console.print(f"  [red]{payload['error']['code']}:[/red] {payload['error']['message']}")
+        if payload["posting_destinations"]:
+            console.print(
+                "[green]Would publish to:[/green] " + ", ".join(payload["posting_destinations"])
+            )
+        elif payload.get("error"):
+            console.print("  Nothing would be published.")
+        else:
+            console.print("[yellow]Nothing would be published to any destination.[/yellow]")
+
+    if payload.get("error"):
+        ctx.exit(EXIT_CONFIG_ERROR)
+    if not payload["posting_destinations"]:
+        ctx.exit(EXIT_GENERAL)
+
+
+@main.command("verify-media")
+@click.argument("file", type=click.Path(exists=True))
+@click.option(
+    "--platform", "-p", default="all",
+    type=click.Choice(["all", "youtube", "tiktok", "instagram", "x", "threads"]),
+    help="Platform spec to verify against (default: all)",
+)
+@click.option(
+    "--plan", "show_plan", is_flag=True,
+    help="Also show the transformation plan (dry-run): what the pipeline would do to this file per platform",
+)
+@json_option
+@click.pass_context
+def verify_media_cmd(
+    ctx: click.Context,
+    file: str,
+    platform: str,
+    show_plan: bool,
+    as_json: bool,
+):
+    """Pre-flight: verify a media file against platform specs BEFORE upload.
+
+    Reports hard errors (the platform would reject or mangle the file) and
+    warnings (the platform would re-encode / shift loudness). Exit code 1
+    when any error was found for the selected platform(s).
+    """
+    from xpst.media.pipeline import TransformPlan, describe_plan
+    from xpst.media.specs import Check, MediaReport, format_report
+    from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
+
+    quiet = ctx.obj.get("quiet", False)
+    setup_logging(
+        log_level="WARNING" if quiet else "INFO",
+        log_file=None,
+    )
+
+    media_path = Path(file)
+    # D4: the config decides what "all" means, the same rule every post path
+    # uses (`resolve_destinations(None)` → enabled destinations only). A
+    # destination switched off in configuration cannot reject the upload, so it
+    # must not fail the exit code: `-p all` used to exit 1 solely on a disabled
+    # Threads' THREADS_NEEDS_URL. An explicit `-p threads` still verifies
+    # against Threads (the user named it) — but says the destination is
+    # disabled so the verdict is not misread as an upload blocker.
+    from xpst.services.post_preflight import enabled_destinations
+
+    config_all = load_config(ctx.obj.get("config_path"))
+    # `-p all` resolves to the enabled destinations (below, via
+    # enabled_destinations) — with no fallback to a hardcoded five: when
+    # nothing is enabled, the plan carries NO_DESTINATIONS, which is the
+    # truth the post path would give.
+    platforms = enabled_destinations(config_all) if platform == "all" else [platform]
+    disabled = [
+        name for name in platforms
+        if not bool(getattr(getattr(config_all, name, None), "enabled", False))
+    ]
+
+    # This is deliberately the same side-effect-free service used by future
+    # desktop and MCP clients. Readiness is omitted here for compatibility:
+    # verify-media historically reported only local media checks.
+    config = config_all if show_plan else None
+    request = PostPlanRequest(
+        media_paths=(media_path,),
+        target_platforms=tuple(platforms),
+        config=config,
+        include_transform=show_plan,
+        include_readiness=False,
+    )
+    post_plan = PostPreflightService(config).plan(request)
+    reports = []
+    for name in platforms:
+        platform_plan = post_plan.platforms[name]
+        media_item = platform_plan.media[0]
+        checks = [Check(**check) for check in media_item.media_spec.get("checks", [])]
+        known_codes = {check.name for check in checks}
+        # A hard blocker is added only when it carries a fact the spec checks do
+        # not already show. Matching on the message as well as the code matters
+        # for checks whose preflight code differs from the check name
+        # (``modality`` → ``MEDIA_MODALITY_UNSUPPORTED``): without it the same
+        # refusal was printed twice.
+        known_messages = {check.detail for check in checks}
+        checks.extend(
+            Check(name=issue.code, status="error", detail=issue.message)
+            for issue in platform_plan.hard_blockers
+            if issue.media_path == str(media_path)
+            and issue.code not in known_codes
+            and issue.message not in known_messages
+        )
+        reports.append(
+            MediaReport(
+                path=media_item.media_spec.get("path", str(media_path)),
+                platform=name,
+                checks=checks,
+                probe=media_item.media_spec.get("probe"),
+            )
+        )
+    plans = [
+        post_plan.platforms[name].transform
+        or TransformPlan(platform=name, action="transcode", reasons=["media transform unavailable"])
+        for name in platforms
+    ]
+    ok = post_plan.ok
+    if as_json:
+        json_output(
+            {
+                "file": str(media_path),
+                "ok": ok,
+                "reports": [r.to_dict() for r in reports],
+                **(
+                    {"disabled_platforms": disabled} if platform != "all" and disabled else {}
+                ),
+                **({"post_plan": post_plan.to_dict()} if show_plan else {}),
+                **({"plans": [p.to_dict() for p in plans]} if show_plan else {}),
+            },
+            True,
+        )
+    else:
+        console.print(f"[bold blue]Verifying {media_path}[/bold blue]")
+        for report in reports:
+            console.print(format_report(report))
+        if platform != "all" and disabled:
+            console.print(
+                f"[dim]Note: {', '.join(disabled)} {'is' if len(disabled) == 1 else 'are'} "
+                "disabled in local configuration — this check is informational; "
+                "a disabled destination would not be posted to at all.[/dim]"
+            )
+        if show_plan:
+            console.print("[bold blue]Transformation plan (dry run):[/bold blue]")
+            for p in plans:
+                console.print(f"  • {describe_plan(p)}")
+        if not ok:
+            console.print("[red]Pre-flight FAILED — fix the [FAIL] items before uploading.[/red]")
+        elif any(r.warnings for r in reports):
+            console.print("[yellow]Uploadable, but warnings above mean the platform will re-encode/adjust.[/yellow]")
+        else:
+            console.print("[green]All checks passed — max fidelity for the selected platform(s).[/green]")
+
+    if not ok:
+        sys.exit(EXIT_GENERAL)
+
+
+@main.command()
+@click.option("--platforms", "-p", default=None, help="Comma-separated platforms")
+@click.option("--limit", "-l", default=10, help="Maximum videos to backfill")
+@click.option("--dry-run", "dry_run", is_flag=True, help="Show what would be backfilled without uploading")
+@json_option
+@click.pass_context
+def backfill(ctx: click.Context, platforms: str | None, limit: int, dry_run: bool, as_json: bool):
+    """Retry failed or incomplete posts"""
+    config = load_config(ctx.obj.get("config_path"))
+    quiet = ctx.obj.get("quiet", False)
+    setup_logging(
+        log_level=config.monitoring.log_level,
+        log_file=config.monitoring.log_file,
+    )
+
+    platform_list = platforms.split(",") if platforms else None
+
+    engine = CrossPostEngine(config)
+
+    if dry_run:
+        target_platforms = platform_list or list(engine._platforms.keys())
+        # Find videos that need backfilling
+        candidates = []
+        for video_id, video_data in list(engine.state.state["posted_videos"].items())[:limit]:
+            missing = [p for p in target_platforms if p not in video_data.get("posted_to", {})]
+            if missing:
+                candidates.append({"video_id": video_id, "missing_platforms": missing})
+        if as_json:
+            json_output({"dry_run": True, "candidates": candidates}, True)
+        else:
+            if not quiet:
+                console.print(f"[bold blue]Dry run — {len(candidates)} videos need backfilling:[/bold blue]")
+            for c in candidates:
+                console.print(f"  {c['video_id']} → {', '.join(c['missing_platforms'])}")
+        return
+
+    if not as_json and not quiet:
+        console.print(f"[bold blue]Backfilling (limit: {limit})...[/bold blue]")
+
+    results = asyncio.run(engine.backfill(platform_list, limit))
+
+    exit_code = _aggregate_post_exit_code(results)
+
+    if as_json:
+        out = [_result_to_dict(r) for r in results]
+        payload = {"status": "ok", "results": out}
+        if exit_code != EXIT_SUCCESS:
+            # The payload keeps its shape; a failed batch names its exit code.
+            payload["exit_code"] = exit_code
+        json_output(payload, True)
+    else:
+        for result in results:
+            _display_result(result)
+        if exit_code != EXIT_SUCCESS and not quiet:
+            console.print(f"[bold red]{_post_failure_message(exit_code)}[/bold red]")
+
+    if exit_code != EXIT_SUCCESS:
+        # Every backfill attempt failed: the exit status must say so.
+        sys.exit(exit_code)
+
+
+@main.command()
+@json_option
+@click.pass_context
+def status(ctx: click.Context, as_json: bool):
+    """Show health status"""
+    config = load_config(ctx.obj.get("config_path"))
+
+    _maybe_show_onboarding_hint(
+        config, as_json, bool(ctx.obj.get("quiet", False))
+    )
+
+    # Load state
+    state = StateManager(config.config_dir)
+    stats = state.get_statistics()
+
+    if as_json:
+        json_output(stats, True)
+        return
+
+    console.print("[bold blue]xPST Health Status[/bold blue]\n")
+
+    # Create status table
+    table = Table(title="Statistics")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+
+    table.add_row("Total Videos Tracked", str(stats["total_videos_tracked"]))
+    table.add_row("Total Processed", str(stats["total_processed"]))
+    table.add_row("Last Check", stats.get("last_check", "Never"))
+
+    for platform, count in stats["by_platform"].items():
+        table.add_row(f"  {platform.title()}", str(count))
+
+    console.print(table)
+
+    # Platform health. These counters are local post history, never a live
+    # check (F7): a retired API path leaves a pile of "failures" that says
+    # nothing about today. Say so where a human reads it.
+    console.print(
+        "\n[bold]Platform Health (historical — local post history; "
+        "run `xpst doctor` for live readiness):[/bold]"
+    )
+    for platform, health in stats["platform_health"].items():
+        status_icon = "✅" if health["status"] == "ok" else "❌"
+        console.print(f"  {status_icon} {platform.title()}: {health['status']}")
+        if health.get("failures", 0) > 0:
+            console.print(f"     Failures: {health['failures']}")
+        if health.get("last_success"):
+            console.print(f"     Last success: {health['last_success']}")
+
+    # Dead letter queue
+    dlq = state.get_dead_letter_queue()
+    if dlq:
+        console.print(f"\n[bold red]Dead Letter Queue ({len(dlq)} items):[/bold red]")
+        for item in dlq[:5]:
+            console.print(f"  - {item['video_id']} → {item['platform']}: {item.get('errors', 'Unknown')}")
+
+    # Quota status
+    quota_mgr = QuotaManager(config.config_dir)
+    quota_status = quota_mgr.get_status()
+    if quota_status:
+        console.print("\n[bold]API Quotas:[/bold]")
+        quota_table = Table(show_header=True, header_style="bold")
+        quota_table.add_column("Platform")
+        quota_table.add_column("Used Today")
+        quota_table.add_column("Daily Limit")
+        quota_table.add_column("Remaining")
+
+        for platform_name, info in quota_status.items():
+            quota_table.add_row(
+                platform_name.title(),
+                str(info["used_today"]),
+                str(info["daily_limit"]),
+                str(info["remaining"]),
+            )
+
+        console.print(quota_table)
+
+
+@main.command()
+@json_option
+@click.pass_context
+def quota(ctx: click.Context, as_json: bool):
+    """Show API quota usage and remaining uploads per platform.
+
+    Displays the daily upload allowance, used/remaining counts and auth mode.
+    YouTube uploads bill to their own ``videos.insert`` quota bucket — 100
+    calls/day at 1 unit per call (Google Quota Calculator, updated 2026-11-12;
+    granular buckets since 2026-06-01), separate from the 10,000-unit pool the
+    other endpoints share. The daily limit shown is xPST's operator cap, not
+    the platform ceiling; both are printed.
+    """
+    config = load_config(ctx.obj.get("config_path"))
+    quota_mgr = QuotaManager(config.config_dir, config=config)
+    status = quota_mgr.get_detailed_status()
+
+    if as_json:
+        json_output(status, True)
+        return
+
+    # Rich table output
+    table = Table(show_header=True, header_style="bold", title="📊 API Quota Status")
+    table.add_column("Platform")
+    table.add_column("Auth Mode")
+    table.add_column("Used Today")
+    table.add_column("Daily Limit")
+    table.add_column("Remaining")
+    table.add_column("Details")
+
+    for platform_name, info in status.items():
+        used = info.get("used_today", 0)
+        limit = info.get("daily_limit", 0)
+        remaining = info.get("remaining", 0)
+        auth_mode = info.get("auth_mode", "—")
+
+        # Color-code remaining (None = no cap / unlimited tracking)
+        if remaining is None:
+            remaining_str = "[dim]unlimited[/dim]"
+        elif remaining == 0:
+            remaining_str = f"[red]{remaining}[/red]"
+        elif remaining <= 2:
+            remaining_str = f"[yellow]{remaining}[/yellow]"
+        else:
+            remaining_str = f"[green]{remaining}[/green]"
+
+        # YouTube-specific bucket info (uploads have their own quota bucket)
+        details = ""
+        if platform_name == "youtube" and "quota_units" in info:
+            units = info["quota_units"]
+            details = (
+                f"{units['used_calls']}/{units['platform_ceiling_per_day']} "
+                f"uploads today (bucket ceiling)"
+            )
+
+        table.add_row(
+            platform_name.title(),
+            auth_mode,
+            str(used),
+            str(limit),
+            remaining_str,
+            details,
+        )
+
+    console.print(table)
+
+    # YouTube upload-bucket breakdown
+    yt_units = quota_mgr.get_youtube_quota_units()
+    cap = yt_units["operator_cap_per_day"]
+    cap_text = f"xPST's {cap} uploads/day cap" if cap else "no xPST uploads/day cap"
+    console.print(
+        f"\n[dim]YouTube uploads: {yt_units['used_calls']}/"
+        f"{yt_units['platform_ceiling_per_day']} calls used today in the "
+        f"videos.insert bucket ({yt_units['remaining_uploads']} left under {cap_text})[/dim]"
+    )
+    console.print(
+        "[dim]Other YouTube Data API endpoints share "
+        f"{yt_units['other_endpoints_units_per_day']:,} units/day.[/dim]"
+    )
+    console.print(f"[dim]X Free tier: {QuotaManager.X_MONTHLY_LIMIT:,} posts/month limit[/dim]")
+
+
+@main.command()
+@click.option("--fix", "fix_local", is_flag=True, help="Create missing local folders and save safe defaults")
+@json_option
+@click.pass_context
+def readiness(ctx: click.Context, fix_local: bool, as_json: bool):
+    """Show first-run readiness and next actions"""
+    from xpst.readiness import build_readiness_report, repair_local_setup
+
+    config = load_config(ctx.obj.get("config_path"))
+    if fix_local:
+        result = repair_local_setup(config, ctx.obj.get("config_path"))
+        if as_json:
+            json_output(result, True)
+        else:
+            console.print("[green]Local setup repaired[/green]")
+            for action in result["actions"]:
+                console.print(f"  {action}")
+            console.print(result["readiness"]["summary"])
+        return
+
+    report = build_readiness_report(config)
+
+    if as_json:
+        json_output(report.to_dict(), True)
+        return
+
+    console.print("[bold blue]xPST Readiness[/bold blue]\n")
+    console.print(report.summary)
+    table = Table(title="Setup Checks")
+    table.add_column("Status")
+    table.add_column("Check", style="cyan")
+    table.add_column("Message")
+    table.add_column("Next Action")
+    for check in report.checks:
+        icon = "OK" if check.ok else "FIX" if check.severity == "error" else "WARN"
+        table.add_row(icon, check.label, check.message, check.action or "-")
+    console.print(table)
+
+
+@main.command()
+@json_option
+@click.pass_context
+def providers(ctx: click.Context, as_json: bool):
+    """Show supported providers and their canonical roles."""
+    from xpst.platforms.base import PlatformRegistry
+    from xpst.provider_truth import canonical_provider_catalog
+    from xpst.sources.base import SourceRegistry
+
+    config = load_config(ctx.obj.get("config_path"))
+    SourceRegistry.auto_discover()
+    PlatformRegistry.auto_discover()
+    sources = SourceRegistry.list_manifests(config)
+    destinations = PlatformRegistry.list_manifests(config)
+    canonical = canonical_provider_catalog(config)
+    data: dict[str, Any] = {
+        "sources": [manifest.to_dict() for manifest in sorted(sources, key=lambda item: item.name)],
+        "destinations": [
+            manifest.to_dict()
+            for manifest in sorted(destinations, key=lambda item: item.name)
+        ],
+        "providers": canonical["providers"],
+        "video_destinations": [
+            item for item in canonical["providers"] if "video_destination" in item["roles"]
+        ],
+        "messaging": [item for item in canonical["providers"] if "messaging" in item["roles"]],
+        "analytics": [item for item in canonical["providers"] if "analytics" in item["roles"]],
+        "roles": canonical["roles"],
+        "provider_mode": config.provider_mode,
+    }
+
+    # Add provider mode per platform (F1.8)
+    for dest in data["destinations"]:
+        platform_name = str(dest["name"])
+        dest["provider_mode"] = (
+            "community" if config.is_community_platform(platform_name) else "official"
+        )
+        dest["visible"] = config.should_show_platform(platform_name)
+
+    if as_json:
+        json_output(data, True)
+        return
+
+    for title, manifests in (("Sources", data["sources"]), ("Destinations", data["destinations"])):
+        table = Table(title=title)
+        table.add_column("Provider", style="cyan")
+        table.add_column("Mode")
+        table.add_column("Official API")
+        table.add_column("Auth")
+        for manifest in manifests:
+            mode = manifest.get("provider_mode", "official")
+            table.add_row(
+                str(manifest["display_name"]),
+                mode,
+                "yes" if manifest["is_official_api"] else "no",
+                str(manifest["auth_mode"]),
+            )
+        console.print(table)
+
+
+def _human_size(value: int | None) -> str:
+    """Byte ceiling in whole MB/GB/TB (display only; the JSON keeps bytes)."""
+    if not value:
+        return "—"
+    for unit, size in (("TB", 1024**4), ("GB", 1024**3), ("MB", 1024**2)):
+        if value >= size:
+            amount = value / size
+            return f"{amount:.0f} {unit}" if amount >= 10 else f"{amount:.1f} {unit}"
+    return f"{value} B"
+
+
+def _capability_envelope_text(document: dict, platform: str) -> str:
+    """One-line envelope for the capabilities table (same numbers as the JSON)."""
+    envelope = (document.get("envelopes") or {}).get(platform) or {}
+    video = envelope.get("video") or {}
+    image = envelope.get("image") or {}
+    caption = (envelope.get("caption") or {}).get("max_characters")
+    parts: list[str] = []
+    if video.get("max_duration_seconds"):
+        parts.append(f"video ≤{video['max_duration_seconds']}s")
+    if video.get("max_bytes"):
+        parts.append(f"≤{int(video['max_bytes']) // (1024 * 1024)} MB")
+    if image.get("max_bytes"):
+        parts.append(f"image ≤{int(image['max_bytes']) // (1024 * 1024)} MB")
+    if caption:
+        parts.append(f"text ≤{caption} ch")
+    return ", ".join(parts) or "—"
+
+
+@main.command()
+@json_option
+@click.pass_context
+def capabilities(ctx: click.Context, as_json: bool):
+    """Show what xPST can publish, per destination, in the canonical vocabulary
+
+    Reads the content contract (the same document the MCP tool
+    ``xpst_capabilities`` and ``GET /api/capabilities`` return), so what a human
+    reads here is exactly what an agent plans against. A content type listed as
+    implemented has real code behind it; a destination that cannot post a type
+    does not declare it.
+    """
+    document = capability_document()
+
+    if as_json:
+        json_output(document, True)
+        return
+
+    if not ctx.obj.get("quiet", False):
+        console.print("[bold blue]What xPST can publish[/bold blue]")
+        console.print("[dim]Vocabulary: " + ", ".join(document["content_types"]) + "[/dim]\n")
+
+    table = Table(title="Declared vs implemented")
+    table.add_column("Destination", style="cyan")
+    table.add_column("Declared")
+    table.add_column("Implemented")
+    table.add_column("Envelope")
+    table.add_column("Notes")
+    for platform in sorted(document["platforms"]):
+        profile = document["platforms"][platform]
+        declared = ", ".join(profile["declared"]) or "—"
+        implemented = ", ".join(profile["implemented"]) or "—"
+        note = profile.get("note") or ""
+        if profile.get("declared_but_unimplemented"):
+            note = (note + " " if note else "") + (
+                "FALSE DECLARATION: " + ", ".join(profile["declared_but_unimplemented"])
+            )
+        table.add_row(
+            f"{profile['display_name']} ({platform})",
+            declared,
+            implemented,
+            _capability_envelope_text(document, platform),
+            note,
+        )
+    console.print(table)
+
+    if document["declared_but_unimplemented"]:
+        console.print(
+            "[red]A destination declares a content type with no implementation: "
+            + ", ".join(f"{platform}={types}" for platform, types in document["declared_but_unimplemented"].items())
+            + "[/red]"
+        )
+
+
+@main.command()
+@json_option
+@click.pass_context
+def health(ctx: click.Context, as_json: bool):
+    """Test connectivity to all platforms (no uploads)"""
+    config = load_config(ctx.obj.get("config_path"))
+    setup_logging(
+        log_level=config.monitoring.log_level,
+        log_file=config.monitoring.log_file,
+    )
+
+    if not as_json:
+        console.print("[bold blue]xPST - Platform Health Check[/bold blue]\n")
+        console.print("[dim]Testing connectivity to all platforms (no uploads)...[/dim]\n")
+
+    engine = CrossPostEngine(config)
+    # Platform auth facts come from the canonical live probe that every other
+    # surface renders from (``auth status``, ``doctor``, MCP, HTTP). ``health``
+    # used to probe platforms on its own path, which let it report a different
+    # verdict than ``doctor`` for the same account on the same box; the engine
+    # is still asked for sources/quotas/state/circuit breakers.
+    from xpst.auth_status import collect_live_auth_status, platform_health_entries
+
+    health_data = asyncio.run(engine.check_health(include_platforms=False))
+    health_data["platforms"] = platform_health_entries(collect_live_auth_status(config))
+    health_data["sessions"] = _session_health(config)
+    # Rate-limit cooldowns are local, persisted state (no probe, no upload), so
+    # they belong in every health answer: without them the only way to see why
+    # a platform was skipped was to read rate_cooldowns.json by hand.
+    from xpst.rate_limit_status import cooldown_report
+
+    health_data["rate_limit_cooldowns"] = cooldown_report(config)
+    # Connectivity: without it every "not authenticated"/timeout below is
+    # ambiguous, so state the network answer explicitly and first.
+    from xpst.utils.net import check_network
+
+    network = check_network()
+    health_data["network"] = network.to_dict()
+
+    if as_json:
+        json_output(health_data, True)
+        return
+
+    if not network.online:
+        console.print(
+            f"[bold red]⚠️  OFFLINE:[/bold red] {network.detail}\n"
+            "[dim]xPST is running from local state; every platform check "
+            "below is limited until connectivity returns.[/dim]\n"
+        )
+
+    # ── Stored sessions (G53: expired sessions fail silently otherwise) ──
+    console.print("[bold]Stored Sessions:[/bold]")
+    for name, info in health_data["sessions"].items():
+        if not info["present"]:
+            console.print(f"  ⚪ {name.title()}: no stored session")
+            continue
+        age = info["age_days"]
+        flag = "⚠️" if (age is not None and age > 30) else "✅"
+        age_text = f"{age}d old" if age is not None else "age unknown"
+        console.print(f"  {flag} {name.title()}: session file present ({age_text})")
+        if age is not None and age > 30:
+            console.print(
+                f"     [yellow]Session is {age} days old — platforms commonly "
+                f"expire or challenge these; re-auth with `xpst connect {name}`[/yellow]"
+            )
+    console.print()
+
+    # ── TikTok Source ──
+    console.print("[bold]TikTok Source:[/bold]")
+    for source_name, source_health in health_data.get("sources", {}).items():
+        status_ok = source_health.get("status") == "ok"
+        icon = "✅" if status_ok else "❌"
+        console.print(f"  {icon} {source_name.title()}")
+
+        if source_health.get("yt_dlp_version"):
+            console.print(f"     yt-dlp version: {source_health['yt_dlp_version']}")
+        if source_health.get("yt_dlp_path"):
+            console.print(f"     yt-dlp path: {source_health['yt_dlp_path']}")
+        if source_health.get("username"):
+            console.print(f"     Username: @{source_health['username']}")
+        if source_health.get("cookies_available"):
+            console.print("     Cookies: available")
+        if not status_ok and source_health.get("error"):
+            console.print(f"     [red]Error: {source_health['error']}[/red]")
+
+    # ── Platforms ──
+    console.print("\n[bold]Platforms:[/bold]")
+
+    all_ok = True
+    for platform_name, platform_health in health_data.get("platforms", {}).items():
+        authenticated = platform_health.get("authenticated", False)
+        session_valid = platform_health.get("session_valid", False)
+        source_only = bool(platform_health.get("source_only"))
+
+        if source_only:
+            # The download side is what xPST uses; posting is not available at
+            # all, so this is neither a pass nor a failure to fix.
+            icon = "ℹ️"
+            status_text = "[cyan]Source only — not a posting destination[/cyan]"
+        elif authenticated and session_valid:
+            icon = "✅"
+            status_text = "[green]Connected[/green]"
+        elif authenticated:
+            icon = "⚠️"
+            status_text = "[yellow]Session may be expired[/yellow]"
+            all_ok = False
+        else:
+            icon = "❌"
+            status_text = "[red]Not authenticated[/red]"
+            all_ok = False
+
+        role = platform_health.get("posting_role")
+        console.print(
+            f"  {icon} {platform_name.title()}: {status_text}"
+            + (f" [dim](role: {role})[/dim]" if role else "")
+        )
+
+        details = platform_health.get("details", {})
+        if details.get("channel_name"):
+            console.print(f"     Channel: {details['channel_name']}")
+        if details.get("username"):
+            console.print(f"     Username: @{details['username']}")
+        if details.get("full_name"):
+            console.print(f"     Name: {details['full_name']}")
+
+        if source_only and platform_health.get("posting_note") and not platform_health.get("error"):
+            console.print(f"     {platform_health['posting_note']}")
+
+        error = platform_health.get("error")
+        if error:
+            console.print(f"     [red]Error: {error}[/red]")
+
+    # ── Circuit Breakers ──
+    cb_status = health_data.get("circuit_breakers", {})
+    if cb_status:
+        console.print("\n[bold]Circuit Breakers:[/bold]")
+        for cb_name, cb_data in cb_status.items():
+            state = cb_data.get("state", "unknown")
+            failures = cb_data.get("failure_count", 0)
+            if state == "open":
+                console.print(f"  🔴 {cb_name.title()}: OPEN ({failures} failures)")
+            elif state == "half_open":
+                console.print(f"  🟡 {cb_name.title()}: HALF-OPEN (testing)")
+            else:
+                console.print(f"  🟢 {cb_name.title()}: CLOSED (healthy)")
+
+    # ── Rate-limit cooldowns (persisted; survive a restart) ──
+    cooldowns = health_data.get("rate_limit_cooldowns") or {}
+    cooling = cooldowns.get("active") or []
+    console.print("\n[bold]Rate-limit Cooldowns:[/bold]")
+    if not cooling:
+        console.print("  🟢 none active")
+    else:
+        for cd_platform in cooling:
+            record = (cooldowns.get("cooldowns") or {}).get(cd_platform, {})
+            console.print(
+                f"  ⏳ {cd_platform.title()}: {record.get('remaining_human', '?')} remaining"
+                f" (strike {record.get('strikes', '?')}"
+                + (f", until {record['until_display']}" if record.get("until_display") else "")
+                + ")"
+            )
+            if record.get("last_reason"):
+                console.print(f"     [dim]{record['last_reason']}[/dim]")
+        console.print(f"  [dim]{cooldowns.get('note', '')}[/dim]")
+
+    # ── Quotas ──
+    quota_status = health_data.get("quotas", {})
+    if quota_status:
+        console.print("\n[bold]API Quotas:[/bold]")
+        for q_name, q_info in quota_status.items():
+            remaining = q_info.get("remaining", "?")
+            daily = q_info.get("daily_limit", "?")
+            console.print(f"  {q_name.title()}: {remaining}/{daily} uploads remaining today")
+
+    # ── Notifications ──
+    if config.notifications.enabled:
+        console.print("\n[bold]Notifications:[/bold]")
+        targets = []
+        if config.notifications.discord_webhook_url:
+            targets.append("Discord")
+        if config.notifications.telegram_bot_token:
+            targets.append("Telegram")
+        console.print(f"  ✅ Enabled ({', '.join(targets) if targets else 'no targets'})")
+    else:
+        console.print("\n[dim]Notifications: disabled[/dim]")
+
+    # ── Summary ──
+    console.print()
+    if all_ok and health_data.get("platforms"):
+        console.print("[bold green]✅ All platforms healthy![/bold green]")
+    elif not health_data.get("platforms"):
+        console.print("[yellow]⚠️ No platforms configured[/yellow]")
+    else:
+        console.print("[yellow]⚠️ Some platforms need attention[/yellow]")
+
+
+# ──────────────────────────────────────────────
+# Connect Command (streamlined wizard)
+# ──────────────────────────────────────────────
+
+@main.command()
+@click.argument("platform", required=False, type=click.Choice(GUIDE_PLATFORMS))
+@click.option("--guide", is_flag=True, help="Print the step-by-step setup guide for the platform (YouTube: Google Cloud OAuth) and exit")
+@click.option("--open-browser/--no-browser", default=None,
+              help="Allow/deny browser launches during account setup (default: TTY only)")
+@click.option("--test", "test_only", is_flag=True, help="Test existing connections only")
+@click.option("--dry-run", "dry_run", is_flag=True,
+              help="Show what connect would do (platform, steps, config impact) without connecting or writing config")
+@json_option
+@click.pass_context
+def connect(ctx: click.Context, platform: str | None, guide: bool, open_browser: bool | None, test_only: bool, dry_run: bool, as_json: bool):
+    """Connect social media accounts (one platform at a time)
+
+    Use when you need to link or re-link a SPECIFIC account, e.g.
+    `xpst connect instagram` after a session expires. For first-time
+    setup of everything at once, use `xpst wizard` instead.
+
+    Preview the setup steps without connecting anything:
+
+        xpst connect youtube --guide       # human-readable GCP checklist
+        xpst connect youtube --guide --json  # machine-readable
+    """
+    if guide:
+        _connect_guide(platform, as_json)
+        return
+
+    if dry_run:
+        from xpst.wizard import PLATFORM_GUIDES
+
+        targets = [platform] if platform else list(GUIDE_PLATFORMS)
+        plan: dict[str, Any] = {
+            "dry_run": True,
+            "platforms": targets,
+            "steps": {
+                p: [s.text for s in PLATFORM_GUIDES[p].steps] for p in targets
+            },
+            "config_impact": "accounts.<platform>.enabled=true + platform credentials",
+        }
+        if as_json:
+            json_output(plan, True)
+        else:
+            if not ctx.obj.get("quiet", False):
+                console.print("[bold blue]Dry run — connect plan (nothing connected):[/bold blue]")
+            for p in targets:
+                console.print(f"  [bold]{p}[/bold]:")
+                for i, step in enumerate(plan["steps"][p], 1):
+                    console.print(f"    {i}. {step}")
+        return
+
+    from xpst.connect import run_connect
+
+    # Agent-safety gate: the connection flow is a prompt-driven interactive
+    # wizard. On closed/piped stdin it must not prompt (EOFError churn),
+    # fall back to "yes" defaults (which would open browsers), or emit
+    # non-JSON output. Refuse cleanly instead — agents get data, not windows.
+    # stdin_is_interactive() (not bare isatty) because NUL/DEVNULL reports
+    # isatty() == True on Windows and would bypass this gate.
+    interactive = stdin_is_interactive()
+    if not interactive and not test_only:
+        message = (
+            "connect requires an interactive terminal. "
+            "Use `xpst connect <platform> --guide` for setup steps, "
+            "`xpst connect --test` for a non-mutating health check, "
+            "or `xpst wizard` for the agent-mode checklist."
+        )
+        if as_json:
+            json_output(_error_payload(
+                "INTERACTIVE_REQUIRED", message,
+                platform=platform, hint="xpst connect --test --json"), True)
+        else:
+            console.print("[red]connect requires an interactive terminal.[/red]")
+            console.print("[dim]Try:[/dim] xpst connect <platform> --guide  ·  "
+                          "xpst connect --test  ·  xpst wizard")
+        sys.exit(EXIT_AUTH_FAILURE)
+
+    if test_only and as_json:
+        import asyncio as _asyncio
+
+        from xpst.connect import test_connections
+
+        config = load_config(ctx.obj.get("config_path"))
+        with keep_stdout_json(True):
+            results = _asyncio.run(test_connections(config))
+        # A source-only platform is not a posting destination, and this payload
+        # must say so instead of just answering "false" about TikTok.
+        posting_truth = dict(getattr(results, "posting_truth", {}))
+        source_only = sorted(
+            name for name, truth in posting_truth.items() if truth.get("source_only")
+        )
+        if platform:
+            results = {p: ok for p, ok in results.items() if p == platform}
+            posting_truth = {p: t for p, t in posting_truth.items() if p == platform}
+            source_only = [name for name in source_only if name == platform]
+        failed = [
+            name for name, ok in results.items() if not ok and name not in source_only
+        ]
+        # Content sources are a separate capability: TikTok's download side can
+        # be ready while `platforms.tiktok` is false (not a posting destination).
+        providers = dict(getattr(results, "providers", {}))
+        ready_sources = sorted(
+            name
+            for name, entry in providers.items()
+            if (entry.get("role_status") or {}).get("source", {}).get("ready")
+        )
+        if platform:
+            ready_sources = [name for name in ready_sources if name == platform]
+        json_output(
+            {
+                "mode": "test",
+                "platforms": results,
+                "posting_truth": posting_truth,
+                "source_only": source_only,
+                "ready_sources": ready_sources,
+                "all_pass": bool(results) and not failed,
+            },
+            True,
+        )
+        if failed or not results:
+            sys.exit(EXIT_AUTH_FAILURE)
+        return
+
+    platforms = [platform] if platform else None
+    success = run_connect(
+        platforms=platforms,
+        test_only=test_only,
+        open_browser=open_browser,
+        config_path=ctx.obj.get("config_path"),
+    )
+    if not success:
+        sys.exit(EXIT_AUTH_FAILURE)
+
+
+def _connect_guide(platform: str | None, as_json: bool) -> None:
+    """Print the platform setup guide and exit (no config, no prompts).
+
+    Renders the same auto-generated guide the wizard uses
+    (:data:`xpst.wizard.PLATFORM_GUIDES`) so the two never drift — for every
+    platform, not just YouTube, because the non-TTY refusal message tells an
+    agent to run ``xpst connect <platform> --guide``. JSON output is also
+    enabled automatically on non-TTY stdout (group-level auto-JSON), matching
+    every other xPST command.
+    """
+    from xpst.wizard import PLATFORM_GUIDES, platform_guide_payload, youtube_guide_payload
+
+    key = str(platform or "youtube")
+    if key not in PLATFORM_GUIDES:
+        console.print(f"[red]--guide is not available for '{key}'.[/red]")
+        console.print(f"[dim]Known platforms: {', '.join(PLATFORM_GUIDES)}[/dim]")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    # YouTube keeps its richer payload (client-secrets path, app status).
+    payload = youtube_guide_payload() if key == "youtube" else platform_guide_payload(key)
+    if as_json:
+        json_output(payload, True)
+        return
+
+    guide = PLATFORM_GUIDES[key]
+    console.print(f"[bold]{guide.title} — setup guide[/bold]")
+    console.print(guide.why)
+    console.print()
+    for i, step in enumerate(guide.steps, 1):
+        console.print(f"  {i}. {step.text}")
+    console.print()
+    if guide.docs_url:
+        console.print(f"[dim]More details: {guide.docs_url}[/dim]")
+    console.print(f"[dim]When done, run [cyan]xpst connect {key}[/cyan] to link the account.[/dim]")
+
+
+@main.command()
+@click.argument("platform", required=True, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "facebook", "messenger", "bluesky"]))
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt (required in non-interactive/JSON mode)")
+@json_option
+@click.pass_context
+def disconnect(ctx: click.Context, platform: str, yes: bool, as_json: bool):
+    """Disconnect a platform: remove stored credentials and disable it.
+
+    The inverse of `xpst connect <platform>`: deletes the platform's stored
+    account credentials (tokens, cookies, session files) and sets
+    accounts.<platform>.enabled=false. Posted content and local state are
+    never touched.
+
+        xpst disconnect x           # remove X cookies + disable
+        xpst disconnect youtube --json
+    """
+    from xpst.connect import disconnect_platform
+
+    config = load_config(ctx.obj.get("config_path"))
+
+    # Destructive-action guard (mirrors `xpst delete`): non-interactive or
+    # JSON invocations must pass --yes explicitly.
+    if not yes and (as_json or not sys.stdin.isatty()):
+        message = (
+            "Refusing to disconnect without confirmation. Re-run with --yes "
+            "to confirm credential removal for this platform."
+        )
+        if as_json:
+            json_output(_error_payload(
+                "CONFIRMATION_REQUIRED", message,
+                platform=platform, hint="--yes"), True)
+        else:
+            console.print("[red]Refusing to disconnect without confirmation.[/red]")
+            console.print(f"[dim]Re-run with --yes to disconnect {platform}.[/dim]")
+        sys.exit(EXIT_GENERAL)
+    if not yes:
+        click.confirm(f"Disconnect {platform} (remove stored credentials)?", abort=True)
+
+    result = disconnect_platform(platform, config)
+
+    if as_json:
+        json_output(result, True)
+        return
+
+    if not ctx.obj.get("quiet", False):
+        if result.get("success"):
+            removed = result.get("removed") or []
+            if removed:
+                console.print(f"[green]✅ {platform.title()} disconnected.[/green] Removed: {', '.join(removed)}")
+            else:
+                console.print(f"[green]✅ {platform.title()} disconnected.[/green] No stored credentials found.")
+            if result.get("disabled"):
+                console.print(f"[dim]accounts.{platform}.enabled → false[/dim]")
+        else:
+            console.print(f"[red]❌ Disconnect failed: {result.get('error', 'unknown error')}[/red]")
+            sys.exit(EXIT_GENERAL)
+
+
+def _legacy_wizard_checklist(service: SetupTransactionService) -> list[dict[str, Any]]:
+    """Keep the old checklist shape while its state migrates to the service."""
+    from xpst.wizard import GUIDE_PLATFORMS, OPT_IN_PLATFORMS, PLATFORM_GUIDES
+
+    legacy_state: dict[str, Any] = {}
+    legacy_path = service.store.config_dir / "wizard_state.json"
+    try:
+        raw = _json.loads(legacy_path.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            legacy_state = raw
+    except (OSError, UnicodeDecodeError, ValueError):
+        pass
+    active = service.status() or {}
+    steps_by_platform = {
+        (step.get("role"), step.get("capability")): step
+        for step in active.get("steps", [])
+    }
+    checklist: list[dict[str, Any]] = []
+    for key in GUIDE_PLATFORMS:
+        guide = PLATFORM_GUIDES[key]
+        step = steps_by_platform.get(("source", key)) or steps_by_platform.get(("video_destination", key))
+        previous = legacy_state.get("platforms", {}).get(key, {})
+        checklist.append({
+            "platform": key,
+            "title": guide.title,
+            "why": guide.why,
+            "steps": [item.text for item in guide.steps],
+            "docs_url": guide.docs_url,
+            "opt_in": key in OPT_IN_PLATFORMS,
+            "health": "pass" if step and step.get("state") == "verified" else "fail",
+            "last_wizard_status": previous.get("status"),
+            "action": None if step and step.get("state") == "verified" else f"xpst wizard {key}",
+        })
+    return checklist
+
+
+@main.command()
+@click.argument("platform", required=False, type=click.Choice(GUIDE_PLATFORMS))
+@click.option("--export-md", "export_md", type=click.Path(), default=None, help="Export the step-by-step guide as markdown and exit")
+@click.option("--status", "show_status", is_flag=True, help="Show the active setup transaction")
+@click.option("--resume", "resume_transaction", is_flag=True, help="Resume the active setup transaction")
+@click.option("--finish-later", is_flag=True, help="Save an explicit resumable finish-later state")
+@click.option("--reset", "reset_transaction", is_flag=True, help="Reset the active setup transaction")
+@json_option
+def wizard(
+    platform: str | None,
+    export_md: str | None,
+    show_status: bool,
+    resume_transaction: bool,
+    finish_later: bool,
+    reset_transaction: bool,
+    as_json: bool,
+):
+    """Compatibility view of the canonical setup transaction.
+
+    ``wizard`` is a deprecated alias of ``setup``. It keeps guide export and
+    platform arguments for compatibility, but durable progress and completion
+    are owned by ``xpst setup``.
+    """
+    from xpst.wizard import export_markdown, run_wizard
+
+    if export_md:
+        path = export_markdown(export_md)
+        if as_json:
+            json_output({"exported": str(path), "alias": {"command": "wizard", "alias_of": "setup", "deprecated": True}}, True)
+        else:
+            console.print(f"[green]✅ Guide written to {path}[/green]")
+        return
+
+    # ``wizard`` does not load config or run probes in JSON/non-TTY mode. This
+    # is the important agent contract: pending human actions are data, never an
+    # input() or browser side effect.
+    ctx = click.get_current_context()
+    service = _setup_transaction_service(ctx)
+    if reset_transaction:
+        payload = service.reset_json(alias="wizard")
+    elif show_status:
+        payload = service.status_json(alias="wizard")
+    elif resume_transaction:
+        if service.status() is None:
+            service.start()
+        payload = service.resume_json(alias="wizard")
+    elif finish_later:
+        if service.status() is None:
+            service.start()
+        payload = service.resume_json(alias="wizard", finish_later=True)
+    else:
+        payload = service.start_json(alias="wizard")
+
+    if as_json or not stdin_is_interactive():
+        completion = payload.get("completion") or {}
+        payload.update({
+            "mode": "agent",
+            "interactive": False,
+            "all_pass": bool(completion.get("complete")),
+            "completed": bool(completion.get("complete")),
+            "next_action": (payload.get("pending_human_actions") or [{}])[0].get("label"),
+            "checklist": _legacy_wizard_checklist(service),
+        })
+        if payload.get("transaction_id") and not completion.get("complete") and not reset_transaction and not show_status and not finish_later:
+            payload = _setup_pending_payload(payload, "wizard")
+        json_output(payload, True)
+        if payload.get("error") and payload["error"].get("code") == "INTERACTIVE_REQUIRED":
+            ctx.exit(EXIT_AUTH_FAILURE)
+        return
+
+    if reset_transaction or show_status or finish_later:
+        _render_setup_transaction(payload, "wizard")
+        return
+
+    success = run_wizard(platforms=[platform] if platform else None, json_mode=False)
+    # The legacy executor performs the human interaction and its live checks.
+    # Feed only role-level booleans into the provider-neutral service; no raw
+    # provider responses or credentials cross the persistence boundary.
+    if success:
+        service.record_readiness(
+            sources=["tiktok"],
+            video_destinations=["youtube", "x", "instagram", "threads"],
+        )
+    final_payload = service.status_json(alias="wizard")
+    _render_setup_transaction(final_payload, "wizard")
+    if not (final_payload.get("completion") or {}).get("complete"):
+        ctx.exit(EXIT_AUTH_FAILURE)
+
+
+# ──────────────────────────────────────────────
+# Onboarding & Doctor Commands
+# ──────────────────────────────────────────────
+
+# ``onboard`` actually connects accounts in one pass, so its sweep is the
+# non-opt-in destinations plus the TikTok source. Opt-in guides are NOT in it
+# on purpose: onboarding must never enrol a destination the user did not ask
+# for (``accounts.bluesky.enabled`` defaults to False). They stay reachable
+# explicitly — ``xpst connect bluesky`` / ``xpst wizard bluesky`` — and the
+# dry-run plan lists them with the reason under ``opt_in_skipped`` instead of
+# silently dropping them.
+_ONBOARD_PLATFORMS = ["youtube", "tiktok", "x", "instagram", "threads", "facebook", "messenger"]
+_ONBOARD_OPT_IN_SKIPPED: dict[str, str] = {
+    "bluesky": "Opt-in text/image destination — connect it explicitly with `xpst connect bluesky`.",
+}
+
+
+@main.command()
+@click.option("--dry-run", "dry_run", is_flag=True,
+              help="Show the onboarding plan (order, steps, connected state) without connecting or writing anything")
+@click.option("--force", "force", is_flag=True,
+              help="Re-run connect even for platforms whose health check already passes")
+@json_option
+@click.pass_context
+def onboard(ctx: click.Context, dry_run: bool, force: bool, as_json: bool):
+    """Guided first-run onboarding: connect every platform in one pass.
+
+    The effortless entry point after installing xPST. For each platform
+    that is not yet connected it shows what will happen, asks for a
+    confirmation, opens the browser / collects credentials (delegating to
+    `xpst connect <platform>`), verifies the connection, and remembers
+    progress so re-running resumes where you left off.
+
+        xpst onboard             # interactive first-run flow
+        xpst onboard --dry-run   # plan only, no side effects
+        xpst onboard --json      # machine-readable plan/results
+    """
+    from xpst.connect import test_connections
+    from xpst.wizard import PLATFORM_GUIDES, load_wizard_state, save_wizard_state
+
+    config = load_config(ctx.obj.get("config_path"))
+    service = _setup_transaction_service(ctx)
+    transaction_payload = service.start_json(alias="onboard")
+    # so --json stdout stays parseable — same trick as xpst.wizard).
+    results: dict[str, bool] = {}
+    with redirect_stdout(sys.stderr):
+        results = asyncio.run(test_connections(config))
+
+    connected = {p: bool(results.get(p)) for p in _ONBOARD_PLATFORMS}
+    # A source-only platform is not a connect target: there is nothing to
+    # connect that would make it postable, and offering `xpst connect tiktok`
+    # as the next step promises an upload the engine cannot deliver. The
+    # download side is reported instead.
+    posting_truth = getattr(results, "posting_truth", {})
+    source_only = [
+        p for p in _ONBOARD_PLATFORMS if (posting_truth.get(p) or {}).get("source_only")
+    ]
+    ready_sources = list(getattr(results, "ready_sources", []))
+    targets = [
+        p
+        for p in _ONBOARD_PLATFORMS
+        if (force or not connected[p]) and p not in source_only
+    ]
+
+    if dry_run:
+        plan: dict[str, Any] = {
+            "dry_run": True,
+            "order": _ONBOARD_PLATFORMS,
+            "platforms": {
+                p: {
+                    "connected": connected[p],
+                    "posting_destination": (
+                        (posting_truth.get(p) or {}).get("posting_destination", True)
+                    ),
+                    "can_post": (posting_truth.get(p) or {}).get("can_post", connected[p]),
+                    "source_only": p in source_only,
+                    "title": PLATFORM_GUIDES[p].title,
+                    "steps": [s.text for s in PLATFORM_GUIDES[p].steps],
+                    "next": (
+                        "Source only — xPST downloads from it; nothing to connect for posting."
+                        if p in source_only
+                        else None
+                        if connected[p]
+                        else f"xpst connect {p}"
+                    ),
+                }
+                for p in _ONBOARD_PLATFORMS
+            },
+            "source_only": source_only,
+            "ready_sources": ready_sources,
+            "would_connect": targets,
+            "opt_in_skipped": dict(_ONBOARD_OPT_IN_SKIPPED),
+            "config_impact": "accounts.<platform>.enabled=true + platform credentials (encrypted)",
+        }
+        plan.update({
+            key: value
+            for key, value in transaction_payload.items()
+            if key not in {"ok", "operation", "transaction"}
+        })
+        if as_json:
+            json_output(plan, True)
+            return
+        if not ctx.obj.get("quiet", False):
+            console.print("[bold blue]Dry run — onboarding plan (nothing connected):[/bold blue]")
+        for p in _ONBOARD_PLATFORMS:
+            if p in source_only:
+                state_str = "[cyan]source only — nothing to connect[/cyan]"
+            else:
+                state_str = "[green]connected[/green]" if connected[p] else "[yellow]not connected[/yellow]"
+            console.print(f"  [bold]{p}[/bold] ({state_str})")
+            for i, step in enumerate(plan["platforms"][p]["steps"], 1):
+                console.print(f"    {i}. {step}")
+        for p, reason in _ONBOARD_OPT_IN_SKIPPED.items():
+            console.print(f"  [dim]{p}: {reason}[/dim]")
+        return
+
+    # All connected? Report and exit before any interactive gate — no
+    # prompting would happen anyway, so agent mode must succeed here.
+    if not targets:
+        service.record_readiness(
+            sources=[p for p in ready_sources if p in _ONBOARD_PLATFORMS],
+            video_destinations=[p for p in ("youtube", "x", "instagram", "threads") if connected.get(p)],
+        )
+        report = {
+            "mode": "onboard",
+            "connected": connected,
+            "connected_count": sum(connected.values()),
+            "total": len(_ONBOARD_PLATFORMS),
+            "source_only": source_only,
+            "ready_sources": ready_sources,
+            "actions": [],
+        }
+        report.update({
+            key: value
+            for key, value in service.status_json(alias="onboard").items()
+            if key not in {"ok", "operation", "transaction"}
+        })
+        if as_json:
+            json_output(report, True)
+        else:
+            console.print("[green]✅ All platforms are already connected — nothing to do.[/green]")
+            console.print("[dim]Run `xpst doctor` for a full health report.[/dim]")
+        return
+
+    # Interactive gate (same agent-safety contract as `xpst connect`):
+    # never prompt, never open browsers on a pipe.
+    if not stdin_is_interactive():
+        message = (
+            "onboard requires an interactive terminal for provider connection. "
+            "The shared setup transaction was saved; complete its pending human "
+            "actions and resume it from a TTY."
+        )
+        pending = _setup_pending_payload(service.status_json(alias="onboard"), "onboard")
+        pending["error"]["message"] = message
+        pending["mode"] = "onboard"
+        pending["interactive"] = False
+        if as_json:
+            json_output(pending, True)
+        else:
+            console.print("[red]onboard requires an interactive terminal.[/red]")
+            console.print("[dim]Try:[/dim] xpst onboard --dry-run --json  ·  xpst setup --resume")
+        sys.exit(EXIT_AUTH_FAILURE)
+        return
+
+    from xpst.connect import run_connect
+
+    state = load_wizard_state(config)
+    outcomes: dict[str, dict[str, Any]] = {}
+    for p in targets:
+        guide = PLATFORM_GUIDES[p]
+        if not as_json:
+            console.print(Panel(
+                f"[bold]{guide.title}[/bold]\n{guide.why}",
+                title=f"Connect {p}", border_style="blue",
+            ))
+        ok = run_connect(platforms=[p], config_path=ctx.obj.get("config_path"))
+        # Verify right after connecting (fresh health check, this platform only)
+        try:
+            with redirect_stdout(sys.stderr):
+                verify = asyncio.run(test_connections(config))
+            verified = bool(verify.get(p))
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("onboard verification failed for %s: %s", p, e)
+            verified = False
+        outcomes[p] = {"connect_ok": bool(ok), "verified": verified}
+        state.setdefault("platforms", {})[p] = {
+            "status": "ok" if verified else "failed",
+            "detail": f"onboard {p}",
+        }
+        save_wizard_state(config, state)
+
+        if verified:
+            if p == "tiktok":
+                service.record_readiness(sources=[p])
+            elif p in {"youtube", "x", "instagram", "threads"}:
+                service.record_readiness(video_destinations=[p])
+        else:
+            active = service.status() or {}
+            step_id = next(
+                (
+                    step["step_id"]
+                    for step in active.get("steps", [])
+                    if step.get("capability") == p
+                ),
+                None,
+            )
+            if step_id:
+                service.resume(step_id=step_id, step_state="error", error="AUTH_REQUIRED")
+
+    succeeded = [p for p, o in outcomes.items() if o["verified"]]
+    failed = [p for p in outcomes if p not in succeeded]
+
+    if as_json:
+        report = {
+            "mode": "onboard",
+            "connected": connected,
+            "outcomes": outcomes,
+            "connected_count": sum(1 for v in connected.values() if v),
+            "total": len(_ONBOARD_PLATFORMS),
+            "source_only": source_only,
+            "ready_sources": ready_sources,
+            "succeeded": succeeded,
+            "failed": failed,
+        }
+        report.update({
+            key: value
+            for key, value in service.status_json(alias="onboard").items()
+            if key not in {"ok", "operation", "transaction"}
+        })
+        json_output(report, True)
+    else:
+        console.print(Panel("[bold]Onboarding Summary[/bold]", style="blue"))
+        for p, o in outcomes.items():
+            mark = "✅" if o["verified"] else "❌"
+            console.print(f"  {mark} {p}")
+        if failed:
+            console.print(f"\n[yellow]Fix the failures with:[/yellow] xpst connect {failed[0]}")
+        console.print("[dim]Run `xpst doctor` anytime for a full health report.[/dim]")
+
+    if failed:
+        sys.exit(EXIT_AUTH_FAILURE)
+
+
+@main.command()
+@click.argument("platform", required=False,
+                type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "facebook", "messenger", "bluesky"]))
+@json_option
+@click.pass_context
+def doctor(ctx: click.Context, platform: str | None, as_json: bool):
+    """Diagnose auth health, quotas and environment; print a fix-it checklist.
+
+    The one command to run when "something doesn't post". Checks each
+    platform's live connection, remaining API quota, and local
+    prerequisites (ffmpeg, yt-dlp, config dir), then prints a prioritized
+    fix-it checklist with copy-pasteable commands.
+
+        xpst doctor              # everything
+        xpst doctor youtube      # one platform
+        xpst doctor --json       # machine-readable report
+    """
+    from xpst.connect import test_connections
+    from xpst.utils.errors import describe_remediation
+    from xpst.utils.probe_errors import PROBE_INVALID_CREDENTIALS, PROBE_UNVERIFIED
+
+    config = load_config(ctx.obj.get("config_path"))
+
+    # 1. Live auth health (chatter → stderr; keep --json stdout parseable).
+    results: dict[str, bool] = {}
+    with redirect_stdout(sys.stderr):
+        results = asyncio.run(test_connections(config))
+    canonical_results = getattr(results, "canonical_status", None)
+    if platform:
+        results = {p: ok for p, ok in results.items() if p == platform}
+
+    # test_connections is a backward-compatible bool wrapper around the
+    # canonical live probes. Rehydrate its result into the same role-aware
+    # model so doctor cannot invent a second definition of "connected".
+    from xpst.provider_truth import (
+        build_canonical_status,
+        live_status_from_booleans,
+        posting_truth,
+    )
+
+    if canonical_results:
+        canonical = build_canonical_status(config, canonical_results)
+    else:
+        # The canonical live payload is missing (a caller or a test double
+        # replaced test_connections with the legacy bool map). Rebuild
+        # per-role facts rather than promoting one boolean into every role:
+        # TikTok's boolean is the SOURCE verdict, and promoting it would make
+        # doctor certify an uploader no probe ever touched.
+        canonical = build_canonical_status(
+            config, live_status_from_booleans(config, results)
+        )
+
+    sessions = _session_health(config)
+    quota_mgr = QuotaManager(config.config_dir, config=config)
+    quota_status = quota_mgr.get_detailed_status()
+    # Ban-risk advisories: any ENABLED platform whose live auth path is not the
+    # provider's official API. Read before the per-platform loop so each row can
+    # carry its own advisory, and never added to ``issues`` — an unofficial path
+    # still posts, so it must not flip ``all_clear`` or the exit code.
+    from xpst.auth_path_risk import active_auth_path_risks
+
+    ban_risks = {risk.platform: risk for risk in active_auth_path_risks(config)}
+    # Rate-limit cooldowns: local persisted state, read-only. An operator asking
+    # "why didn't it post?" gets the answer here instead of opening
+    # rate_cooldowns.json by hand.
+    from xpst.rate_limit_status import cooldown_report
+
+    cooldowns = cooldown_report(config)
+
+    # 2. Per-platform findings.
+    platforms_report: dict[str, dict[str, Any]] = {}
+    issues: list[dict[str, Any]] = []
+    notes: list[dict[str, Any]] = []
+    for p, ok in results.items():
+        session = sessions.get(p, {})
+        creds_present = bool(session.get("present"))
+        canonical_info = canonical.get(p, {})
+        role_status = canonical_info.get("role_status") or {}
+        source_role = role_status.get("source") or {}
+        source_ready = bool(source_role.get("ready"))
+        # ``connected`` answers the question doctor is asked — can xPST use
+        # this provider for what it is listed as? A provider whose promise is
+        # posting is connected only when its POSTING role is ready. Reading the
+        # platform-level ``authenticated`` flag instead reported TikTok as
+        # connected (and postable) on the strength of its download side, and
+        # "connected: true, problem: null" is a promise the engine cannot keep.
+        posting = posting_truth(canonical_info)
+        destination_error = posting["posting_error"]
+        if posting["posting_destination"]:
+            connected = posting["can_post"]
+        else:
+            connected = bool(canonical_info.get("authenticated", ok))
+        # A platform switched off in config is not a failure to fix, whatever
+        # path produced its canonical state.
+        disabled = canonical_info.get("state") == "disabled"
+        probe_class = canonical_info.get("probe_class")
+        probe_error = canonical_info.get("probe_error")
+
+        problem: str | None = None
+        fix: str | None = None
+        note: str | None = None
+        if disabled:
+            pass
+        elif posting["source_only"]:
+            # A source-only platform (TikTok) has two independent verdicts and
+            # this entry must not collapse them: the download side can be
+            # healthy while posting is simply not available. Report whichever
+            # one is broken, and say plainly that posting is not on the table.
+            if source_ready:
+                note = posting["posting_note"]
+            else:
+                problem = (
+                    source_role.get("error")
+                    or f"{p.title()} is a source only and its download source is not ready."
+                )
+                fix = describe_remediation(p, str(problem)) or f"xpst connect {p}"
+        elif connected:
+            pass
+        elif creds_present and probe_class == PROBE_UNVERIFIED:
+            # The probe failed without proving the credential is dead (network
+            # error, challenge, anti-bot redirect). Report that honestly and ask
+            # for a retry — "token expired, re-run connect" would send the user
+            # into a credential re-entry for a failure that may clear on its own.
+            problem = (
+                "Live check could not verify this account — the probe failed "
+                "without proving the credential is dead: "
+                f"{probe_error or 'unclassified probe failure'}"
+            )
+            fix = f"Retry: xpst health (only run `xpst connect {p}` if it keeps failing)"
+        elif creds_present:
+            # Carry the probe's own message verbatim: it is the actionable one
+            # (Instagram names the exact re-login command and the fact that it
+            # needs a username/password), where the fixed sentences below only
+            # guess "token may be expired or revoked".
+            problem = (
+                str(destination_error)
+                or str(canonical_info.get("error") or "")
+                or (
+                    "Credentials found but the health check failed — the provider "
+                    f"rejected them: {probe_error}"
+                    if probe_class == PROBE_INVALID_CREDENTIALS and probe_error
+                    else "Credentials found but the health check failed — token may be expired or revoked."
+                )
+            )
+            fix = (
+                describe_remediation(p, str(destination_error or probe_error or "token expired"))
+                or f"xpst connect {p}"
+            )
+        else:
+            # No stored credential file for this provider (TikTok's browser
+            # publish route has none at all — its credential is the web
+            # session).  A destination-probe error is still the most
+            # actionable sentence available, so carry it verbatim instead of
+            # collapsing it into "Not connected."
+            problem = str(destination_error) if destination_error else "Not connected."
+            fix = (
+                describe_remediation(p, str(destination_error or ""))
+                or f"xpst connect {p}"
+            )
+
+        qinfo = quota_status.get(p, {})
+        risk = ban_risks.get(p)
+        platforms_report[p] = {
+            # The probe's verdict for the provider's primary role. ``connected``
+            # below is the role-qualified answer and differs from this exactly
+            # when the provider is a source only.
+            "authenticated": bool(canonical_info.get("authenticated", ok)),
+            "connected": connected,
+            "state": canonical_info.get("state", "degraded"),
+            "roles": canonical_info.get("roles", {}),
+            "auth_mode": canonical_info.get(
+                "auth_mode", getattr(getattr(config, p, None), "auth_mode", None)
+            ),
+            "session_age_days": session.get("age_days"),
+            "probe_class": probe_class,
+            "probe_error": probe_error,
+            "probe_retryable": canonical_info.get("probe_retryable"),
+            "problem": problem,
+            "fix": fix,
+            "note": note,
+            # Role-qualified truth. A platform can be usable as a source and
+            # still never accept a post; these fields let a reader tell the
+            # difference without running anything else.
+            "posting_destination": posting["posting_destination"],
+            "posting_role": posting["posting_role"],
+            "posting_state": posting["posting_state"],
+            "posting_error": destination_error,
+            "can_post": posting["can_post"],
+            "source_only": posting["source_only"],
+            "source_ready": source_ready,
+            "quota": {
+                "used_today": qinfo.get("used_today"),
+                "daily_limit": qinfo.get("daily_limit"),
+                "remaining": qinfo.get("remaining"),
+            },
+            # ``None`` means "this platform is on its official path". A risk
+            # object carries ban_risk, severity, the acknowledgement record and
+            # the advisory code preflight emits, so no caller has to re-derive
+            # the verdict from auth_mode strings.
+            "ban_risk": risk.to_dict() if risk is not None else None,
+        }
+        if problem is not None:
+            issues.append({
+                "severity": "error",
+                "platform": p,
+                "problem": problem,
+                "fix": fix,
+            })
+        elif note is not None:
+            notes.append({
+                "severity": "info",
+                "platform": p,
+                "problem": note,
+                "fix": (
+                    f"Nothing to fix for downloads. Posting to "
+                    f"{canonical_info.get('display_name') or p.title()} needs an approved "
+                    "upload API app from the provider — use another destination until then."
+                ),
+            })
+        elif (qinfo.get("remaining") is not None and qinfo["remaining"] <= 2):
+            issues.append({
+                "severity": "warning",
+                "platform": p,
+                "problem": f"Quota nearly exhausted ({qinfo['remaining']} uploads left today).",
+                "fix": "xpst quota",
+            })
+
+    # 2b. Source-pipeline health (issue #296). A source whose every fetch
+    # fails (e.g. launchd's PATH missing yt-dlp) used to be invisible here:
+    # the daemon logged the error to launchagent.err and reported "cycle
+    # complete" while doctor said all_clear. The daemon now records the
+    # failure in state; surface it as a warning (not an auth error —
+    # the pipeline is dead, the credentials are not).
+    try:
+        state_health_sources = (
+            StateManager(config.config_dir).state.get("health", {}).get("sources", {})
+        )
+    except Exception as e:  # noqa: BLE001 - a broken state file must not kill doctor
+        logger.debug("Could not read source health for doctor: %s", e)
+        state_health_sources = {}
+    for src_name, src_entry in sorted(state_health_sources.items()):
+        fetch_error = (src_entry or {}).get("last_error")
+        if not fetch_error:
+            continue
+        issues.append({
+            "severity": "warning",
+            "platform": src_name,
+            "problem": (
+                f"Source pipeline '{src_name}' is failing: {fetch_error} "
+                f"({src_entry.get('consecutive_failures', '?')} consecutive fetch "
+                f"failure(s), last at {src_entry.get('last_error_at', 'unknown')}). "
+                "The daemon runs but never fetches new videos."
+            ),
+            "fix": (
+                "Check the daemon log (launchagent.err). Verify the helper "
+                "binary is installed for the daemon's environment: "
+                "`xpst doctor` environment section below shows the resolved "
+                "path; compare with the daemon's PATH. Restart the daemon "
+                "after fixing."
+            ),
+        })
+
+    # 3. Environment prerequisites.
+    # Route through resolve_*_path so the check agrees with what the engine
+    # actually uses: XPST_*_PATH override > system install > the copy xPST
+    # fetched on first use (~/.xpst/bin). A bare `shutil.which` reported
+    # "not found" for GUI-launched apps whose minimal PATH misses
+    # /opt/homebrew/bin and for the fetched build.
+    from xpst.utils.net import check_network
+    from xpst.utils.platform import (
+        resolve_ffmpeg_path,
+        resolve_ffprobe_path,
+        resolve_ytdlp_path,
+    )
+
+    ffmpeg_path = resolve_ffmpeg_path()
+    ffprobe_path = resolve_ffprobe_path()
+    ytdlp_path = resolve_ytdlp_path()
+    network = check_network()
+    environment: list[dict[str, Any]] = [
+        {
+            "name": "ffmpeg",
+            "ok": bool(ffmpeg_path),
+            "detail": ffmpeg_path or "not found (xPST can download a verified static build)",
+            "fix": None if ffmpeg_path else "Run `xpst media fetch`, install ffmpeg (e.g. `brew install ffmpeg`), or set XPST_FFMPEG_PATH.",
+        },
+        {
+            "name": "ffprobe",
+            "ok": bool(ffprobe_path),
+            "detail": ffprobe_path or "not found (xPST can download a verified static build)",
+            "fix": None if ffprobe_path else "Run `xpst media fetch`, install ffmpeg (e.g. `brew install ffmpeg`), or set XPST_FFPROBE_PATH.",
+        },
+        {
+            "name": "yt-dlp",
+            "ok": bool(ytdlp_path),
+            "detail": str(ytdlp_path) if ytdlp_path else (
+                "yt-dlp not found on PATH, in XPST_YTDLP_PATH or in the bundled "
+                "media directory"
+            ),
+            "fix": None if ytdlp_path else (
+                "Install yt-dlp (e.g. `brew install yt-dlp` or "
+                "`pipx install yt-dlp`) or set XPST_YTDLP_PATH to the "
+                "yt-dlp binary."
+            ),
+        },
+        {
+            "name": "network",
+            "ok": network.online,
+            "detail": network.detail,
+            "fix": None if network.online else (
+                "Connect this machine to the internet (check Wi-Fi/VPN/"
+                "firewall/DNS). xPST can start and read local state offline, "
+                "but nothing can be downloaded or posted until connectivity "
+                "returns."
+            ),
+        },
+    ]
+    try:
+        Path(config.config_dir).expanduser().mkdir(parents=True, exist_ok=True)
+        env_ok = True
+    except OSError as e:
+        env_ok = False
+        logger.debug("config dir not writable: %s", e)
+    environment.append({
+        "name": "config dir",
+        "ok": env_ok,
+        "detail": str(config.config_dir),
+        "fix": None if env_ok else (
+            f"Ensure {config.config_dir} is writable (chmod u+rwx), or set "
+            f"XPST_CONFIG_DIR to a writable directory."
+        ),
+    })
+    for entry in environment:
+        if not entry["ok"]:
+            issues.append({
+                "severity": "error" if entry["name"] != "yt-dlp" else "warning",
+                "platform": None,
+                "problem": f"{entry['name']}: {entry['detail']}",
+                "fix": entry["fix"],
+            })
+
+    # A cooldown is a state, not a failure: nothing to fix, but it is the
+    # answer to "why hasn't it posted yet", so it belongs in notes (which never
+    # flip all_clear / the exit code) rather than in issues.
+    if cooldowns.get("active"):
+        detail = ", ".join(
+            f"{p} ({cooldowns['cooldowns'][p]['remaining_human']} remaining)"
+            for p in cooldowns["active"]
+        )
+        notes.append({
+            "severity": "info",
+            "platform": None,
+            "problem": (
+                f"Rate-limit cooldown active for {detail}. Posts to these "
+                "platforms are deferred, not failed."
+            ),
+            "fix": (
+                "Nothing to fix — xPST resumes automatically when the pause "
+                "expires. Watch it with `xpst health` or the MCP tool "
+                "`xpst_rate_limit_status`; the persisted state is "
+                f"{cooldowns.get('source')}."
+            ),
+        })
+
+    report: dict[str, Any] = {
+        "doctor": True,
+        "platforms": platforms_report,
+        "canonical": {"providers": canonical, "roles": ["source", "video_destination", "messaging", "analytics"]},
+        "environment": environment,
+        "rate_limit_cooldowns": cooldowns,
+        "issues": issues,
+        # Not failures: facts a reader needs that no fix-it item can express.
+        # Kept out of ``issues``/``all_clear`` so a source-only platform never
+        # makes doctor exit non-zero, but never dropped either.
+        "notes": notes,
+        # Advisories never change the verdict: a platform on an unofficial path
+        # still posts today, so it is reported (never hidden) and left out of
+        # ``issues``. Disabled platforms are excluded — that pause is deliberate.
+        "ban_risk_advisories": [risk.to_dict() for risk in ban_risks.values()],
+        "all_clear": not issues,
+    }
+    if as_json:
+        json_output(report, True)
+        # Exit-code contract (issue #280): a status command exits 0 whenever it
+        # produced its payload. ``all_clear: false`` / ``issues`` are the
+        # verdict, never the process status — readiness and health already
+        # answer this way, and a first-run script doing ``xpst doctor || exit``
+        # must read "connect your accounts", not "doctor is broken".
+        # Non-zero is reserved for doctor being unable to do its job: the
+        # config failing to load (``load_config`` → EXIT_CONFIG_ERROR) or an
+        # internal error propagating out.
+        return
+
+    # Rich report.
+    table = Table(show_header=True, header_style="bold", title="🩺 xPST Doctor")
+    table.add_column("Platform")
+    table.add_column("Auth")
+    table.add_column("Health")
+    table.add_column("Quota left")
+    for p, info in platforms_report.items():
+        if info["connected"]:
+            health = "[green]✅ pass[/green]"
+        elif info["source_only"]:
+            # Not a failure: the download side works, posting is not available.
+            health = "[cyan]ℹ️ source only[/cyan]"
+        else:
+            health = "[red]❌ fail[/red]"
+        remaining = info["quota"]["remaining"]
+        rem_str = "[dim]—[/dim]" if remaining is None else str(remaining)
+        table.add_row(p, info["auth_mode"] or "—", health, rem_str)
+    console.print(table)
+
+    if ban_risks:
+        console.print("\n[bold yellow]Ban-risk advisories (unofficial auth path):[/bold yellow]")
+        for risk in ban_risks.values():
+            state = "acknowledged" if risk.acknowledged else "NOT acknowledged"
+            console.print(
+                f"  ⚠️  {risk.display_name}: {risk.ban_risk} — "
+                f"auth_mode '{risk.auth_mode}', {state}"
+            )
+            console.print(f"     [dim]{risk.consequence}[/dim]")
+            console.print(
+                f"     [dim]Ban-safe path: {risk.official_label} via "
+                f"'{risk.switch_command}' ({risk.docs_url}).[/dim]"
+            )
+        console.print(
+            "  [dim]Advisory only — nothing here is broken, and these do not "
+            "affect the exit code.[/dim]"
+        )
+
+    console.print("\n[bold]Environment:[/bold]")
+    for entry in environment:
+        mark = "✅" if entry["ok"] else "❌"
+        console.print(f"  {mark} {entry['name']}: {entry['detail']}")
+
+    console.print("\n[bold]Rate-limit Cooldowns:[/bold]")
+    if not cooldowns.get("active"):
+        console.print("  🟢 none active")
+    else:
+        for cd_platform in cooldowns["active"]:
+            record = cooldowns["cooldowns"].get(cd_platform, {})
+            console.print(
+                f"  ⏳ {cd_platform}: {record.get('remaining_human', '?')} remaining"
+                f" (strike {record.get('strikes', '?')}"
+                + (f", until {record['until_display']}" if record.get("until_display") else "")
+                + ")"
+            )
+            if record.get("last_reason"):
+                console.print(f"     [dim]{record['last_reason']}[/dim]")
+        console.print(f"  [dim]{cooldowns.get('note', '')}[/dim]")
+
+    if notes:
+        console.print("\n[bold]Notes:[/bold]")
+        for platform_note in notes:
+            console.print(f"  ℹ️  {platform_note['problem']}")
+            if platform_note["fix"]:
+                console.print(f"     [dim]→[/dim] {platform_note['fix']}")
+
+    if issues:
+        console.print("\n[bold yellow]Fix-it checklist:[/bold yellow]")
+        for i, issue in enumerate(issues, 1):
+            console.print(f"  {i}. [{issue['severity']}] {issue['problem']}")
+            if issue["fix"]:
+                console.print(f"     [dim]→[/dim] {issue['fix']}")
+    else:
+        console.print("\n[green]✅ Everything looks healthy. Happy posting![/green]")
+    # Same contract as the ``--json`` branch above: findings are the payload,
+    # not the exit status. The checklist is printed and the process exits 0.
+
+
+# ──────────────────────────────────────────────
+# Auth Commands
+# ──────────────────────────────────────────────
+
+@main.command()
+@click.argument("platform", required=False)
+@click.option(
+    "--refresh",
+    "refresh",
+    is_flag=True,
+    help="Refresh due/expiring tokens first (bounded retry), then report status",
+)
+@click.option("--rotate", is_flag=True,
+              help="With `api-token`: generate a new API token, invalidating the old one")
+@json_option
+@click.pass_context
+def auth(ctx: click.Context, platform: str | None, refresh: bool, rotate: bool, as_json: bool):
+    """Authenticate with a platform or check auth status.
+
+    Usage:
+        xpst auth youtube     # Authenticate with YouTube
+        xpst auth x           # Authenticate with X/Twitter
+        xpst auth instagram   # Authenticate with Instagram
+        xpst auth tiktok      # Authenticate with TikTok
+        xpst auth facebook    # Authenticate a Facebook Page (BYO Meta app)
+        xpst auth status      # Show auth status for all platforms
+        xpst auth status --refresh   # Refresh expiring tokens, then report
+    """
+    if platform is None or platform == "status":
+        _show_auth_status(ctx, as_json, refresh=refresh)
+        return
+
+    if platform in ("api-token", "api_token"):
+        _show_api_token(ctx, as_json, rotate=rotate)
+        return
+
+    valid_platforms = {
+        "tiktok",
+        "youtube",
+        "x",
+        "instagram",
+        "threads",
+        "facebook",
+        "messenger",
+        "bluesky",
+    }
+    if platform not in valid_platforms:
+        click.echo(f"Unknown platform: {platform}")
+        click.echo(f"Valid platforms: {', '.join(sorted(valid_platforms))}")
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    config = load_config(ctx.obj.get("config_path"))
+
+    if not as_json:
+        # JSON mode must emit one parseable document on stdout: an agent piping
+        # `xpst auth <platform> --json` into a parser gets JSON, not a banner.
+        console.print(f"[bold blue]Authenticating with {platform.title()}...[/bold blue]")
+
+    if platform == "youtube":
+        _auth_youtube(config)
+    elif platform == "x":
+        _auth_x(config)
+    elif platform == "instagram":
+        _auth_instagram(config)
+    elif platform == "tiktok":
+        _auth_tiktok(config)
+    elif platform == "threads":
+        _auth_threads(config)
+    elif platform == "bluesky":
+        if not _auth_bluesky(config):
+            ctx.exit(EXIT_AUTH_FAILURE)
+    elif platform == "facebook":
+        # Facebook is Page-scoped and BYO-app only; a failed discovery/exchange
+        # is a real auth failure, so the command exits non-zero.
+        if not _auth_facebook(config, as_json=as_json):
+            ctx.exit(EXIT_AUTH_FAILURE)
+    elif platform == "messenger":
+        _auth_messenger(config)
+
+
+# ──────────────────────────────────────────────
+# BYO (bring-your-own developer app) commands
+# ──────────────────────────────────────────────
+
+@main.group()
+@click.pass_context
+def byo(ctx: click.Context):
+    """Bring-your-own developer app: per-platform app id/secret, stored locally.
+
+    The credential is what flips Instagram/Threads/TikTok into the official
+    API path with NO App Review (Meta Standard Access: you use your own app).
+    It is stored only in the encrypted store under the xPST config dir and is
+    never echoed back — every output shows at most a masked id tail.
+
+    Usage:
+        xpst byo status                    # what has an app, what is missing
+        xpst byo set instagram             # prompts, secret input hidden
+        xpst byo set tiktok --app-id ...   # agent/CI form (secret via env)
+        xpst byo clear threads             # remove the stored pair
+    """
+    ctx.ensure_object(dict)
+
+
+@byo.command("status")
+@json_option
+@click.pass_context
+def byo_status_cmd(ctx: click.Context, as_json: bool):
+    """Show per-platform BYO app setup truth (masked, never a secret)."""
+    from xpst.byo import byo_status
+
+    config = load_config(ctx.obj.get("config_path"))
+    payload = byo_status(config)
+    if as_json:
+        json_output(payload, True)
+        return
+    console.print("[bold blue]Bring-your-own app setup[/bold blue]")
+    for status in payload["platforms"].values():
+        if status["configured"]:
+            mark = f"[green]configured[/green] ({status['app_id_masked']}, from {status['source']})"
+        elif status["half_configured"]:
+            mark = "[yellow]app id stored, secret missing[/yellow]"
+        elif not status["configurable"]:
+            mark = "[dim]tracked via its own connect flow[/dim]"
+        else:
+            mark = "[dim]no app yet[/dim]"
+        console.print(f"  {status['display_name']}: {mark}")
+    console.print(f"[dim]{payload['note']}[/dim]")
+
+
+@byo.command("set")
+@click.argument("platform")
+@click.option("--app-id", default="", help="App id / client key (Meta numeric id, TikTok aw… key)")
+@click.option("--app-secret", default="", help="App secret (prefer the platform env var; never echoed)")
+@json_option
+@click.pass_context
+def byo_set_cmd(ctx: click.Context, platform: str, app_id: str, app_secret: str, as_json: bool):
+    """Store one platform's app credential (validated, encrypted, masked back).
+
+    Missing values are prompted (the secret with hidden input). For
+    non-interactive runs pass --app-id and set the platform's secret env var
+    (see `xpst byo status` env_vars) — the secret is never taken as a CLI
+    argument on the command line, where process listings would expose it.
+    """
+    import os
+
+    from xpst.byo import BYO_PLATFORMS, ByoAppError, store_byo_app, validate_byo_app
+
+    config = load_config(ctx.obj.get("config_path"))
+    key = platform.strip().lower()
+    if key not in BYO_PLATFORMS:
+        console.print(f"[red]Unknown platform: {platform}[/red] (options: {', '.join(sorted(BYO_PLATFORMS))})")
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+    spec = BYO_PLATFORMS[key]
+    if not spec.configurable:
+        console.print(
+            f"[yellow]{spec.display_name} keeps its app credential in its own connect flow.[/yellow]"
+        )
+        console.print(f"[dim]{spec.docs_url}[/dim]")
+        return
+    if not app_id:
+        app_id = os.environ.get(spec.env_id_var, "").strip()
+    if not app_secret:
+        app_secret = os.environ.get(spec.env_secret_var, "").strip()
+    if not app_id:
+        app_id = console.input(f"[cyan]{spec.id_label}: [/cyan]").strip()
+    if not app_secret:
+        try:
+            import getpass
+
+            app_secret = getpass.getpass(f"{spec.secret_label} (hidden): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            app_secret = ""
+    try:
+        app_id, app_secret = validate_byo_app(key, app_id, app_secret)
+        status = store_byo_app(config, key, app_id, app_secret)
+    except ByoAppError as exc:
+        if as_json:
+            json_output({"ok": False, "error": str(exc), "errors": exc.errors}, True)
+        else:
+            console.print(f"[red]{exc}[/red]")
+            for field, message in exc.errors.items():
+                console.print(f"  {field}: {message}")
+            console.print(f"[dim]How to create one: {spec.create_url}[/dim]")
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+    if as_json:
+        json_output({"ok": True, **status}, True)
+        return
+    console.print(
+        f"[green]✅ {spec.display_name}: app {status['app_id_masked']} stored encrypted.[/green] "
+        f"{spec.enables}"
+    )
+    console.print(f"[dim]Register this redirect on the app: {status['redirect_uri']}[/dim]")
+
+
+@byo.command("clear")
+@click.argument("platform")
+@json_option
+@click.pass_context
+def byo_clear_cmd(ctx: click.Context, platform: str, as_json: bool):
+    """Remove a platform's stored app credential (sign-in control turns off)."""
+    from xpst.byo import BYO_PLATFORMS, ByoAppError, clear_byo_app
+
+    config = load_config(ctx.obj.get("config_path"))
+    key = platform.strip().lower()
+    try:
+        payload = clear_byo_app(config, key)
+    except ByoAppError as exc:
+        console.print(f"[red]{exc}[/red] (options: {', '.join(sorted(BYO_PLATFORMS))})")
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+    if as_json:
+        json_output({"ok": True, **payload}, True)
+        return
+    console.print(f"[green]✅ {payload['note']}[/green]")
+
+
+def _show_api_token(ctx: click.Context, as_json: bool, *, rotate: bool = False) -> None:
+    """Print (or replace) the local dashboard API token.
+
+    Every mutating dashboard route (``POST /api/post``,
+    ``POST /api/connect/{platform}``, ``POST /api/onboarding*`` and the
+    link-in-bio form save) requires this token. Loopback is not an authorisation
+    boundary, so an unauthenticated write from any process on the machine — or
+    any page open in a browser — is refused with 401. The token is generated on
+    the first run and stored in the encrypted credential store, never in
+    ``config.yaml``.
+    """
+    from xpst.dashboard.auth import ensure_api_token, rotate_api_token
+
+    config = load_config(ctx.obj.get("config_path"))
+    config_dir = config.config_dir
+    try:
+        token = rotate_api_token(config_dir) if rotate else ensure_api_token(config_dir)
+    except Exception as exc:  # noqa: BLE001 - surface the reason, never a traceback
+        console.print(f"[red]Could not access the dashboard API token: {exc}[/red]")
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    if as_json:
+        json_output({"config_dir": config_dir, "api_token": token, "rotated": rotate}, True)
+        return
+
+    console.print(f"[bold blue]Dashboard API token[/bold blue] [dim]({config_dir})[/dim]")
+    click.echo(token)
+    console.print(
+        "[dim]Send it as `Authorization: Bearer <token>` or `X-API-Token: <token>` "
+        "on mutating endpoints (POST /api/post, /api/connect/<platform>, "
+        "/api/onboarding*). Read-only endpoints stay open.[/dim]"
+    )
+    if rotate:
+        console.print("[yellow]Rotated — previously issued tokens no longer work.[/yellow]")
+
+
+def _show_auth_status(ctx: click.Context, as_json: bool, refresh: bool = False):
+    """Show authentication and quota status for all platforms."""
+    config = load_config(ctx.obj.get("config_path"))
+
+    # Credential store status
+    cred_store = CredentialStore(config.config_dir)
+    quota_mgr = QuotaManager(config.config_dir)
+
+    stored_keys = cred_store.list_keys()
+    storage_type = "OS Keychain" if cred_store._use_keyring else "File Storage (fallback)"
+
+    # Optional bounded refresh BEFORE probing, so a token that is due is
+    # renewed first and the badge below tells the truth about the refreshed
+    # state. Skipped entirely when nothing is due (no network, no side effect).
+    refresh_report: dict = {}
+    if refresh:
+        from xpst.token_refresh import refresh_due_tokens, save_refresh_report
+
+        refresh_report = refresh_due_tokens(config)
+        save_refresh_report(config, refresh_report)
+        if not as_json:
+            if not refresh_report:
+                console.print("[dim]No token was due for refresh.[/dim]")
+            for name, item in refresh_report.items():
+                if item.get("ok"):
+                    console.print(f"[green]Refreshed {name} access token[/green]")
+                else:
+                    console.print(f"[red]Refresh failed for {name}: {item.get('error')}[/red]")
+
+    # Live session validation — same validators `xpst health` uses (engine
+    # check_health / _live_auth pattern, PRs #66/#70). Fails closed per
+    # platform with an `error` detail; never prompts or opens a browser.
+    # Every entry carries a badge derived from that probe plus the
+    # `checked_at` timestamp it is based on (see xpst.token_state) — this JSON
+    # is the single source of truth the web UI/desktop/MCP render from.
+    from xpst.auth_status import collect_live_auth_status
+
+    live = collect_live_auth_status(config)
+
+    def _entry(plat: str) -> dict:
+        info = live.get(plat)
+        return info if isinstance(info, dict) else {}
+
+    if as_json:
+        data: dict = {
+            "credential_storage": storage_type,
+            "stored_credentials": stored_keys,
+            "platforms": {},
+            "badges": {},
+        }
+        yt_creds = cred_store.retrieve("youtube_token")
+        x_creds = cred_store.retrieve_json("x_cookies")
+        ig_creds = cred_store.retrieve_json("instagram_session")
+        tiktok_creds = cred_store.retrieve_json("tiktok_cookies")
+        threads_creds = cred_store.retrieve("threads_access_token")
+        facebook_creds = cred_store.retrieve("facebook_page_token")
+        messenger_creds = cred_store.retrieve("messenger_page_token")
+        # Bluesky's credential is the app password; a cached session alone is
+        # not proof the app password still works, so it is not counted here.
+        bluesky_creds = cred_store.retrieve("bluesky_app_password")
+        for plat, creds in [
+            ("youtube", yt_creds),
+            ("x", x_creds),
+            ("instagram", ig_creds),
+            ("tiktok", tiktok_creds),
+            ("threads", threads_creds),
+            ("facebook", facebook_creds),
+            ("messenger", messenger_creds),
+            ("bluesky", bluesky_creds),
+            ("local", config.local.path),
+        ]:
+            remaining = quota_mgr.get_remaining(plat)
+            stored = bool(creds)
+            entry: dict = {
+                # Back-compat: the old presence-based signal, kept under an
+                # explicit name (`authenticated` below is now LIVE truth).
+                "credentials_stored": stored,
+                "quota_remaining": remaining.get("daily", "N/A"),
+            }
+            live_info = live.get(plat)
+            if live_info:
+                # Live validation wins over file presence — an expired
+                # session file must not report authenticated: true.
+                entry.update(live_info)
+            elif plat != "local":
+                # No live entry at all: presence is explicitly NOT proof, so
+                # derive a non-green badge rather than reporting connected.
+                from xpst.token_state import derive_token_state, token_metadata
+
+                entry["authenticated"] = False
+                entry["live_checked"] = False
+                entry.update(
+                    derive_token_state(
+                        plat,
+                        {"configured": stored, "live_checked": False},
+                        token_metadata(config, plat),
+                    )
+                )
+            data["platforms"][plat] = entry
+            if entry.get("badge"):
+                data["badges"][plat] = entry["badge"]
+        data["providers"] = data["platforms"]
+        data["roles"] = ["source", "video_destination", "messaging", "analytics"]
+        # Forward-looking watchdog (xpst.credential_health): which credentials
+        # will die before the user notices. Derived from the same live badges —
+        # no extra probing, no invented deadlines.
+        from xpst.credential_health import build_credential_health
+
+        data["credential_health"] = build_credential_health(data["platforms"])
+        abs_checked = [
+            float(entry["checked_at"])
+            for entry in data["platforms"].values()
+            if isinstance(entry.get("checked_at"), (int, float))
+        ]
+        data["checked_at"] = max(abs_checked) if abs_checked else None
+        if data["checked_at"] is not None:
+            from xpst.token_state import iso_timestamp
+
+            data["checked_at_iso"] = iso_timestamp(data["checked_at"])
+        if refresh:
+            data["refresh"] = refresh_report
+        json_output(data, True)
+        return
+
+    def _badge_cell(plat: str) -> str:
+        """Render the platform's badge (never green unless live-proven)."""
+        from xpst.token_state import BADGE_LABELS, GREEN_BADGES
+
+        info = _entry(plat)
+        badge = str(info.get("badge") or "unknown")
+        label = str(info.get("badge_label") or BADGE_LABELS.get(badge, badge))
+        color = {
+            "connected": "green",
+            "expiring": "yellow",
+            "needs_reauth": "red",
+            "source_only": "cyan",
+        }.get(badge, "dim")
+        age = info.get("check_age_seconds")
+        stamp = ""
+        if isinstance(age, (int, float)) and badge in GREEN_BADGES:
+            from xpst.token_state import humanize_seconds
+
+            stamp = f" [dim](checked {humanize_seconds(age)} ago)[/dim]"
+        return f"[{color}]{label}[/{color}]{stamp}"
+
+    def _live_detail(plat: str, base: str) -> str:
+        """Append the live-check error / badge reason to a table Details cell."""
+        from xpst.token_state import GREEN_BADGES
+
+        info = _entry(plat)
+        if info.get("badge") in GREEN_BADGES:
+            return base
+        reason = info.get("badge_reason") or info.get("error")
+        if info.get("live_checked") or reason:
+            if reason:
+                return f"{base} — {reason}"
+        return base
+
+    console.print("[bold blue]xPST Authentication Status[/bold blue]\n")
+
+    # Credential store info
+    console.print(f"[bold]Credential Storage:[/bold] {storage_type}")
+    console.print(f"[bold]Stored Credentials:[/bold] {len(stored_keys)}")
+    for key in stored_keys:
+        console.print(f"  🔑 {key}")
+
+    # Platform auth status
+    console.print("\n[bold]Platform Status:[/bold]")
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Platform")
+    table.add_column("Badge")
+    table.add_column("Quota (Daily)")
+    table.add_column("Remaining")
+    table.add_column("Details")
+
+    # YouTube
+    yt_creds = cred_store.retrieve("youtube_token")
+    yt_file = Path(config.youtube.client_secrets).expanduser()
+    yt_quota = quota_mgr.get_remaining("youtube")
+    table.add_row(
+        "YouTube",
+        _badge_cell("youtube"),
+        str(quota_mgr.quotas.get("youtube", {}).daily_limit if hasattr(quota_mgr.quotas.get("youtube", {}), "daily_limit") else "N/A"),
+        str(yt_quota.get("daily", "N/A")),
+        _live_detail("youtube", "Keyring" if yt_creds else ("File" if yt_file.exists() else "Not configured")),
+    )
+
+    # X/Twitter
+    x_creds = cred_store.retrieve_json("x_cookies")
+    x_file = Path(config.x.cookies_file).expanduser()
+    x_quota = quota_mgr.get_remaining("x")
+    table.add_row(
+        "X/Twitter",
+        _badge_cell("x"),
+        str(quota_mgr.quotas.get("x", {}).daily_limit if hasattr(quota_mgr.quotas.get("x", {}), "daily_limit") else "N/A"),
+        str(x_quota.get("daily", "N/A")),
+        _live_detail("x", "Keyring" if x_creds else ("File" if x_file.exists() else "Not configured")),
+    )
+
+    # Instagram
+    ig_creds = cred_store.retrieve_json("instagram_session")
+    ig_file = Path(config.instagram.session_file).expanduser()
+    ig_quota = quota_mgr.get_remaining("instagram")
+    table.add_row(
+        "Instagram",
+        _badge_cell("instagram"),
+        str(quota_mgr.quotas.get("instagram", {}).daily_limit if hasattr(quota_mgr.quotas.get("instagram", {}), "daily_limit") else "N/A"),
+        str(ig_quota.get("daily", "N/A")),
+        _live_detail("instagram", "Keyring" if ig_creds else ("File" if ig_file.exists() else "Not configured")),
+    )
+
+    # TikTok
+    tt_live = _entry("tiktok")
+    tt_quota = quota_mgr.get_remaining("tiktok")
+    table.add_row(
+        "TikTok",
+        _badge_cell("tiktok"),
+        str(quota_mgr.quotas.get("tiktok", {}).daily_limit if hasattr(quota_mgr.quotas.get("tiktok", {}), "daily_limit") else "N/A"),
+        str(tt_quota.get("daily", "N/A")),
+        _live_detail("tiktok", str(tt_live.get("auth_mode", "source_only"))),
+    )
+
+    # Threads
+    threads_creds = cred_store.retrieve("threads_access_token")
+    threads_quota = quota_mgr.get_remaining("threads")
+    table.add_row(
+        "Threads",
+        _badge_cell("threads"),
+        str(quota_mgr.quotas.get("threads", {}).daily_limit if hasattr(quota_mgr.quotas.get("threads", {}), "daily_limit") else "N/A"),
+        str(threads_quota.get("daily", "N/A")),
+        _live_detail("threads", "Keyring" if threads_creds else ("Config" if config.threads.graph_access_token else "Not configured")),
+    )
+
+    # Facebook Page (Page-scoped publishing)
+    facebook_page_id = str(getattr(config.facebook, "page_id", "") or "")
+    facebook_quota = quota_mgr.get_remaining("facebook")
+    facebook_detail = f"Page {facebook_page_id}" if facebook_page_id else "Not configured"
+    table.add_row(
+        "Facebook Page",
+        _badge_cell("facebook"),
+        str(quota_mgr.quotas.get("facebook", {}).daily_limit if hasattr(quota_mgr.quotas.get("facebook", {}), "daily_limit") else "N/A"),
+        str(facebook_quota.get("daily", "N/A")),
+        _live_detail("facebook", facebook_detail),
+    )
+
+    # Messenger
+    messenger_creds = cred_store.retrieve("messenger_page_token")
+    messenger_quota = quota_mgr.get_remaining("messenger")
+    messenger_detail = "Not configured"
+    if messenger_creds or config.messenger.page_access_token:
+        messenger_detail = "Auto-reply" if config.messenger.auto_reply else "Messaging"
+    table.add_row(
+        "Messenger",
+        _badge_cell("messenger"),
+        str(quota_mgr.quotas.get("messenger", {}).daily_limit if hasattr(quota_mgr.quotas.get("messenger", {}), "daily_limit") else "N/A"),
+        str(messenger_quota.get("daily", "N/A")),
+        _live_detail("messenger", messenger_detail),
+    )
+
+    console.print(table)
+
+    # Forward-looking watchdog: what will break before the user notices.
+    from xpst.credential_health import build_credential_health
+
+    health = build_credential_health(live)
+    needs = health.get("needs_attention") or []
+    horizon = health.get("reauth_horizon_days")
+    if needs:
+        console.print(f"\n[bold yellow]Needs attention (within {horizon} days):[/bold yellow]")
+        for item in needs:
+            action = item.get("action") or f"xpst connect {item['platform']}"
+            console.print(f"  • [bold]{item['platform']}[/bold] — {item.get('attention')}")
+            console.print(f"    [dim]{action}[/dim]")
+    else:
+        console.print(f"\n[green]No credential needs attention within {horizon} days.[/green]")
+    unpredictable = health.get("unverifiable") or []
+    if unpredictable:
+        names = ", ".join(str(i.get("platform")) for i in unpredictable)
+        console.print(
+            f"[dim]Cannot warn ahead of time (provider reports no expiry): {names}[/dim]"
+        )
+
+    checked = [
+        float(e["checked_at"])
+        for e in live.values()
+        if isinstance(e, dict) and isinstance(e.get("checked_at"), (int, float))
+    ]
+    if checked:
+        from xpst.token_state import humanize_seconds
+
+        age = max(0.0, time.time() - max(checked))
+        console.print(
+            f"\n[dim]Badges come from a live check taken {humanize_seconds(age)} ago. "
+            "A stored credential is never enough for a green badge — run "
+            "`xpst auth status --refresh` to renew expiring tokens.[/dim]"
+        )
+
+
+# ──────────────────────────────────────────────
+# Other Commands
+# ──────────────────────────────────────────────
+
+def _render_outcome_table(report: dict) -> None:
+    """Render the outcome report: per platform, per metric, labelled source.
+
+    A platform with no metric-bearing owned post prints "No data" rather than
+    zeros, and every populated row says whether the numbers are ``Live``
+    (fetched this run) or ``Recorded`` (last persisted snapshot).
+    """
+    table = Table(title="Platform Analytics")
+    table.add_column("Platform", style="cyan")
+    table.add_column("Posts", style="white")
+    table.add_column("Views", style="green")
+    table.add_column("Likes", style="red")
+    table.add_column("Comments", style="magenta")
+    table.add_column("Shares", style="blue")
+    table.add_column("Source", style="yellow")
+
+    totals: dict[str, int] = {}
+    counted_posts = 0
+    failed_platforms: list[str] = []
+    for platform, entry in report.get("platforms", {}).items():
+        totals_row = entry.get("totals")
+        collection_error = entry.get("collection_error")
+        collection_status = str(entry.get("collection_status") or "unknown")
+        if collection_error:
+            failed_platforms.append(platform)
+        if not entry.get("has_data") or not totals_row:
+            if collection_error:
+                label = f"[red]Collection failed[/red] ({collection_error.get('failures')} post(s))"
+            elif collection_status == "failed":
+                label = "[red]Collection failed[/red] (last attempt)"
+            else:
+                label = "No data"
+            table.add_row(platform.title(), "—", "—", "—", "—", "—", label)
+            continue
+        source_label = str(entry.get("data_source_label") or "No data")
+        if collection_error:
+            # Numbers exist but this run could not refresh them — say so.
+            source_label = f"{source_label} (+ collection failed)"
+        elif collection_status == "failed":
+            # Issue #297: the numbers on this row were written by a collection
+            # attempt that FAILED — the record says so forever now.
+            source_label = f"{source_label} (+ collection failed)"
+        elif collection_status == "partial":
+            source_label = f"{source_label} (+ partial collection)"
+        elif collection_status == "unknown":
+            source_label = f"{source_label} (collection unknown)"
+        counted_posts += int(entry.get("posts_with_metrics") or 0)
+        for key, value in totals_row.items():
+            totals[key] = totals.get(key, 0) + int(value)
+        available = set(entry.get("metrics_available") or [])
+
+        def cell(key: str, row: dict = totals_row, avail: set = available) -> str:
+            if key not in avail or row.get(key) is None:
+                return "—"
+            return f"{int(row[key]):,}"
+
+        table.add_row(
+            platform.title(),
+            str(entry.get("posts_with_metrics") or 0),
+            cell("views"),
+            cell("likes"),
+            cell("comments"),
+            cell("shares"),
+            source_label,
+        )
+
+    if totals:
+        table.add_section()
+        table.add_row(
+            "[bold]TOTAL[/bold]",
+            f"[bold]{counted_posts}[/bold]",
+            f"[bold]{totals.get('views', 0):,}[/bold]",
+            f"[bold]{totals.get('likes', 0):,}[/bold]",
+            f"[bold]{totals.get('comments', 0):,}[/bold]",
+            f"[bold]{totals.get('shares', 0):,}[/bold]",
+            "[bold]Owned posts only[/bold]",
+        )
+
+    console.print(table)
+
+    excluded = (report.get("diagnostics") or {}).get("unowned_ids_excluded") or []
+    if excluded:
+        console.print(
+            f"[dim]Excluded {len(excluded)} id(s) not verified as owned by this account.[/dim]"
+        )
+
+    # Silent-zero defense (QA-2026-09-28 D1): never print an empty platform
+    # as a quiet zero when the collector actually failed — name the failure.
+    for platform, entry in report.get("platforms", {}).items():
+        collection_error = entry.get("collection_error")
+        if collection_error and entry.get("note"):
+            console.print(f"[red]⚠ {platform}: {entry['note']}[/red]")
+        elif entry.get("collection_status") == "failed" and entry.get("note"):
+            # Issue #297: the recorded ledger says the last attempt failed —
+            # the numbers on that row are not current measurements.
+            console.print(f"[red]⚠ {platform}: {entry['note']}[/red]")
+
+    # Definitive answers are not failures and must not read like one: when a
+    # platform told us why there is nothing to fetch (posts deleted upstream,
+    # provider payload shape changed), print that reason.
+    for platform, entry in report.get("platforms", {}).items():
+        unavailable = entry.get("unavailable") or {}
+        if unavailable.get("reason") and entry.get("note") and not entry.get("collection_error"):
+            console.print(f"[yellow]ℹ {platform}: {entry['note']}[/yellow]")
+
+
+def _exit_for_collection_failures(outcome_report: dict) -> None:
+    """Exit non-zero when a live analytics collection produced failures.
+
+    Silent-zero defense (QA-2026-09-28 D1): a run where the platform fetch
+    failed must be detectable by scripts without parsing the payload —
+    ``posts: 0`` with a failed collection is NOT the same as a real zero,
+    and exit 0 previously claimed success for a broken round-trip.
+    """
+    failed = (outcome_report.get("diagnostics") or {}).get("collection_failed_platforms") or []
+    if failed:
+        sys.exit(EXIT_PLATFORM_UNAVAILABLE)
+
+
+@main.command("refresh-tokens")
+@click.option("--platform", "platform", default=None, help="Only this platform (default: every platform that is due)")
+@click.option("--force", is_flag=True, help="Refresh even when the token is not expired/near expiry")
+@click.option("--max-attempts", default=3, show_default=True, type=click.IntRange(1, 10), help="Bounded retry attempts per platform")
+@click.option("--deadline", default=30.0, show_default=True, type=float, help="Wall-clock seconds of retry budget per platform")
+@json_option
+@click.pass_context
+def refresh_tokens(
+    ctx: click.Context,
+    platform: str | None,
+    force: bool,
+    max_attempts: int,
+    deadline: float,
+    as_json: bool,
+):
+    """Refresh expiring/expired access tokens (bounded retry, no prompts).
+
+    Nothing happens when no token is due, so this is safe to run from cron or
+    before a scheduled post. Failures are bounded, recorded (0600) and never
+    print credential material.
+    """
+    from xpst.token_refresh import refresh_due_tokens, save_refresh_report
+
+    config = load_config(ctx.obj.get("config_path"))
+    platforms = [platform] if platform else None
+    report = refresh_due_tokens(
+        config,
+        platforms=platforms,
+        force=force,
+        max_attempts=max_attempts,
+        deadline=deadline,
+    )
+    save_refresh_report(config, report)
+
+    if as_json:
+        json_output(
+            {"refreshed": report, "attempted": sorted(report), "count": len(report)},
+            True,
+        )
+        return
+
+    if not report:
+        console.print("[dim]No token was due for refresh.[/dim]")
+        return
+    for name, item in report.items():
+        if item.get("ok"):
+            console.print(f"[green]Refreshed {name} access token[/green] ({item.get('reason')})")
+        else:
+            console.print(f"[red]Refresh failed for {name}[/red]: {item.get('error')}")
+    failed = [name for name, item in report.items() if not item.get("ok")]
+    if failed:
+        console.print(
+            f"\n[yellow]Still broken: {', '.join(failed)}. Reconnect with "
+            f"`xpst connect {failed[0]}`.[/yellow]"
+        )
+
+
+@main.group(invoke_without_command=True)
+@click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
+@click.option("--refresh", "-r", is_flag=True, help="Force refresh (ignore cache)")
+@click.option("--live", is_flag=True,
+              help="Force a live collection now, bypassing the cache (the MCP "
+                   "xpst_analytics live=true equivalent)")
+@click.option("--recorded", is_flag=True,
+              help="Never touch the network: report the recorded snapshots only "
+                   "(the MCP xpst_analytics live=false equivalent)")
+@click.option("--cross-post", "cross_post", is_flag=True, help="Show cross-post group correlation analytics (one video across platforms)")
+@json_option
+@click.pass_context
+def analytics(ctx: click.Context, platforms: str | None, refresh: bool, live: bool, recorded: bool, cross_post: bool, as_json: bool = False):
+    """Show cross-platform analytics summary
+
+    By default this refreshes through the collector's cache (15 minutes).
+    ``--live`` forces a fresh provider round-trip now; ``--recorded`` reads the
+    local snapshot store only and makes zero network calls.
+    """
+    # Bound up front: used by the cross-post branch AND the JSON report
+    # below (a nested import inside `if cross_post` previously made `_json`
+    # a function-local name that was unbound on every other code path).
+    import json as _json
+
+    if ctx.invoked_subcommand is not None:
+        return
+    if live and recorded:
+        raise click.UsageError("--live and --recorded are opposites; choose one.")
+
+    # Cross-post correlation analytics (B1): one video → multiple platforms
+    # aggregated as a single entry with totals and per-platform breakdown.
+    if cross_post:
+        from xpst.dashboard.analytics import AnalyticsCollector
+
+        collector = AnalyticsCollector(load_config(ctx.obj.get("config_path")).config_dir)
+        groups = collector.get_cross_post_analytics()
+        click.echo(_json.dumps({"cross_post_groups": groups}, indent=2, default=str))
+        return
+
+    import asyncio
+
+    config = load_config(ctx.obj.get("config_path"))
+
+    platform_list = platforms.split(",") if platforms else None
+
+    if not as_json:
+        console.print("[bold blue]xPST - Cross-Platform Analytics[/bold blue]\n")
+
+    # Load state to get post IDs
+    from xpst.analytics import AnalyticsCollector
+
+    collector = AnalyticsCollector(config.config_dir)
+
+    if refresh or live:
+        collector._cache_ttl = 0  # Force cache miss
+
+    # --recorded is the MCP xpst_analytics live=false equivalent: report the
+    # snapshot store only, zero network calls (no live collection, and no
+    # channel-video discovery either — that walk is a YouTube API call).
+    if recorded:
+        empty_requested: dict[str, list[str]] = {}
+        if as_json:
+            report = collector.build_report({}, requested=empty_requested)
+            report["outcome_report"] = collector.outcome_report()
+            report["live"] = False
+            click.echo(_json.dumps(report, indent=2, default=str))
+        else:
+            _render_outcome_table(collector.outcome_report())
+        return
+
+    # Discover post IDs from state
+    post_ids = collector._discover_post_ids()
+
+    if platform_list:
+        post_ids = {k: v for k, v in post_ids.items() if k in platform_list}
+
+    # Also cover the channel's recent uploads (videos posted outside xPST) so
+    # analytics works for previous videos too. Failure-safe: no-op without a
+    # YouTube token or when the API is unreachable.
+    if platform_list is None or "youtube" in platform_list:
+        channel_ids = collector._discover_channel_videos()
+        if channel_ids:
+            existing = post_ids.get("youtube", [])
+            post_ids["youtube"] = list(dict.fromkeys(existing + channel_ids))
+
+    total_ids = sum(len(v) for v in post_ids.values())
+    if total_ids == 0:
+        if as_json:
+            report = collector.build_report({}, requested=post_ids)
+            report["outcome_report"] = collector.outcome_report()
+            click.echo(_json.dumps(report, indent=2, default=str))
+        else:
+            _render_outcome_table(collector.outcome_report())
+        return
+
+    if not as_json:
+        console.print(f"[dim]Fetching analytics for {total_ids} posts across {len(post_ids)} platforms...[/dim]\n")
+
+    # Collect analytics
+    data = asyncio.run(collector.collect_all(post_ids))
+
+    # D5: the outcome report is the single source of the numbers shown here.
+    # Rows fetched by the collection above are labelled "live"; anything read
+    # from the snapshot store is labelled "recorded"; a platform with no
+    # metric-bearing owned post says "no data" instead of printing zeros.
+    outcome_report = collector.outcome_report(live_data=data)
+
+    # G24: machine-readable output for agents/scripts. Phase 1.1 contract:
+    # an aggregate report — per platform: as-of timestamp, metrics available
+    # vs missing, and values (architecture §2.5) — never fabricated zeros.
+    if as_json:
+        report = collector.build_report(data, requested=post_ids)
+        report["outcome_report"] = outcome_report
+        click.echo(_json.dumps(report, indent=2, default=str))
+        _exit_for_collection_failures(outcome_report)
+        return
+
+    _render_outcome_table(outcome_report)
+
+    # Top posts detail: owned posts with metrics, newest capture first.
+    all_posts = [
+        {**outcome, "platform": platform}
+        for platform, entry in outcome_report["platforms"].items()
+        for outcome in entry["outcomes"]
+        if outcome.get("metrics")
+    ]
+
+    if all_posts:
+        all_posts.sort(key=lambda p: (p.get("metrics") or {}).get("views") or 0, reverse=True)
+        console.print("\n[bold]Top Posts by Views:[/bold]")
+        detail_table = Table(show_header=True, header_style="bold")
+        detail_table.add_column("#", style="dim")
+        detail_table.add_column("Platform", style="cyan")
+        detail_table.add_column("Post ID")
+        detail_table.add_column("Views", style="green")
+        detail_table.add_column("Likes", style="red")
+        detail_table.add_column("Comments", style="magenta")
+        detail_table.add_column("Source")
+
+        for i, p in enumerate(all_posts[:10], 1):
+            metrics = p.get("metrics") or {}
+            detail_table.add_row(
+                str(i),
+                p["platform"].title(),
+                str(p.get("post_id", ""))[:20],
+                f"{metrics.get('views'):,}" if metrics.get("views") is not None else "—",
+                f"{metrics.get('likes'):,}" if metrics.get("likes") is not None else "—",
+                f"{metrics.get('comments'):,}" if metrics.get("comments") is not None else "—",
+                "Live" if p.get("metric_source") == "live" else "Recorded",
+            )
+
+        console.print(detail_table)
+
+    # A live-refreshed run whose collection failed is not a success — exit
+    # non-zero so scripts/cron see the failure (silent-zero defense, D1).
+    # --live is the same round-trip and carries the same obligation.
+    if refresh or live:
+        _exit_for_collection_failures(outcome_report)
+
+
+@main.command()
+@json_option
+@click.pass_context
+def logs(ctx: click.Context, as_json: bool):
+    """View recent logs"""
+    config = load_config(ctx.obj.get("config_path"))
+    log_file = Path(config.monitoring.log_file).expanduser()
+
+    if not log_file.exists():
+        if as_json:
+            json_output({"logs": [], "error": "No log file found"}, True)
+        else:
+            console.print("[yellow]No log file found[/yellow]")
+        return
+
+    # Show last 50 lines
+    with open(log_file) as f:
+        lines = f.readlines()
+
+    if as_json:
+        json_output({"logs": [log_line.rstrip() for log_line in lines[-50:]]}, True)
+    else:
+        for line in lines[-50:]:
+            console.print(line.rstrip())
+
+
+@main.command()
+@click.option("--output", "-o", default=None, type=click.Path(), help="Output zip path")
+@click.option("--log-lines", default=200, type=int, show_default=True, help="Recent log lines to include")
+@json_option
+@click.pass_context
+def diagnostics(ctx: click.Context, output: str | None, log_lines: int, as_json: bool):
+    """Export a redacted local diagnostics bundle."""
+    from xpst.diagnostics import build_diagnostics_bundle
+
+    config = load_config(ctx.obj.get("config_path"))
+    try:
+        path = build_diagnostics_bundle(config, output=output, log_lines=log_lines)
+    except OSError as e:
+        if as_json:
+            json_output({"ok": False, "error": str(e)}, True)
+        else:
+            console.print(f"[red]Failed to create diagnostics bundle:[/red] {e}")
+        sys.exit(EXIT_GENERAL)
+
+    if as_json:
+        json_output({"ok": True, "output": str(path), "redacted": True}, True)
+    else:
+        console.print(f"[green]Diagnostics bundle written:[/green] [bold]{path}[/bold]")
+        console.print("[dim]Review diagnostics.json before sharing if logs may contain private details.[/dim]")
+
+
+@main.command()
+@click.argument('video_id')
+@click.option('--platform', '-p', help='Platform to delete from (default: all)')
+@click.option('--soft', is_flag=True, help='Unpublish instead of hard-delete (YouTube: sets privacyStatus=private)')
+@click.option('--visibility', type=click.Choice(['private', 'unlisted']), default=None,
+              help='Target visibility for soft-delete/unpublish (YouTube only)')
+@click.option('--yes', '-y', is_flag=True, help='Skip confirmation')
+@click.option('--dry-run', 'dry_run', is_flag=True,
+              help='Show what would be deleted without contacting any platform')
+@json_option
+@click.pass_context
+def delete(ctx: click.Context, video_id: str, platform: str, soft: bool, visibility: str | None,
+           yes: bool, dry_run: bool, as_json: bool):
+    """Delete a posted video from platforms.
+
+    VIDEO_ID accepts xPST's internal id, the platform-side post id, or a full
+    post URL (e.g. https://youtube.com/shorts/RZ6i-0HM5dM) — the latter two are
+    resolved to the internal record via stored state.
+
+    Routes every platform through the Phase-1.2 delete contract: each result
+    carries an explicit outcome (deleted / soft_hidden / pending / unsupported)
+    plus a UI-facing message — no silent failures. Use --soft to unpublish
+    (reversible, YouTube privacyStatus=private|unlisted) instead of hard-deleting.
+    """
+    import asyncio
+
+    from xpst.platforms.base import DeleteOutcome
+
+    config = load_config(ctx.obj.get("config_path"))
+
+    # Resolve the destination list straight from config flags — do NOT
+    # instantiate CrossPostEngine here: its __init__ performs crash recovery
+    # and may create/rotate state files, which --dry-run must never do.
+    all_dest_platforms = [
+        name for name, enabled in (
+            ("youtube", config.youtube.enabled),
+            ("x", config.x.enabled),
+            ("instagram", config.instagram.enabled),
+            ("tiktok", config.tiktok.enabled),
+            ("threads", config.threads.enabled),
+        ) if enabled
+    ]
+    platforms = [platform] if platform else all_dest_platforms
+
+    if dry_run:
+        plan = {
+            "dry_run": True,
+            "video_id": video_id,
+            "platforms": platforms,
+            "soft": bool(soft),
+            "visibility": visibility,
+        }
+        if as_json:
+            json_output(plan, True)
+        else:
+            if not ctx.obj.get("quiet", False):
+                console.print("[bold blue]Dry run — would delete:[/bold blue]")
+            console.print(f"  Video: {video_id}")
+            console.print(f"  Platforms: {', '.join(platforms)}")
+            console.print(f"  Mode: {'soft (unpublish)' if soft else 'hard delete'}")
+        return
+
+    # Destructive-action guard: in non-interactive/JSON mode an explicit --yes
+    # is REQUIRED. Previously, piped invocations (auto-JSON) silently deleted
+    # without confirmation — a dangerous default for scripted/agent use.
+    if not yes and (as_json or not sys.stdin.isatty()):
+        message = (
+            "Refusing to delete without confirmation. Re-run with --yes "
+            "to confirm deletion of this video."
+        )
+        if as_json:
+            json_output(_error_payload(
+                "CONFIRMATION_REQUIRED", message,
+                video_id=video_id, platforms=platforms, hint="--yes"), True)
+        else:
+            console.print("[red]Refusing to delete without confirmation.[/red]")
+            console.print(f"[dim]Re-run with --yes to confirm deletion of {video_id}.[/dim]")
+        sys.exit(EXIT_GENERAL)
+    if not yes:
+        click.confirm(f'Delete {video_id} from {platform or "all platforms"}?', abort=True) # nosec B608 - click.confirm prompt, not SQL
+
+    engine = CrossPostEngine(config)
+
+    async def do_delete() -> list[dict]:
+        """Execute deletion across all target platforms."""
+        results = []
+        for p in platforms:
+            result = await engine.delete_post(video_id, p, soft=soft, visibility=visibility)
+            results.append(result.to_dict())
+            if result.outcome in (DeleteOutcome.DELETED, DeleteOutcome.SOFT_HIDDEN):
+                click.echo(f"  \u2713 {result.message}")
+            elif result.outcome == DeleteOutcome.PENDING:
+                click.echo(f"  \u26a0 {result.message}")
+            else:
+                click.echo(f"  \u2717 {result.message}")  # noqa: SIM114 - distinct glyph per outcome
+        return results
+
+    results = asyncio.run(do_delete())
+    if as_json:
+        json_output({"video_id": video_id, "results": results}, True)
+
+
+@main.command()
+@click.option("--no-dashboard", "no_dashboard", is_flag=True, help="Do not start the FastAPI dashboard server")
+@click.option("--port", "-p", default=None, type=int, help="Dashboard HTTP port (default: config monitoring.healthcheck_port)")
+@click.option("--host", default="127.0.0.1", help="Dashboard bind host (default: 127.0.0.1)")
+@click.option("--interval", "-i", default=None, type=int, help="Scheduler check interval in seconds (default: config schedule.check_interval)")
+@click.option("--source", "-s", default=None, type=click.Choice(_SOURCE_CHOICES), help="Video source for the watch check (default: tiktok)")
+@click.pass_context
+def serve(ctx: click.Context, no_dashboard: bool, port: int | None, host: str, interval: int | None, source: str | None):
+    """Run the xPST supervisor daemon: scheduler loop + optional dashboard.
+
+    Runs the configured scheduler loop (reusing the existing Scheduler and
+    ScheduleManager) under the shared engine pidfile, and optionally serves
+    the FastAPI dashboard. Designed to be run supervised by launchd,
+    systemd, or a process manager — handles SIGTERM/SIGINT gracefully,
+    releases the pidfile on shutdown, and logs health lines to stderr/log
+    file suitable for supervisor collection.
+
+    \b
+    Examples:
+        xpst serve                  # daemon: scheduler + dashboard (default port)
+        xpst serve --no-dashboard   # scheduler loop only (headless)
+        xpst serve --port 9000      # scheduler + dashboard on port 9000
+    """
+    config = load_config(ctx.obj.get("config_path"))
+    setup_logging(
+        log_level=config.monitoring.log_level,
+        log_file=config.monitoring.log_file,
+    )
+
+    # The supervisor would run a scheduler loop that can never publish: refuse
+    # at startup with the same canonical error as `run`/`watch`/`post` rather
+    # than supervise a permanently empty pipeline.
+    _refuse_unless_routed(
+        ctx,
+        config,
+        as_json=ctx.obj.get("json", False),
+        quiet=ctx.obj.get("quiet", False),
+    )
+
+    from xpst.serve import run_serve
+
+    chosen_source = source or "tiktok"
+    exit_code = run_serve(
+        config,
+        no_dashboard=no_dashboard,
+        host=host,
+        port=port,
+        check_interval=interval,
+        source=chosen_source,
+    )
+    ctx.exit(exit_code)
+
+
+@main.command()
+@click.option("--port", "-p", default=8080, type=int, envvar="XPST_DASHBOARD_PORT",
+              help="Dashboard HTTP port (env: XPST_DASHBOARD_PORT)")
+@click.option("--host", default="127.0.0.1",
+              help="Bind address (default: 127.0.0.1, loopback only)")
+@click.option("--api-only", is_flag=True, default=True, hidden=True,
+              help="API-only mode (default, no NiceGUI required)")
+@click.pass_context
+def dashboard(ctx: click.Context, port: int, host: str, api_only: bool):
+    """Launch the web API dashboard"""
+    config_path = ctx.obj.get("config_path")
+    config_dir = str(get_config_dir())
+    if config_path:
+        config_dir = str(Path(config_path).parent)
+    else:
+        try:
+            cfg = load_config(config_path)
+            config_dir = cfg.config_dir
+        except Exception as e:
+            logger.debug("Could not load config for dashboard: %s", e)
+
+    console.print(f"[bold blue]Starting xPST Dashboard on http://{host}:{port}[/bold blue]")
+    console.print("[dim]Press Ctrl+C to stop[/dim]\n")
+
+    from xpst.dashboard.server import start_dashboard
+
+    start_dashboard(port=port, host=host, config_dir=config_dir)
+
+
+@main.command()
+@click.option("--port", "-p", default=8080, type=int, help="Dashboard HTTP port")
+@click.option("--host", default="127.0.0.1",
+              help="Dashboard bind host (default: 127.0.0.1)")
+@click.option("--reveal", is_flag=True,
+              help="Print the admin URL with the dashboard API token in full "
+                   "(it is masked by default so the output can be pasted, "
+                   "screenshotted, or logged without leaking the credential)")
+@json_option
+@click.pass_context
+def bio(ctx: click.Context, port: int, host: str, reveal: bool, as_json: bool):
+    """Print your Link-in-Bio page URL (start the dashboard with `xpst dashboard` first)
+
+    Also prints the admin editor URL. The editor is a plain HTML form, so the
+    dashboard API token attached to it is what authorises its writes when no
+    dashboard username/password is configured. Because a URL with a live
+    credential pastes into chat, tickets and screenshots as easily as a
+    password, the token is MASKED by default; ``--reveal`` prints it whole and
+    ready to open.
+    """
+    from xpst.dashboard.auth import ensure_api_token
+    from xpst.dashboard.server import bio_edit_url, bio_url
+
+    config = load_config(ctx.obj.get("config_path"))
+    url = bio_url(host=host, port=port)
+    token: str | None = None
+    try:
+        token = ensure_api_token(config.config_dir)
+    except Exception as exc:  # noqa: BLE001 - the public URL is still useful
+        logger.debug("Could not read the dashboard API token: %s", exc)
+    edit_url = bio_edit_url(host=host, port=port, token=token if reveal else None)
+    masked_url = bio_edit_url(host=host, port=port, token=_mask_token(token))
+
+    if as_json:
+        payload: dict = {"url": url, "edit_url": edit_url if reveal else masked_url}
+        if not reveal:
+            payload["edit_url_reveal_flag"] = "--reveal"
+        if reveal and token:
+            payload["edit_url_masked"] = masked_url
+        json_output(payload, True)
+        return
+    console.print(f"[bold blue]Link-in-Bio:[/bold blue] {url}")
+    console.print(f"[bold blue]Edit page:[/bold blue] {edit_url if reveal else masked_url}")
+    if not reveal:
+        console.print("[dim]Token masked — rerun with --reveal for a ready-to-open URL.[/dim]")
+    console.print("[dim]Start the dashboard with `xpst dashboard`, then share the public URL.[/dim]")
+
+
+# ──────────────────────────────────────────────
+# Local Web UI Command (Phase 1 product UI, arch D1)
+# ──────────────────────────────────────────────
+
+@main.command()
+@click.option("--port", "-p", default=8080, type=int,
+              help="UI server HTTP port (default: 8080)")
+@click.option("--host", default="127.0.0.1",
+              help="Bind address (default: 127.0.0.1). Use 0.0.0.0 or a tailnet "
+                   "address to reach the UI from a phone; reads then require a credential.")
+@click.option("--no-browser", is_flag=True,
+              help="Do not open the default browser (server/agent mode)")
+@json_option
+@click.pass_context
+def ui(ctx: click.Context, port: int, host: str, no_browser: bool, as_json: bool):
+    """Launch the local web UI (dashboard server + default browser)
+
+    Starts the xPST dashboard API server (loopback by default) and opens the
+    default browser to the UI once the server is accepting connections. Pass
+    --no-browser for server/agent mode: the server stays up until SIGINT/SIGTERM
+    (graceful shutdown) and a readiness line with the UI URL and PID is printed
+    for scripts/MCP to parse.
+
+    For a phone, bind a reachable address (``--host 0.0.0.0``) and run
+    ``xpst pair`` — a non-loopback bind requires a credential for reads as well
+    as writes.
+    """
+    config_path = ctx.obj.get("config_path")
+    config_dir = str(get_config_dir())
+    if config_path:
+        config_dir = str(Path(config_path).parent)
+    else:
+        try:
+            cfg = load_config(config_path)
+            config_dir = cfg.config_dir
+        except Exception as e:
+            logger.debug("Could not load config for ui: %s", e)
+
+    url = f"http://{host}:{port}"
+
+    from xpst.dashboard.server import UI_BUILD_HINT, _ui_dist_dir
+
+    # Resolved before the server starts so both the readiness payload and the
+    # warning describe what will actually be served, not what should be.
+    ui_dist = _ui_dist_dir()
+
+    def _on_ready(ready_url: str) -> None:
+        # Printed only once the server is actually accepting connections,
+        # so scripts/MCP can rely on it as a hard readiness signal. The
+        # ``ui_built`` flag keeps the missing-bundle case machine-readable:
+        # without it a JSON caller cannot tell the real UI from the
+        # placeholder page.
+        payload = {"url": ready_url, "pid": os.getpid(), "ui_built": ui_dist is not None}
+        if as_json:
+            json_output(payload, True)
+            return
+        console.print(
+            f"[bold green]xPST UI ready[/bold green] at {ready_url} "
+            f"(pid {os.getpid()})"
+        )
+        console.print("[dim]Press Ctrl+C to stop[/dim]")
+
+    if not as_json:
+        console.print(f"[bold blue]Starting xPST UI on {url}[/bold blue] ...")
+        if ui_dist is None:
+            console.print(f"[bold yellow]No web UI build found[/bold yellow]: {UI_BUILD_HINT}")
+
+    from xpst.dashboard.server import serve_ui
+
+    serve_ui(
+        port=port,
+        host=host,
+        config_dir=config_dir,
+        open_browser=not no_browser,
+        on_started=_on_ready,
+    )
+
+
+# ──────────────────────────────────────────────
+# Device pairing (phone access, M0)
+# ──────────────────────────────────────────────
+
+@main.command()
+@click.option("--label", default="phone", show_default=True,
+              help="Label recorded on the device this code pairs")
+@click.option("--ttl", "ttl_s", default=600, type=int, show_default=True,
+              help="Seconds the code stays valid")
+@click.option("--code", default=None,
+              help="Use this fixed 8-character code instead of a random one")
+@click.option("--host", default="127.0.0.1", show_default=True,
+              help="Engine host to print in the pairing URL")
+@click.option("--port", "-p", default=8080, type=int, show_default=True,
+              help="Engine port to print in the pairing URL")
+@json_option
+@click.pass_context
+def pair(ctx: click.Context, label: str, ttl_s: int, code: str | None, host: str, port: int, as_json: bool):
+    """Create a one-time pairing code for a phone.
+
+    \b
+    The phone exchanges the code once for its own device token:
+        POST /api/pair {"code": "ABCD-EFGH", "label": "phone"}
+    The token is returned once, stored hashed by the engine, and can be revoked
+    with `xpst devices --revoke <device_id>`.
+    """
+    from xpst.dashboard.devices import PairingError, create_pairing_code
+
+    config = load_config(ctx.obj.get("config_path"))
+    try:
+        issued = create_pairing_code(config.config_dir, label=label, ttl_s=ttl_s, code=code)
+    except PairingError as exc:
+        if as_json:
+            json_output({"ok": False, "error": exc.to_dict()}, True)
+        else:
+            console.print(f"[red]{exc.message}[/red]")
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    url = f"http://{host}:{port}"
+    if as_json:
+        json_output({"ok": True, "url": url, **issued}, True)
+        return
+    console.print(f"[bold green]Pairing code:[/bold green] [bold]{issued['code']}[/bold]")
+    console.print(
+        f"[dim]Valid for {issued['expires_in_s'] // 60} min, single use, label "
+        f"'{issued['label']}'.[/dim]"
+    )
+    console.print(
+        f"[dim]On the phone, open {url} and enter the code (or POST /api/pair "
+        f"{{\"code\": \"{issued['code']}\"}}).[/dim]"
+    )
+
+
+@main.command()
+@click.option("--revoke", "revoke_id", default=None,
+              help="Revoke this device id; its token stops working immediately")
+@json_option
+@click.pass_context
+def devices(ctx: click.Context, revoke_id: str | None, as_json: bool):
+    """List paired devices, or revoke one with --revoke."""
+    from xpst.dashboard.devices import list_devices, revoke_device
+
+    config = load_config(ctx.obj.get("config_path"))
+    if revoke_id:
+        revoked = revoke_device(config.config_dir, revoke_id)
+        if as_json:
+            json_output({"ok": revoked, "device_id": revoke_id, "revoked": revoked}, True)
+        else:
+            console.print(
+                f"[green]Revoked {revoke_id}.[/green]" if revoked
+                else f"[yellow]{revoke_id} was already revoked (or is unknown).[/yellow]"
+            )
+        if not revoked:
+            ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    rows = list_devices(config.config_dir)
+    if as_json:
+        json_output({"ok": True, "devices": rows}, True)
+        return
+    if not rows:
+        console.print("[dim]No paired devices. Run `xpst pair` to add one.[/dim]")
+        return
+    for row in rows:
+        state = "revoked" if row["revoked"] else "active"
+        console.print(f"[bold]{row['device_id']}[/bold]  {row['label']}  ({state})")
+
+
+# ──────────────────────────────────────────────
+# Desktop App Command
+# ──────────────────────────────────────────────
+
+
+def _desktop_shell_candidates() -> list[Path]:
+    """Installed locations of the Tauri desktop shell, in preference order.
+
+    The shell is a native binary/``.app`` bundle (``com.tysais.xpst``), not a
+    Python module, so it is located on disk instead of imported.
+
+    ``com.tysais.xpst`` is the product's reverse-DNS bundle identifier, not
+    personal data: it is the shipped id from ``src-tauri/tauri.conf.json``, and
+    the public-safety deny list carries it as an allowed product identifier
+    (see ``.public-safety-denylist`` and D-2 in ``docs/DIRECTION.md``).
+    """
+    home = Path.home()
+    if sys.platform == "darwin":
+        return [Path("/Applications/xPST.app"), home / "Applications" / "xPST.app"]
+    if sys.platform == "win32":
+        candidates: list[Path] = []
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            candidates.append(Path(local) / "xPST" / "xPST.exe")
+        for variable in ("ProgramFiles", "ProgramFiles(x86)"):
+            base = os.environ.get(variable)
+            if base:
+                candidates.append(Path(base) / "xPST" / "xPST.exe")
+        return candidates
+    # Linux: the .deb installs `xPST` (capitalised — the lowercase `xpst`
+    # on PATH is this CLI), the AppImage is usually kept in ~/Applications.
+    return [
+        Path("/usr/bin/xPST"),
+        Path("/usr/local/bin/xPST"),
+        home / "Applications" / "xPST.AppImage",
+    ]
+
+
+@main.command()
+def app():
+    """Launch the installed xPST desktop app (Tauri shell).
+
+    The desktop app is the Tauri shell under ``src-tauri/``, which spawns the
+    bundled Python engine sidecar itself. Build it with
+    ``scripts/build-engine.sh`` + ``cargo tauri build`` (see docs/PACKAGING.md)
+    or install a published bundle from the GitHub Releases page.
+    """
+    import subprocess
+
+    target = next((path for path in _desktop_shell_candidates() if path.exists()), None)
+    if target is None:
+        console.print("[yellow]xPST desktop app not found.[/yellow]")
+        console.print("[dim]Install a published bundle from https://github.com/TysAIs/xPST/releases[/dim]")
+        console.print("[dim]or build one from a checkout: scripts/build-engine.sh && (cd src-tauri && cargo tauri build)[/dim]")
+        sys.exit(EXIT_GENERAL)
+
+    console.print(f"[bold blue]Launching xPST desktop app…[/bold blue] [dim]{target}[/dim]")
+    command = ["open", str(target)] if sys.platform == "darwin" else [str(target)]
+    subprocess.Popen(command)
+
+
+# ──────────────────────────────────────────────
+# MCP Server Command
+# ──────────────────────────────────────────────
+
+@main.group(invoke_without_command=True)
+@click.pass_context
+def mcp(ctx):
+    """MCP (Model Context Protocol) server commands"""
+    if ctx.invoked_subcommand is None:
+        from xpst.mcp import cli_main
+        config_path = ctx.obj.get("config_path") if ctx.obj else None
+        cli_main(config_path) if config_path else cli_main()
+
+
+@mcp.command()
+@click.pass_context
+def start(ctx):
+    """Start MCP server over stdio using the selected config."""
+    from xpst.mcp import cli_main
+    cli_main(ctx.parent.obj.get("config_path") if ctx.parent and ctx.parent.obj else None)
+
+
+@mcp.command(name="list")
+@json_option
+def mcp_list(as_json: bool):
+    """List all available MCP tools"""
+    import importlib.util
+
+    if importlib.util.find_spec("mcp") is None:
+        message = "MCP package not installed. Install with: pip install 'xpst[mcp]'"
+        if as_json:
+            json_output(_error_payload("MCP_EXTRA_MISSING", message, hint="pip install 'xpst[mcp]'"), True)
+        else:
+            click.echo(message)
+        return
+
+    from xpst.mcp.server import TOOLS
+
+    if as_json:
+        tools_data = [{"name": t.name, "description": t.description} for t in TOOLS]
+        click.echo(_json.dumps(tools_data, indent=2))
+    else:
+        console.print(f"\n[bold]MCP Tools ({len(TOOLS)})[/bold]\n")
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("#")
+        table.add_column("Tool")
+        table.add_column("Description")
+        for i, tool in enumerate(TOOLS, 1):
+            desc = (tool.description or "").split("\n")[0]
+            table.add_row(str(i), tool.name, desc[:80])
+        console.print(table)
+
+
+# ──────────────────────────────────────────────
+# Messenger / IG+FB comment automation
+# ──────────────────────────────────────────────
+
+@main.group()
+@click.pass_context
+def messenger(ctx: click.Context):
+    """Messenger — IG + Facebook comment auto-reply (Content360-lite)."""
+    pass
+
+
+@messenger.command("status")
+@json_option
+@click.pass_context
+def messenger_status(ctx: click.Context, as_json: bool) -> None:
+    """Report Messenger readiness: token, switches, webhook, quota.
+
+    The auth-status table shows one Messenger row; this is the per-detail
+    answer (the same fields `xpst auth status` summarises), so an operator can
+    see WHICH prerequisite is missing instead of a bare \"Not configured\".
+    """
+    from xpst.utils.credentials import CredentialStore
+
+    config = load_config(ctx.obj.get("config_path"))
+    store = CredentialStore(config.config_dir)
+    token = None
+    try:
+        token = store.retrieve("messenger_page_token") or config.messenger.page_access_token
+    except Exception as exc:  # noqa: BLE001 - a credential read must stay reportable
+        logger.debug("Could not read the Messenger page token: %s", exc)
+
+    payload = {
+        "enabled": bool(config.messenger.enabled),
+        "page_configured": bool(config.messenger.page_id),
+        "page_id": config.messenger.page_id or None,
+        "token_configured": bool(token),
+        "token_preview": _mask_token(token),
+        "auto_reply": bool(config.messenger.auto_reply),
+        "comment_reply_enabled": bool(config.messenger.comment_reply_enabled),
+        "comment_platforms": list(config.messenger.comment_platforms),
+        "reply_rules": len(config.messenger.reply_rules),
+        "webhook_path": config.messenger.webhook_path,
+    }
+    if as_json:
+        json_output(payload, True)
+        return
+
+    def _yesno(flag: bool) -> str:
+        return "[green]yes[/green]" if flag else "[red]no[/red]"
+
+    console.print("[bold blue]Messenger status[/bold blue]")
+    console.print(f"  Enabled:        {_yesno(payload['enabled'])}")
+    console.print(f"  Page ID:        {payload['page_id'] or '[red]missing[/red]'}")
+    console.print(
+        f"  Page token:     {('configured (' + str(payload['token_preview']) + ')') if payload['token_configured'] else '[red]missing[/red]'}"
+    )
+    console.print(f"  DM auto-reply:  {_yesno(payload['auto_reply'])} ({payload['reply_rules']} rule(s))")
+    console.print(
+        f"  Comment reply:  {_yesno(payload['comment_reply_enabled'])} "
+        f"(platforms: {', '.join(payload['comment_platforms']) or 'none'})"
+    )
+    console.print(f"  Webhook path:   {payload['webhook_path']}")
+    if not payload["token_configured"] or not payload["page_configured"]:
+        console.print("[dim]Connect with: xpst auth messenger[/dim]")
+
+
+@messenger.command("check-comments")
+@click.argument("media_id")
+@click.option(
+    "--platform",
+    "-p",
+    type=click.Choice(["instagram", "facebook"]),
+    default="instagram",
+    show_default=True,
+    help="Platform owning media_id (instagram or facebook)",
+)
+@click.option(
+    "--since",
+    "since_ts",
+    type=int,
+    default=None,
+    help="Only reply to comments created after this epoch timestamp (Facebook only)",
+)
+@json_option
+@click.pass_context
+def messenger_check_comments(
+    ctx: click.Context,
+    media_id: str,
+    platform: str,
+    since_ts: int | None,
+    as_json: bool,
+) -> None:
+    """Fetch recent comments on a post and auto-reply per reply_rules.
+
+    Gated by accounts.messenger.comment_reply_enabled and
+    accounts.messenger.comment_platforms. Replies use the same keyword →
+    reply map as DM auto-reply (reply_rules).
+    """
+    import asyncio as _asyncio
+
+    from xpst.platforms.messenger import MessengerAdapter
+
+    config = load_config(ctx.obj.get("config_path"))
+    adapter = MessengerAdapter(config)
+    results = _asyncio.run(adapter.auto_reply_to_comments(platform, media_id, since_ts))
+
+    if as_json:
+        json_output({"media_id": media_id, "platform": platform, "results": results}, True)
+        return
+
+    if not results:
+        console.print("[dim]No comments to process (disabled, platform not enabled, or none found).[/dim]")
+        return
+    replied = sum(1 for r in results if r.get("sent"))
+    console.print(
+        f"[bold]Comment scan on {platform} media {media_id}:[/bold] {replied}/{len(results)} replied"
+    )
+    for r in results:
+        if r.get("error"):
+            console.print(f"[red]❌ {r.get('comment_id')} ({r.get('from', '')}): {r.get('error')}[/red]")
+        elif r.get("sent"):
+            console.print(f"[green]✅ Replied to {r.get('comment_id')} ({r.get('from', '')}): {r.get('reply')}[/green]")
+        else:
+            console.print(f"[yellow]⏭  Skipped {r.get('comment_id')} ({r.get('from', '')}): no matching rule[/yellow]")
+
+
+# ──────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────
+
+def _display_result(result: CrossPostResult) -> None:
+    """Display a cross-posting result as a rich table.
+
+    Shows per-platform status (OK/FAIL) with URLs or error messages.
+
+    Args:
+        result: CrossPostResult to display.
+    """
+
+    from xpst.utils.errors import describe_remediation
+
+    status = "[green]✅ Success[/green]" if result.all_success else "[yellow]⚠️  Partial[/yellow]" if result.partial_success else "[red]❌ Failed[/red]"
+
+    console.print(f"\n[bold]{result.video_id}[/bold] - {status}")
+    console.print(f"Caption: {result.caption[:50]}...")
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Platform")
+    table.add_column("Status")
+    table.add_column("URL/Error")
+
+    for platform, upload_result in result.results.items():
+        state = str((upload_result.metadata or {}).get("state") or "")
+        if upload_result.success:
+            table.add_row(
+                platform.title(),
+                "[green]OK[/green]",
+                upload_result.post_url or "-",
+            )
+        elif state == "skipped_unconnected":
+            # Not a failure: the account was never connected (R3).
+            table.add_row(
+                platform.title(),
+                "[yellow]SKIPPED[/yellow]",
+                f"not connected — xpst connect {platform}",
+            )
+        elif state == "unsupported_format":
+            table.add_row(
+                platform.title(),
+                "[yellow]UNSUPPORTED[/yellow]",
+                upload_result.error or "destination cannot publish this format",
+            )
+        else:
+            table.add_row(
+                platform.title(),
+                "[red]FAIL[/red]",
+                upload_result.error or "Unknown error",
+            )
+
+    console.print(table)
+
+    # Actionable remediation for the common failure modes (expired token,
+    # missing scope, quota exceeded) — a copy-pasteable fix, not just the
+    # raw error.
+    for platform, upload_result in result.results.items():
+        if upload_result.success or not upload_result.error:
+            continue
+        hint = describe_remediation(platform, upload_result.error)
+        if hint:
+            console.print(f"[yellow]💡 Fix ({platform}):[/yellow] {hint}")
+
+
+def _print_destination_advisories(item: dict, *, indent: str = "      ") -> None:
+    """Print one destination's advisories and its rendition decision.
+
+    Warnings were JSON-only, so a human reading ``preflight`` saw "would
+    publish" with no hint that the destination will re-encode the file, or
+    that a soft ceiling was exceeded (F6). ``transform``/``transforms`` are
+    printed only when the caller asked for the rendition plan (F1) — absent
+    means "not computed", which must never read as "passthrough".
+    """
+    for issue in item.get("warnings") or []:
+        console.print(
+            f"{indent}[yellow]advisory[/yellow] ({issue.get('code')}): {issue.get('message')}"
+        )
+    transform = item.get("transform")
+    transforms = item.get("transforms") or []
+    plans = transforms or ([transform] if transform else [])
+    for index, plan in enumerate(plans, start=1):
+        prefix = f"item {index} " if len(plans) > 1 else ""
+        reasons = "; ".join(plan.get("reasons") or []) or "no change needed"
+        console.print(f"{indent}{prefix}transform: {plan.get('action')} — {reasons}")
+
+
+def _print_route_plan(route_plan: dict) -> None:
+    """Print the resolved per-destination plan (R4) before anything publishes.
+
+    States are shown exactly as the JSON carries them: ``posted`` (will
+    publish), ``skipped_unconnected`` (connect command shown), or
+    ``unsupported_format`` (the envelope is in the reason).
+    """
+    destinations = route_plan.get("destinations") or []
+    if not destinations:
+        return
+    console.print("  Resolved plan:")
+    for item in destinations:
+        state = item.get("state")
+        colour = {"posted": "green", "skipped_unconnected": "yellow"}.get(state, "red")
+        console.print(
+            f"    - {item.get('platform')}: [{colour}]{state}[/{colour}] — {item.get('reason')}"
+        )
+        _print_destination_advisories(item, indent="      ")
+
+
+def _result_to_dict(result: CrossPostResult) -> dict:
+    """Convert a CrossPostResult to a plain dict for JSON output."""
+    from xpst.utils.errors import describe_remediation
+
+    platforms = {}
+    for platform, ur in result.results.items():
+        entry = {
+            "success": ur.success,
+            "outcome": ur.status,
+            "status": ur.status,
+            "post_url": ur.post_url,
+            "post_id": ur.post_id,
+            "error": ur.error,
+            "platform": ur.platform,
+        }
+        if ur.retryable is not None:
+            entry["retryable"] = ur.retryable
+            entry["terminal"] = not ur.retryable
+        if not ur.success and ur.error:
+            hint = describe_remediation(platform, ur.error)
+            if hint:
+                entry["hint"] = hint
+        platforms[platform] = entry
+    return {
+        "video_id": result.video_id,
+        "caption": result.caption[:80],
+        "all_success": result.all_success,
+        "partial_success": result.partial_success,
+        "platforms": platforms,
+    }
+
+
+def _check_crash_recovery(engine: CrossPostEngine) -> None:
+    """Check for crash recovery on startup and queue retries.
+
+    Examines state for partially-completed uploads (some platforms done,
+    others not) and prompts the user to retry missing platforms.
+
+    Args:
+        engine: Initialized CrossPostEngine instance.
+    """
+
+    from xpst.crash_recovery import CrashRecoveryManager
+
+    recovery = CrashRecoveryManager(engine.config.config_dir)
+    retry_items = recovery.check_and_recover(engine.state)
+
+    if retry_items:
+        for item in retry_items:
+            video_id = item["video_id"]
+            missing_platforms = item["missing_platforms"]
+            console.print(f"[dim]Queuing retry: {video_id} → {', '.join(missing_platforms)}[/dim]")
+
+
+def _auth_youtube(config: XPSTConfig) -> None:
+    """Guide YouTube OAuth authentication and store credentials.
+
+    Args:
+        config: Loaded xPST configuration.
+    """
+
+    creds_dir = Path(config.config_dir) / "credentials"
+    cred_store = CredentialStore(config.config_dir)
+
+    # Check if credentials file exists
+    Path(config.youtube.client_secrets).expanduser()
+    token_file = Path(config.youtube.token_file).expanduser()
+
+    if token_file.exists():
+        # Store token in keyring
+        try:
+            token_data = token_file.read_text()
+            cred_store.store("youtube_token", token_data)
+            console.print("[green]✅ YouTube token stored in secure keychain[/green]")
+        except Exception as e:
+            console.print(f"[yellow]⚠️ Could not store in keychain: {e}[/yellow]")
+
+    console.print(f"""
+[bold]YouTube Authentication[/bold]
+
+1. Go to Google Cloud Console: https://console.cloud.google.com
+2. Create or select a project
+3. Enable YouTube Data API v3
+4. Create OAuth 2.0 credentials (Desktop application)
+5. Download client_secrets.json
+6. Save to: {creds_dir}/youtube_client_secrets.json
+
+Then run this command again to complete authentication.
+""")
+
+
+def _auth_x(config: XPSTConfig) -> None:
+    """Guide X/Twitter cookie-based authentication and store credentials.
+
+    Args:
+        config: Loaded xPST configuration.
+    """
+
+    creds_dir = Path(config.config_dir) / "credentials"
+    cred_store = CredentialStore(config.config_dir)
+
+    # Check if cookies file exists and store in keyring
+    cookies_file = Path(config.x.cookies_file).expanduser()
+    if cookies_file.exists():
+        try:
+            import json
+            cookies_data = json.loads(cookies_file.read_text())
+            cred_store.store_json("x_cookies", cookies_data)
+            console.print("[green]✅ X cookies stored in secure keychain[/green]")
+        except Exception as e:
+            console.print(f"[yellow]⚠️ Could not store in keychain: {e}[/yellow]")
+
+    console.print(f"""
+[bold]X/Twitter Authentication[/bold]
+
+Option 1: Browser cookie export
+1. Log into x.com in your browser
+2. Export cookies using a cookie editor extension
+3. Save to: {creds_dir}/x_cookies.json
+
+Option 2: twikit login
+1. Run: python3 -c "import twikit, asyncio; asyncio.run(twikit.Client('en-US').login('USER', 'PASS').save_cookies('cookies.json'))"
+2. Move cookies.json to: {creds_dir}/x_cookies.json
+""")
+
+
+def _auth_instagram(config: XPSTConfig) -> None:
+    """Guide Instagram session-based authentication and store credentials.
+
+    Args:
+        config: Loaded xPST configuration.
+    """
+
+    creds_dir = Path(config.config_dir) / "credentials"
+    cred_store = CredentialStore(config.config_dir)
+
+    # Check if session file exists and store in keyring
+    session_file = Path(config.instagram.session_file).expanduser()
+    if session_file.exists():
+        try:
+            import json
+            session_data = json.loads(session_file.read_text())
+            cred_store.store_json("instagram_session", session_data)
+            console.print("[green]✅ Instagram session stored in secure keychain[/green]")
+        except Exception as e:
+            console.print(f"[yellow]⚠️ Could not store in keychain: {e}[/yellow]")
+
+    console.print(f"""
+[bold]Instagram Authentication[/bold]
+
+1. Log into instagram.com in your browser
+2. Open DevTools → Application → Cookies
+3. Find the cookie named 'sessionid'
+4. Copy its value
+5. Create a JSON file at: {creds_dir}/instagram_session.json
+
+Format:
+{{{{
+    "authorization_data": {{{{
+        "sessionid": "YOUR_SESSION_ID"
+    }}}}
+}}}}
+""")
+
+
+def _auth_tiktok(config: XPSTConfig) -> None:
+    """Guide TikTok browser cookie configuration.
+
+    Args:
+        config: Loaded xPST configuration.
+    """
+
+    console.print("""
+[bold]TikTok Authentication[/bold]
+
+TikTok doesn't require authentication for basic downloads.
+However, for HD quality without watermarks:
+
+Option 1: Browser cookies (recommended)
+1. Log into tiktok.com in your browser
+2. The crossposter will automatically use your browser cookies
+3. Set cookies_from_browser: true in config.yaml
+
+Option 2: Export cookies manually
+1. Use a cookie editor extension
+2. Save cookies to a file
+3. Set cookies_file in config.yaml
+""")
+
+
+def _auth_threads(config: XPSTConfig) -> None:
+    """Guide Threads (Meta Threads API) authentication.
+
+    Args:
+        config: Loaded xPST configuration.
+    """
+    from xpst.connect import connect_threads
+
+    connect_threads(config)
+
+
+def _auth_messenger(config: XPSTConfig) -> None:
+    """Guide Messenger (static Page Access Token) authentication.
+
+    Args:
+        config: Loaded xPST configuration.
+    """
+    from xpst.connect import connect_messenger
+
+    connect_messenger(config)
+
+
+def _auth_bluesky(config: XPSTConfig) -> bool:
+    """Connect a Bluesky account (handle + app password, AT Protocol).
+
+    Returns the connect verdict so the command can exit non-zero: a rejected
+    credential is a real authentication failure, not something to report as
+    "configured".
+
+    Args:
+        config: Loaded xPST configuration.
+    """
+    from xpst.connect import connect_bluesky
+
+    return connect_bluesky(config)
+
+
+def _auth_facebook(config: XPSTConfig, *, as_json: bool = False) -> bool:
+    """Authenticate a Facebook Page through Facebook Login for Business.
+
+    The flow is Page-scoped: it discovers the Pages the user administers and
+    stores one Page access token, encrypted. There is no personal-profile
+    fallback (the Graph API cannot publish as a personal profile).
+
+    Args:
+        config: Loaded xPST configuration.
+        as_json: Emit the structured report (agent mode) instead of a panel.
+
+    Returns:
+        True when a Page was verified and stored.
+    """
+    from xpst.connect import facebook_auth
+
+    report = facebook_auth(config, as_json=as_json)
+    if as_json:
+        json_output(report, True)
+    return bool(report.get("success"))
+
+
+# ──────────────────────────────────────────────
+# Config Commands
+# ──────────────────────────────────────────────
+
+def _mask_sensitive_values(data: dict | list | Any, _path: str = "") -> Any:
+    """Recursively mask sensitive values (passwords, tokens, secrets, keys).
+
+    Args:
+        data: The data structure to mask.
+        _path: Current key path (for determining sensitivity).
+
+    Returns:
+        Data with sensitive values replaced by '***'.
+    """
+    sensitive_keywords = {
+        "password", "token", "secret", "key", "webhook_url",
+        "cookies", "session", "credentials", "auth",
+    }
+    if isinstance(data, dict):
+        result = {}
+        for k, v in data.items():
+            child_path = f"{_path}.{k}" if _path else k
+            is_sensitive = any(kw in k.lower() for kw in sensitive_keywords)
+            if is_sensitive and isinstance(v, str) and v:
+                result[k] = "***"
+            else:
+                result[k] = _mask_sensitive_values(v, child_path)
+        return result
+    elif isinstance(data, list):
+        return [_mask_sensitive_values(item, _path) for item in data]
+    return data
+
+
+@main.group()
+@click.pass_context
+def state(ctx: click.Context):
+    """Back up, export, and restore posting state (G51).
+
+    ~/.xpst/state.json is the single source of truth for what has been
+    posted — losing it means the next watch cycle re-posts the recent
+    catalog publicly. These commands make it durable.
+    """
+    pass
+
+
+@state.command("export")
+@click.argument("output", type=click.Path(dir_okay=False))
+@json_option
+@click.pass_context
+def state_export(ctx: click.Context, output: str, as_json: bool) -> None:
+    """Export state.json to OUTPUT (validated copy)."""
+    import json as _json
+    import shutil
+    from pathlib import Path as _Path
+
+    config = load_config(ctx.obj.get("config_path"))
+    src = _Path(config.config_dir).expanduser() / "state.json"
+    if not src.exists():
+        if as_json:
+            json_output(_error_payload("NO_STATE_FILE", "No state.json to export."), True)
+        else:
+            console.print("[yellow]No state.json to export.[/yellow]")
+        raise SystemExit(1)
+    _json.loads(src.read_text(encoding="utf-8"))  # refuse to export corrupt state
+    dest = _Path(output).expanduser()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    if as_json:
+        json_output({"ok": True, "exported": str(dest), "source": str(src)}, True)
+    else:
+        console.print(f"[green]Exported[/green] {src} -> {dest}")
+
+
+@state.command("import")
+@click.argument("source", type=click.Path(exists=True, dir_okay=False))
+@click.option("--yes", is_flag=True, help="Skip confirmation")
+@json_option
+@click.pass_context
+def state_import(ctx: click.Context, source: str, yes: bool, as_json: bool) -> None:
+    """Restore state.json from SOURCE (current state is backed up first)."""
+    import json as _json
+    import shutil
+    from datetime import datetime as _dt
+    from pathlib import Path as _Path
+
+    config = load_config(ctx.obj.get("config_path"))
+    dest = _Path(config.config_dir).expanduser() / "state.json"
+    incoming = _Path(source).expanduser()
+    data = _json.loads(incoming.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or "posted_videos" not in data:
+        if as_json:
+            json_output(_error_payload(
+                "INVALID_STATE_FILE", "Not a valid xPST state file (no posted_videos).",
+                source=str(incoming)), True)
+        else:
+            console.print("[red]Not a valid xPST state file (no posted_videos).[/red]")
+        raise SystemExit(1)
+    if not yes and not click.confirm(f"Replace {dest} with {incoming}?"):
+        return
+    if dest.exists():
+        backup = dest.with_name(
+            f"state.json.pre-import-{_dt.now().strftime('%Y%m%d-%H%M%S')}"
+        )
+        shutil.copy2(dest, backup)
+        if not as_json:
+            console.print(f"[dim]Current state backed up to {backup.name}[/dim]")
+    shutil.copy2(incoming, dest)
+    if as_json:
+        json_output({"ok": True, "imported": str(incoming),
+                     "posted_videos": len(data.get("posted_videos", {}))}, True)
+    else:
+        console.print(
+            f"[green]Imported[/green] {len(data.get('posted_videos', {}))} posted-video "
+            "records. Review with `xpst status` before the next run."
+        )
+
+
+@state.command("backup")
+@click.option("--keep", default=10, help="Backups to retain")
+@json_option
+@click.pass_context
+def state_backup(ctx: click.Context, keep: int, as_json: bool) -> None:
+    """Snapshot state.json into ~/.xpst/backups/ with rotation."""
+    import shutil
+    from datetime import datetime as _dt
+    from pathlib import Path as _Path
+
+    config = load_config(ctx.obj.get("config_path"))
+    src = _Path(config.config_dir).expanduser() / "state.json"
+    if not src.exists():
+        if as_json:
+            json_output(_error_payload("NO_STATE_FILE", "No state.json to back up."), True)
+        else:
+            console.print("[yellow]No state.json to back up.[/yellow]")
+        return
+    backups = _Path(config.config_dir).expanduser() / "backups"
+    backups.mkdir(parents=True, exist_ok=True)
+    dest = backups / f"state-{_dt.now().strftime('%Y%m%d-%H%M%S')}.json"
+    shutil.copy2(src, dest)
+    existing = sorted(backups.glob("state-*.json"))
+    for old in existing[:-keep] if keep > 0 else []:
+        old.unlink(missing_ok=True)
+    if as_json:
+        json_output({"ok": True, "backup": str(dest),
+                     "retained": min(len(existing), keep)}, True)
+    else:
+        console.print(f"[green]Backed up[/green] to {dest} ({min(len(existing), keep)} retained)")
+
+
+@main.group()
+@click.pass_context
+def failures(ctx: click.Context):
+    """Inspect and retry failed uploads (G55).
+
+    The dead-letter queue was previously invisible outside logs.
+    """
+    pass
+
+
+@failures.command("list")
+@json_option
+@click.pass_context
+def failures_list(ctx: click.Context, as_json: bool) -> None:
+    """List failed uploads recorded in the dead-letter queue."""
+    from xpst.state import StateManager
+
+    config = load_config(ctx.obj.get("config_path"))
+    sm = StateManager(config.config_dir)
+    dlq = sm.get_dead_letter_queue()
+    if as_json:
+        json_output({"failures": dlq}, True)
+        return
+    if not dlq:
+        console.print("[green]No failed uploads.[/green]")
+        return
+    table = Table(title="Failed Uploads (dead-letter queue)")
+    table.add_column("Video", style="cyan")
+    table.add_column("Platform", style="white")
+    table.add_column("Status", style="yellow")
+    table.add_column("Age", style="dim")
+    table.add_column("Error", style="red", max_width=50)
+    table.add_column("Count", style="yellow")
+    for entry in dlq:
+        age = entry.get("age_hours")
+        table.add_row(
+            entry["video_id"], entry["platform"],
+            "resolved" if entry.get("resolved") else "OPEN",
+            (f"{age:.0f}h" if age is not None else "?"),
+            (entry.get("error") or "")[:80], str(entry.get("count", 1)),
+        )
+    console.print(table)
+    console.print("[dim]Retry one with: xpst failures retry <video_id> --platform <name>[/dim]")
+    console.print("[dim]Clear the queue with: xpst failures clear[/dim]")
+
+
+@failures.command("clear")
+@click.argument("video_id", required=False, default=None)
+@json_option
+@click.pass_context
+def failures_clear(ctx: click.Context, video_id: str | None, as_json: bool) -> None:
+    """Clear recorded failures from the dead-letter queue.
+
+    Without a VIDEO_ID, every entry is cleared; with one, only that video's
+    errors. Successful-post history is never removed — a retry that later
+    succeeds leaves the post record intact, and a resolved failure stays
+    visible in ``failures list`` until it is cleared here.
+    """
+    from xpst.state import StateManager
+
+    config = load_config(ctx.obj.get("config_path"))
+    sm = StateManager(config.config_dir)
+    cleared = sm.clear_dead_letter_queue(video_id)
+    if as_json:
+        json_output(
+            {"ok": True, "cleared": cleared, "scope": video_id or "all"},
+            True,
+        )
+        return
+    if cleared == 0:
+        console.print("[dim]Nothing to clear.[/dim]")
+        return
+    where = f" for {video_id}" if video_id else ""
+    console.print(f"[green]Cleared {cleared} failure record(s){where}.[/green]")
+
+
+@failures.command("retry")
+@click.argument("video_id")
+@click.option("--platform", "-p", required=True, help="Platform to retry")
+@json_option
+@click.pass_context
+def failures_retry(ctx: click.Context, video_id: str, platform: str, as_json: bool) -> None:
+    """Retry one failed upload by re-posting its source file.
+
+    The verdict (target resolution, error code, whether the destination
+    accepted the post) comes from
+    :mod:`xpst.services.recovery_service`, which the MCP ``xpst_failures_retry``
+    tool calls too — the two surfaces cannot disagree about what happened.
+    """
+    import asyncio as _asyncio
+
+    from xpst.engine import CrossPostEngine
+    from xpst.services import recovery_service
+    from xpst.state import StateManager
+
+    config = load_config(ctx.obj.get("config_path"))
+
+    # Resolve the target BEFORE constructing the engine: CrossPostEngine.__init__
+    # runs crash recovery and can create/rotate state files, which a retry that
+    # is going to be refused must never do.
+    plan = recovery_service.plan_failure_retry(
+        config, StateManager(config.config_dir), video_id, platform
+    )
+
+    if plan.ok:
+        if as_json:
+            click.echo(f"Retrying {video_id} on {platform}...", err=True)
+        else:
+            assert plan.media_path is not None
+            console.print(f"Retrying {video_id} on {platform} from {plan.media_path.name}...")
+        engine = CrossPostEngine(config)
+        payload = _asyncio.run(recovery_service.execute_failure_retry(engine, plan))
+    else:
+        payload = plan.to_payload()
+
+    error = payload.get("error") or {}
+
+    if payload["ok"]:
+        if as_json:
+            json_output(payload, True)
+        else:
+            console.print(f"[green]Retry succeeded[/green]: {payload.get('post_url') or 'posted'}")
+        return
+
+    message = str(error.get("message") or "retry failed")
+    if as_json:
+        json_output(
+            {**payload, **_error_payload(
+                str(error.get("code") or "RETRY_FAILED"), message,
+                video_id=video_id, platform=platform)},
+            True,
+        )
+    elif payload.get("attempted"):
+        console.print(f"[red]Retry failed[/red]: {message}")
+    else:
+        console.print(f"[red]{message}[/red]")
+    raise SystemExit(1)
+
+
+@main.group()
+@click.pass_context
+def config(ctx: click.Context):
+    """View and manage xPST configuration"""
+    pass
+
+
+@config.command("show")
+@click.option("--raw", is_flag=True, help="Show raw values (no masking)")
+@click.option("--file", "config_file", default=None, help="Config file path")
+@json_option
+@click.pass_context
+def config_show(ctx: click.Context, raw: bool, config_file: str | None, as_json: bool):
+    """Display current configuration as YAML"""
+    import os
+
+    import yaml
+    from rich.syntax import Syntax
+
+    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    if not Path(config_path).exists():
+        if as_json:
+            json_output(_error_payload(
+                "CONFIG_FILE_NOT_FOUND", f"Config file not found: {config_path}",
+                path=config_path, hint="run `xpst wizard` or `xpst setup` to create one"), True)
+        else:
+            console.print(f"[red]Config file not found:[/red] {config_path}")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    with open(config_path) as f:
+        try:
+            raw_config = yaml.safe_load(f) or {}
+        except yaml.YAMLError as exc:
+            if as_json:
+                json_output(_error_payload(
+                    "INVALID_YAML", f"Invalid YAML in {config_path}: {exc}",
+                    path=config_path), True)
+            else:
+                console.print(f"[red]Invalid YAML in {config_path}:[/red] {exc}")
+            sys.exit(EXIT_CONFIG_ERROR)
+
+    if not raw:
+        raw_config = _mask_sensitive_values(raw_config)
+
+    if as_json:
+        json_output(raw_config, True)
+    else:
+        yaml_str = yaml.dump(raw_config, default_flow_style=False, sort_keys=False)
+        syntax = Syntax(yaml_str, "yaml", theme="monokai", line_numbers=False)
+        console.print(syntax)
+
+
+@config.command("set")
+@click.argument("key")
+@click.argument("value")
+@click.option("--file", "config_file", default=None, help="Config file path")
+@json_option
+@click.pass_context
+def config_set(ctx: click.Context, key: str, value: str, config_file: str | None, as_json: bool):
+    """Set a configuration value using dotted keys.
+
+    Examples:
+        xpst config set accounts.youtube.enabled true
+        xpst config set rate_limits.youtube 10
+        xpst config set monitoring.log_level DEBUG
+    """
+    import os
+
+    import yaml
+
+    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    config_path = Path(config_path)
+
+    # Load existing config
+    if config_path.exists():
+        with open(config_path) as f:
+            cfg = yaml.safe_load(f) or {}
+    else:
+        cfg = {}
+
+    # Parse value: try int, then float, then bool, else string
+    def _parse_value(v: str):
+        # Bool
+        if v.lower() in ("true", "yes", "1"):
+            return True
+        if v.lower() in ("false", "no", "0"):
+            return False
+        # Int
+        try:
+            return int(v)
+        except ValueError:
+            pass
+        # Float
+        try:
+            return float(v)
+        except ValueError:
+            pass
+        # String
+        return v
+
+    parsed_value = _parse_value(value)
+
+    # Navigate dotted key and set value
+    parts = key.split(".")
+    current = cfg
+    for part in parts[:-1]:
+        if part not in current or not isinstance(current[part], dict):
+            current[part] = {}
+        current = current[part]
+    current[parts[-1]] = parsed_value
+
+    # Save
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, "w") as f:
+        yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
+
+    if as_json:
+        json_output({"key": key, "value": parsed_value, "saved": True}, True)
+    else:
+        console.print(f"[green]✓[/green] Set [bold]{key}[/bold] = [cyan]{parsed_value}[/cyan]")
+
+
+@config.command("validate")
+@click.option("--file", "config_file", default=None, help="Config file path")
+@json_option
+@click.pass_context
+def config_validate(ctx: click.Context, config_file: str | None, as_json: bool):
+    """Validate configuration for errors.
+
+    Checks required fields, path existence, and platform config validity.
+    Exit code 0 if valid, 2 (config error) if invalid.
+    """
+    import os
+
+    checks: list[tuple[str, bool, str]] = []
+
+    # Load config
+    try:
+        cfg = load_config(config_file)
+        checks.append(("Config file loaded", True, "OK"))
+    except SystemExit:
+        checks.append(("Config file loaded", False, "Failed to load config"))
+        if as_json:
+            json_output({"valid": False, "checks": [{"name": n, "ok": o, "detail": d} for n, o, d in checks]}, True)
+        else:
+            _print_validation_results(checks)
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    # Check config file exists
+    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    exists = Path(config_path).exists()
+    checks.append(("Config file exists", exists, config_path))
+
+    # Check download directory
+    dl_dir = Path(cfg.video.download_dir).expanduser()
+    dl_ok = dl_dir.exists() or dl_dir.parent.exists()
+    checks.append(
+        ("Download directory accessible", dl_ok, str(dl_dir))
+    )
+
+    # Check log directory
+    log_dir = Path(cfg.monitoring.log_file).expanduser().parent
+    log_ok = log_dir.exists() or log_dir.parent.exists()
+    checks.append(
+        ("Log directory accessible", log_ok, str(log_dir))
+    )
+
+    # Check platform configs
+    platforms_to_check = [
+        ("YouTube", cfg.youtube.enabled, cfg.youtube.client_secrets, "client_secrets"),
+        ("X/Twitter", cfg.x.enabled, cfg.x.cookies_file, "cookies_file"),
+        ("Instagram", cfg.instagram.enabled, cfg.instagram.session_file, "session_file"),
+    ]
+    for name, enabled, cred_path, field_name in platforms_to_check:
+        if enabled:
+            if cred_path:
+                expanded = Path(cred_path).expanduser()
+                cred_exists = expanded.exists()
+                checks.append(
+                    (f"{name} credentials", cred_exists, str(expanded))
+                )
+            else:
+                checks.append(
+                    (f"{name} credentials", False, f"{field_name} not configured")
+                )
+        else:
+            checks.append((f"{name} enabled", False, "Platform disabled (OK)"))
+
+    # Check rate limits are positive
+    for platform, limit in [
+        ("YouTube", cfg.rate_limits.youtube),
+        ("Instagram", cfg.rate_limits.instagram),
+        ("X", cfg.rate_limits.x),
+        ("TikTok", cfg.rate_limits.tiktok),
+    ]:
+        ok = isinstance(limit, (int, float)) and limit > 0
+        checks.append(
+            (f"{platform} rate limit", ok, str(limit))
+        )
+
+    # Check schedule config
+    checks.append(
+        ("Check interval >= 60s", cfg.schedule.check_interval >= 60, str(cfg.schedule.check_interval))
+    )
+
+    if as_json:
+        all_pass = all(ok for _, ok, _ in checks)
+        json_output({
+            "valid": all_pass,
+            "checks": [{"name": n, "ok": o, "detail": d} for n, o, d in checks],
+        }, True)
+    else:
+        _print_validation_results(checks)
+
+    all_pass = all(ok for _, ok, _ in checks)
+    if not as_json:
+        sys.exit(EXIT_SUCCESS if all_pass else EXIT_CONFIG_ERROR)
+
+
+def _print_validation_results(checks: list[tuple[str, bool, str]]) -> None:
+    """Print validation check results as a table.
+
+    Args:
+        checks: List of (name, passed, detail) tuples.
+    """
+    table = Table(title="Configuration Validation", show_lines=True)
+    table.add_column("Check", style="bold")
+    table.add_column("Status", justify="center")
+    table.add_column("Details")
+
+    for name, passed, detail in checks:
+        status = "[green]PASS[/green]" if passed else "[red]FAIL[/red]"
+        table.add_row(name, status, detail)
+
+    console.print(table)
+
+    passed = sum(1 for _, ok, _ in checks if ok)
+    total = len(checks)
+    if passed == total:
+        console.print(f"\n[green]All {total} checks passed ✓[/green]")
+    else:
+        console.print(f"\n[red]{total - passed} of {total} checks failed ✗[/red]")
+
+
+@config.command("fix")
+@click.option("--file", "config_file", default=None, help="Config file path")
+@click.option("--yes", "-y", is_flag=True, help="Apply fixes without confirmation")
+@json_option
+@click.pass_context
+def config_fix(ctx: click.Context, config_file: str | None, yes: bool, as_json: bool):
+    """Detect and auto-fix common configuration issues.
+
+    Fixes: missing credentials directory, stale .crosspstr paths,
+    invalid port numbers, and missing required fields.
+    """
+    import os
+
+    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    fixes: list[str] = []
+
+    # Load current config
+    try:
+        cfg = load_config(config_file)
+    except Exception as e:
+        if as_json:
+            json_output({"ok": False, "error": str(e)}, True)
+        else:
+            console.print(f"[red]Cannot load config:[/red] {e}")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    # Fix 1: Ensure credentials directory exists
+    cred_dir = Path("~/.xpst/credentials").expanduser()
+    if not cred_dir.exists():
+        fixes.append(f"Create missing credentials directory: {cred_dir}")
+        if yes or as_json:
+            cred_dir.mkdir(parents=True, exist_ok=True)
+        elif not yes:
+            console.print(f"[yellow]Missing credentials directory:[/yellow] {cred_dir}")
+            if not confirm("Create it?"):
+                fixes[-1] = fixes[-1] + " (skipped)"
+            else:
+                cred_dir.mkdir(parents=True, exist_ok=True)
+
+    # Fix 2: Stale .crosspstr paths (already handled by _fix_legacy_paths, but check raw YAML)
+    if Path(config_path).exists():
+        with open(config_path) as f:
+            raw_content = f.read()
+        if ".crosspstr" in raw_content:
+            fixes.append("Replace stale .crosspstr paths with .xpst")
+            if yes or as_json:
+                fixed_content = raw_content.replace(".crosspstr", ".xpst")
+                with open(config_path, "w") as f:
+                    f.write(fixed_content)
+
+    # Fix 3: Invalid port numbers (must be 1-65535)
+    port = cfg.monitoring.healthcheck_port
+    if not (1 <= port <= 65535):
+        fixes.append(f"Fix invalid healthcheck_port ({port} → 8080)")
+        if yes or as_json:
+            cfg.monitoring.healthcheck_port = 8080
+
+    # Fix 4: Missing required fields with defaults
+    if not cfg.video.download_dir:
+        fixes.append("Set default download directory (~/.xpst/downloads)")
+        if yes or as_json:
+            cfg.video.download_dir = "~/.xpst/downloads"
+
+    if not cfg.monitoring.log_file:
+        fixes.append("Set default log file path (~/.xpst/logs/xpst.log)")
+        if yes or as_json:
+            cfg.monitoring.log_file = "~/.xpst/logs/xpst.log"
+
+    # Save fixed config
+    if fixes and (yes or as_json):
+        cfg.save(config_path)
+
+    if as_json:
+        json_output({"ok": True, "fixes_applied": len(fixes), "details": fixes}, True)
+    else:
+        if fixes:
+            console.print(f"\n[green]Applied {len(fixes)} fix(es):[/green]")
+            for fix in fixes:
+                console.print(f"  [green]✓[/green] {fix}")
+        else:
+            console.print("[green]No issues detected — configuration looks good ✓[/green]")
+
+
+@config.command("export")
+@click.argument("output_file", type=click.Path())
+@click.option("--raw", is_flag=True, help="Export raw values (no masking)")
+@click.option("--file", "config_file", default=None, help="Source config file path")
+@json_option
+@click.pass_context
+def config_export(ctx: click.Context, output_file: str, raw: bool, config_file: str | None, as_json: bool):
+    """Export current configuration to a file.
+
+    Writes the config YAML to OUTPUT_FILE. By default masks sensitive values.
+    """
+    import os
+
+    import yaml
+
+    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    if not Path(config_path).exists():
+        if as_json:
+            json_output({"ok": False, "error": f"Config file not found: {config_path}"}, True)
+        else:
+            console.print(f"[red]Config file not found:[/red] {config_path}")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    with open(config_path) as f:
+        raw_config = yaml.safe_load(f) or {}
+
+    if not raw:
+        raw_config = _mask_sensitive_values(raw_config)
+
+    out_path = Path(output_file)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w") as f:
+        yaml.dump(raw_config, f, default_flow_style=False, sort_keys=False)
+
+    if as_json:
+        json_output({"ok": True, "exported": str(out_path), "masked": not raw}, True)
+    else:
+        console.print(f"[green]✓[/green] Config exported to [bold]{out_path}[/bold]")
+
+
+@config.command("import")
+@click.argument("input_file", type=click.Path(exists=True))
+@click.option("--merge/--replace", default=True, help="Merge with existing config or replace entirely")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+@click.option("--strict", is_flag=True, help="Fail on validation warnings")
+@json_option
+@click.pass_context
+def config_import(ctx: click.Context, input_file: str, merge: bool, yes: bool, strict: bool, as_json: bool):
+    """Import configuration from a file.
+
+    By default merges with existing config. Use --replace to overwrite entirely.
+    Shows a diff of changes before applying. Use --yes to skip confirmation.
+    Validates the imported config structure. Use --strict to fail on warnings.
+    """
+    import os
+
+    import yaml
+
+    config_path = os.path.expanduser("~/.xpst/config.yaml")
+
+    with open(input_file) as f:
+        try:
+            imported = yaml.safe_load(f) or {}
+        except yaml.YAMLError as exc:
+            console.print(f"[red]Invalid YAML in {input_file}:[/red] {exc}")
+            sys.exit(EXIT_CONFIG_ERROR)
+
+    if not isinstance(imported, dict):
+        if as_json:
+            json_output({"ok": False, "error": "Import file must contain a YAML mapping"}, True)
+        else:
+            console.print("[red]Import file must contain a YAML mapping[/red]")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    # ── Validate imported config structure ──
+    validation_errors, validation_warnings = _validate_config_dict(imported)
+
+    if validation_errors:
+        if as_json:
+            json_output({"ok": False, "errors": validation_errors, "warnings": validation_warnings}, True)
+        else:
+            console.print("[red]Validation errors:[/red]")
+            for err in validation_errors:
+                console.print(f"  [red]✗[/red] {err}")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    if strict and validation_warnings:
+        if as_json:
+            json_output({"ok": False, "errors": [], "warnings": validation_warnings}, True)
+        else:
+            console.print("[red]Strict mode — warnings treated as errors:[/red]")
+            for warn in validation_warnings:
+                console.print(f"  [yellow]⚠[/yellow] {warn}")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    existing: dict = {}
+    if merge and Path(config_path).exists():
+        with open(config_path) as f:
+            existing = yaml.safe_load(f) or {}
+
+    # ── Compute and display diff ──
+    merged = _deep_merge_import(existing, imported) if merge else imported
+
+    changes = _compute_config_diff(existing, merged)
+
+    if not changes["added"] and not changes["removed"] and not changes["changed"]:
+        if as_json:
+            json_output({"ok": True, "message": "No changes detected", "imported": str(input_file)}, True)
+        else:
+            console.print("[dim]No changes detected — config is identical.[/dim]")
+        return
+
+    if not as_json:
+        _display_config_diff(changes, validation_warnings)
+
+    # Confirm before applying
+    if not yes and not as_json:
+        if not confirm("Apply these changes?"):
+            console.print("[dim]Import cancelled.[/dim]")
+            return
+
+    Path(config_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, "w") as f:
+        yaml.dump(merged, f, default_flow_style=False, sort_keys=False)
+
+    if as_json:
+        json_output({
+            "ok": True,
+            "imported": str(input_file),
+            "mode": "merge" if merge else "replace",
+            "added": changes["added"],
+            "removed": changes["removed"],
+            "changed": changes["changed"],
+            "warnings": validation_warnings,
+        }, True)
+    else:
+        mode_label = "merged" if merge else "replaced"
+        console.print(f"[green]✓[/green] Config {mode_label} from [bold]{input_file}[/bold]")
+        if validation_warnings:
+            console.print(f"[yellow]{len(validation_warnings)} warning(s) — run `xpst config validate` for details[/yellow]")
+
+
+# ──────────────────────────────────────────────
+# Schedule Commands
+# ──────────────────────────────────────────────
+
+@main.group()
+@click.pass_context
+def schedule(ctx: click.Context):
+    """Manage scheduled posts"""
+    pass
+
+
+@schedule.command("add")
+@click.argument("file", type=click.Path(), required=False, default=None)
+@click.option("--caption", "-c", required=True, help="Post caption text")
+@click.option(
+    "--text",
+    "text_post",
+    is_flag=True,
+    help=(
+        "Text-only post: no media file. The --caption text IS the post; the "
+        "entry is stored as content_type=text and fires through the text "
+        "route (never an encoder). FILE must be omitted."
+    ),
+)
+@click.option(
+    "--caption-for",
+    "caption_for",
+    multiple=True,
+    metavar="PLATFORM=TEXT",
+    help=(
+        "Different caption for one destination (repeatable), e.g. "
+        "--caption-for x='short copy'. Destinations without one use --caption. "
+        "Stored with the entry and honoured when the schedule fires."
+    ),
+)
+@click.option("--at", "scheduled_time", required=True, help="Scheduled time (ISO or 'YYYY-MM-DD HH:MM')")
+@click.option("--platforms", "-p", default=None, help="Comma-separated target platforms")
+@click.option("--repeat", "repeat_rule", default=None, type=click.Choice(["none", "daily", "weekly", "monthly"]), help="Repeat schedule")
+@click.option("--dry-run", "dry_run", is_flag=True,
+              help="Validate the entry and show it without writing to the schedule store")
+@json_option
+@click.pass_context
+def schedule_add(ctx: click.Context, file: str | None, caption: str, caption_for: tuple[str, ...], scheduled_time: str, platforms: str | None, repeat_rule: str | None, text_post: bool, dry_run: bool, as_json: bool):
+    """Schedule a post for later publishing.
+
+    Examples:
+        xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08 10:00'
+        xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08T10:00:00' -p youtube,instagram
+        xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08 10:00' --repeat daily
+        xpst schedule add video.mp4 --caption 'Long copy' --caption-for x='short copy' --at '2026-06-08 10:00'
+        xpst schedule add --text --caption 'A text-only post' --at '2026-06-08 10:00' -p x
+    """
+    from datetime import datetime
+
+    from xpst.schedule_manager import MAX_CAPTION_LENGTH, ScheduleManager
+
+    if text_post and file is not None:
+        if as_json:
+            json_output(_error_payload(
+                "INVALID_TEXT_ENTRY",
+                "--text takes no media file; drop FILE for a text-only post.",
+            ), True)
+        else:
+            console.print("[red]--text takes no media file; drop FILE for a text-only post.[/red]")
+        sys.exit(EXIT_CONFIG_ERROR)
+    entry_content_type = "text" if text_post else None
+    video_path = Path(file) if file is not None else None
+    if video_path is not None and not video_path.exists():
+        if as_json:
+            json_output(_error_payload(
+                "FILE_NOT_FOUND", f"File not found: {file}", file=file), True)
+        else:
+            console.print(f"[red]File not found:[/red] {file}")
+        sys.exit(EXIT_GENERAL)
+
+    # Memory-bound guard: a multi-megabyte caption argument must fail fast
+    # with an actionable error instead of being silently persisted (and
+    # re-read into memory by every scheduler tick).
+    if len(caption) > MAX_CAPTION_LENGTH:
+        message = (
+            f"Caption is {len(caption):,} characters; the limit is "
+            f"{MAX_CAPTION_LENGTH:,}. Shorten the caption (platforms cap "
+            "captions at a few thousand characters)."
+        )
+        if as_json:
+            json_output(_error_payload(
+                "CAPTION_TOO_LONG", message,
+                caption_length=len(caption), max_caption_length=MAX_CAPTION_LENGTH), True)
+        else:
+            console.print(f"[red]Caption too long:[/red] {message}")
+        sys.exit(EXIT_GENERAL)
+
+    # Per-destination copy, parsed by the same helper `xpst post` uses, so a
+    # malformed PLATFORM=TEXT is a usage error on both surfaces. Each override
+    # gets the same size guard as the shared caption: the whole store is
+    # re-read by every scheduler tick.
+    try:
+        per_platform_captions = _parse_caption_for(caption_for)
+    except click.BadParameter as exc:
+        if as_json:
+            json_output(_error_payload("INVALID_CAPTION_FOR", str(exc)), True)
+        else:
+            console.print(f"[red]Invalid --caption-for:[/red] {exc}")
+        sys.exit(EXIT_CONFIG_ERROR)
+    for override_platform, override_text in per_platform_captions.items():
+        if len(override_text) > MAX_CAPTION_LENGTH:
+            message = (
+                f"Caption override for {override_platform!r} is "
+                f"{len(override_text):,} characters; the limit is "
+                f"{MAX_CAPTION_LENGTH:,}. Shorten it before scheduling."
+            )
+            if as_json:
+                json_output(_error_payload(
+                    "CAPTION_TOO_LONG", message, platform=override_platform,
+                    caption_length=len(override_text),
+                    max_caption_length=MAX_CAPTION_LENGTH), True)
+            else:
+                console.print(f"[red]Caption too long:[/red] {message}")
+            sys.exit(EXIT_GENERAL)
+
+    # Parse scheduled time
+    dt = None
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            dt = datetime.strptime(scheduled_time, fmt)
+            break
+        except ValueError:
+            continue
+    if dt is None:
+        if as_json:
+            json_output(_error_payload(
+                "INVALID_DATE_FORMAT",
+                f"Invalid date format: {scheduled_time}. "
+                "Use 'YYYY-MM-DD HH:MM' or ISO format.",
+                value=scheduled_time), True)
+        else:
+            console.print(f"[red]Invalid date format:[/red] {scheduled_time}")
+            console.print("[dim]Use: 'YYYY-MM-DD HH:MM' or ISO format[/dim]")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    platform_list = (
+        [p.strip() for p in platforms.split(",") if p.strip()] if platforms else None
+    )
+    if platforms and not platform_list:
+        console.print(f"[red]Invalid platforms:[/red] no usable platform names in {platforms!r}")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    # No implied set in the queue either (R3 rule 3): resolve the route now, at
+    # add time, and persist exactly the destinations that were shown. A queue
+    # entry that stores "all enabled" re-targets itself whenever a new account
+    # is connected later — the defect this contract removes.
+    from xpst.services.route_plan import build_route_plan
+
+    config = load_config(ctx.obj.get("config_path"))
+    route = build_route_plan(
+        config,
+        media_paths=[str(video_path)] if video_path else [],
+        caption=caption,
+        per_platform_captions=per_platform_captions,
+        content_type=entry_content_type or "auto",
+        requested=platform_list,
+        # Scheduling is a future publish: a credential that is missing *now* is
+        # not a reason to refuse the entry (it may be connected before it fires).
+        # The format/envelope verdict still applies.
+        include_readiness=False,
+        include_transform=False,
+    )
+    if not route.posting_destinations:
+        error = route.actionable_error or {
+            "code": "NO_DESTINATIONS",
+            "message": "No destination would publish this entry.",
+        }
+        if as_json:
+            payload = _error_payload(error["code"], error["message"])
+            payload["route_plan"] = route.to_dict()
+            payload["exit_code"] = EXIT_CONFIG_ERROR
+            json_output(payload, True)
+        else:
+            console.print(f"[red]Error:[/red] {error['message']}")
+            for item in route.destinations:
+                console.print(f"  {item.platform}: {item.state} — {item.reason}")
+        sys.exit(EXIT_CONFIG_ERROR)
+    if platform_list is None:
+        # The route the plan resolved, persisted verbatim.
+        platform_list = list(route.posting_destinations)
+
+    effective_repeat = repeat_rule if repeat_rule and repeat_rule != "none" else None
+
+    if dry_run:
+        plan = {
+            "dry_run": True,
+            "video_path": str(video_path.resolve()) if video_path else "",
+            "content_type": entry_content_type,
+            "caption": caption,
+            "per_platform_captions": per_platform_captions,
+            "scheduled_time": dt.isoformat(),
+            "platforms": platform_list,
+            "target_source": route.source,
+            "route_plan": route.to_dict(),
+            "repeat_rule": effective_repeat,
+        }
+        if as_json:
+            json_output(plan, True)
+        else:
+            if not ctx.obj.get("quiet", False):
+                console.print("[bold blue]Dry run — would schedule:[/bold blue]")
+            console.print(f"  File:     {video_path if video_path else '(text post — no media)'}")
+            console.print(f"  Caption:  {caption[:60]}{'...' if len(caption) > 60 else ''}")
+            for override_platform, override_text in per_platform_captions.items():
+                console.print(
+                    f"  Caption for {override_platform}: "
+                    f"{override_text[:60]}{'...' if len(override_text) > 60 else ''}"
+                )
+            console.print(f"  Time:     {dt.strftime('%Y-%m-%d %H:%M')}")
+            console.print(f"  Platforms: {', '.join(platform_list) if platform_list else 'none'}")
+            if effective_repeat:
+                console.print(f"  Repeat:   {effective_repeat}")
+        return
+
+    manager = ScheduleManager()
+    entry = manager.add(
+        video_path=str(video_path.resolve()) if video_path else "",
+        caption=caption,
+        scheduled_time=dt,
+        platforms=platform_list,
+        repeat_rule=effective_repeat,
+        per_platform_captions=per_platform_captions,
+        content_type=entry_content_type,
+    )
+
+    if as_json:
+        json_output(entry, True)
+    else:
+        console.print("[green]✓ Scheduled post[/green]")
+        console.print(f"  ID:       [bold]{entry['id']}[/bold]")
+        console.print(f"  File:     {video_path if video_path else '(text post — no media)'}")
+        console.print(f"  Caption:  {caption[:60]}{'...' if len(caption) > 60 else ''}")
+        for override_platform, override_text in per_platform_captions.items():
+            console.print(
+                f"  Caption for {override_platform}: "
+                f"{override_text[:60]}{'...' if len(override_text) > 60 else ''}"
+            )
+        console.print(f"  Time:     {dt.strftime('%Y-%m-%d %H:%M')}")
+        console.print(f"  Platforms: {', '.join(platform_list) if platform_list else 'none'}")
+        if effective_repeat:
+            console.print(f"  Repeat:   {effective_repeat}")
+
+
+@schedule.command("list")
+@json_option
+@click.pass_context
+def schedule_list(ctx: click.Context, as_json: bool):
+    """List all scheduled posts"""
+    from xpst.schedule_manager import ScheduleManager
+
+    manager = ScheduleManager()
+    entries = manager.list()
+    pause = manager.pause_state()
+
+    if as_json:
+        # A store file with zero entries is NOT the same fact as "the queue
+        # was paused" (D3: an empty list hid a 10-entry paused-* backup, and a
+        # renamed store hid the pause itself). Report pause state and any
+        # pause snapshots alongside the entries.
+        snapshots = manager.paused_snapshots()
+        if pause["paused"] or snapshots:
+            payload: dict[str, Any] = {"entries": entries, "paused": pause}
+            if snapshots:
+                payload["paused_snapshots"] = snapshots
+            json_output(payload, True)
+        else:
+            json_output(entries, True)
+        return
+
+    if pause["paused"]:
+        reason = f" — {pause['reason']}" if pause.get("reason") else ""
+        console.print(
+            f"[yellow]Queue paused[/yellow]{reason}. Entries will not fire until "
+            "[bold]xpst schedule resume[/bold]."
+        )
+
+    if not entries:
+        console.print("[dim]No scheduled posts.[/dim]")
+        for snap in manager.paused_snapshots():
+            count = snap["entries"]
+            console.print(
+                f"[yellow]Note:[/yellow] pause snapshot found at [bold]{snap['file']}[/bold]"
+                + (f" ({count} entries)" if count is not None else "")
+                + " — the queue may have been paused, not emptied."
+            )
+        return
+
+    table = Table(title="Scheduled Posts", show_lines=True)
+    table.add_column("ID", style="bold")
+    table.add_column("File")
+    table.add_column("Caption", max_width=40)
+    table.add_column("Scheduled")
+    table.add_column("Platforms")
+    table.add_column("Status")
+
+    status_styles = {
+        "pending": "[yellow]pending[/yellow]",
+        "completed": "[green]completed[/green]",
+        "failed": "[red]failed[/red]",
+    }
+
+    for entry in entries:
+        file_name = Path(entry.get("video_path", "")).name or "(text post)"
+        caption = entry.get("caption", "")[:37]
+        if len(entry.get("caption", "")) > 37:
+            caption += "..."
+        # Show local time: the store keeps UTC, the table shows the wall clock
+        # the user typed (the manager adds the derived local rendering).
+        scheduled = str(entry.get("scheduled_time_local") or entry.get("scheduled_time", ""))
+        if "T" in scheduled:
+            scheduled = scheduled.replace("T", " ").split(".")[0]
+            scheduled = scheduled[:16]
+        platforms = ", ".join(entry.get("platforms", [])) or "all"
+        status = status_styles.get(entry.get("status", "pending"), entry.get("status", ""))
+        table.add_row(entry.get("id", "?"), file_name, caption, scheduled, platforms, status)
+
+    console.print(table)
+
+
+@schedule.command("pause")
+@click.option("--reason", default="", help="Why the queue is paused (shown by schedule list)")
+@json_option
+@click.pass_context
+def schedule_pause(ctx: click.Context, reason: str, as_json: bool):
+    """Pause the queue: no scheduled entry fires until `schedule resume`
+
+    This is a first-class pause, not a renamed store file. The marker is
+    enforced at the claim boundary, so a paused queue cannot post from any
+    surface (cron, daemon or an explicit run).
+    """
+    from xpst.schedule_manager import ScheduleManager
+
+    manager = ScheduleManager()
+    created = manager.pause(reason=reason)
+    state = manager.pause_state()
+
+    if as_json:
+        json_output({"paused": True, "already_paused": not created, **state}, True)
+        return
+
+    if created:
+        console.print("[yellow]Queue paused.[/yellow] No scheduled post will fire until resume.")
+    else:
+        console.print("[dim]Queue was already paused.[/dim]")
+
+
+@schedule.command("resume")
+@json_option
+@click.pass_context
+def schedule_resume(ctx: click.Context, as_json: bool):
+    """Release a paused queue so due entries can fire again"""
+    from xpst.schedule_manager import ScheduleManager
+
+    manager = ScheduleManager()
+    was_paused = manager.resume()
+
+    if as_json:
+        json_output({"paused": False, "was_paused": was_paused}, True)
+        return
+
+    if was_paused:
+        console.print("[green]Queue resumed.[/green] Due entries can fire again.")
+    else:
+        console.print("[dim]Queue was not paused.[/dim]")
+
+
+@schedule.command("remove")
+@click.argument("entry_id")
+@click.option("--dry-run", "dry_run", is_flag=True,
+              help="Show which entry would be removed without modifying the schedule store")
+@json_option
+@click.pass_context
+def schedule_remove(ctx: click.Context, entry_id: str, dry_run: bool, as_json: bool):
+    """Remove a scheduled post by ID
+
+    Removal is a local schedule-store operation only — it never un-posts
+    content that has already been published. The verdict comes from
+    :mod:`xpst.services.recovery_service`, which the MCP
+    ``xpst_schedule_cancel`` tool calls too.
+    """
+    from xpst.services import recovery_service
+
+    payload = recovery_service.cancel_scheduled_post(None, entry_id, dry_run=dry_run)
+
+    if dry_run:
+        if as_json:
+            json_output(payload, True)
+        else:
+            if not ctx.obj.get("quiet", False):
+                console.print("[bold blue]Dry run — would remove:[/bold blue]")
+            entry = payload.get("entry")
+            if entry:
+                console.print(
+                    f"  ID: [bold]{entry_id}[/bold] — {entry.get('caption', '')[:60]}"
+                )
+            else:
+                console.print(f"  ID: [bold]{entry_id}[/bold] — [yellow]not found[/yellow]")
+        return
+
+    if payload["ok"]:
+        # Legacy key kept for already-shipped consumers (`removed`: entry id).
+        payload["removed"] = entry_id
+        if as_json:
+            json_output(payload, True)
+        else:
+            console.print(f"[green]✓ Removed scheduled post [bold]{entry_id}[/bold][/green]")
+        return
+
+    error = payload.get("error") or {}
+    message = str(error.get("message") or f"Post not found: {entry_id}")
+    if as_json:
+        json_output({**payload, **_error_payload(
+            str(error.get("code") or "POST_NOT_FOUND"), message, entry_id=entry_id)}, True)
+    else:
+        console.print(f"[red]Post not found:[/red] {entry_id}")
+    sys.exit(EXIT_GENERAL)
+
+
+@schedule.command("run")
+@click.option("--dry-run", "dry_run", is_flag=True, help="Show what would be posted without uploading")
+@json_option
+@click.pass_context
+def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
+    """Process all due scheduled posts.
+
+    Fetches posts where scheduled_time <= now and status is pending,
+    then posts each one. Typically called by cron or manually.
+    """
+    from xpst.schedule_manager import ScheduleManager, entry_fire_route, stored_per_platform_captions
+
+    config_obj = load_config(ctx.obj.get("config_path"))
+    setup_logging(
+        log_level=config_obj.monitoring.log_level,
+        log_file=config_obj.monitoring.log_file,
+    )
+
+    manager = ScheduleManager()
+    # Duck-typed managers (tests, embedders) predate the pause contract: treat
+    # a manager with no pause state as running rather than crashing the command.
+    if getattr(manager, "is_paused", None) is not None and manager.is_paused():
+        state = manager.pause_state()
+        if as_json:
+            json_output({"status": "paused", "processed": 0, **state}, True)
+        else:
+            console.print(
+                "[yellow]Queue is paused[/yellow] — no entry will fire. "
+                "Run [bold]xpst schedule resume[/bold] first."
+            )
+        ctx.exit(EXIT_GENERAL)
+    due = manager.get_due()
+
+    if not due:
+        if as_json:
+            json_output({"status": "nothing_due", "processed": 0}, True)
+        else:
+            console.print("[dim]No scheduled posts are due.[/dim]")
+        # Nothing was due, so nothing was attempted: not a failure.
+        return
+
+    quiet = ctx.obj.get("quiet", False) if ctx.obj else False
+
+    if dry_run:
+        if as_json:
+            results = [
+                {"id": entry["id"], "status": "would_post"} for entry in due
+            ]
+            json_output({"status": "dry_run", "count": len(due), "posts": results}, True)
+        else:
+            console.print(f"[bold blue]Found {len(due)} due post(s)[/bold blue]")
+            for entry in due:
+                console.print(f"  Would post: {entry['id']} — {(Path(entry['video_path']).name if str(entry.get('video_path') or '').strip() else 'text post')} → {', '.join(entry.get('platforms', ['all']))}")
+        return
+
+    # Claim the due entries atomically (pending -> processing, under a
+    # cross-process file lock) so concurrent invocations — e.g. cron and
+    # the serve daemon — cannot double-post the same entry.
+    due = manager.claim_due()
+    if not due:
+        if as_json:
+            json_output({"status": "nothing_due", "processed": 0, "note": "claimed by another worker"}, True)
+        else:
+            console.print("[dim]Due posts were claimed by another worker.[/dim]")
+        return
+
+    engine = CrossPostEngine(config_obj)
+
+    # The batch verdict: per-entry failure families, aggregated with the same
+    # rule ``run``/``backfill`` use (_aggregate_post_exit_code) — any entry
+    # that published something makes the batch a success, otherwise the shared
+    # family of the entries that failed.
+    published = False
+    failure_codes: set[int] = set()
+
+    for entry in due:
+        entry_id = entry["id"]
+        video_path = Path(entry["video_path"])
+        caption = entry["caption"]
+        platforms = entry.get("platforms") or None
+        # Per-destination copy persisted at add time (same semantics as
+        # `xpst post --caption-for`); {} = shared caption everywhere.
+        per_platform_captions = stored_per_platform_captions(entry)
+        # Resolve the route FIRST (single shared resolver — entry_fire_route):
+        # a text entry has no media file, so the file-exists gate only applies
+        # to the media routes.
+        entry_route = entry_fire_route(entry)
+
+        if entry_route != "text" and not video_path.exists():
+            if not as_json:
+                console.print(f"  [red]✗[/red] {entry_id}: file not found — {video_path}")
+            manager.mark_complete(entry_id, success=False, error=f"File not found: {video_path}")
+            failure_codes.add(EXIT_GENERAL)
+            continue
+
+        try:
+            # Route by the modality stored at add time (D1's schedule twin):
+            # an image entry fires through the image route, a carousel entry
+            # through the carousel route, a text entry through post_text —
+            # never a placeholder .txt into the video encoder.
+            entry_media = [Path(p) for p in (entry.get("media_paths") or []) if str(p).strip()]
+            if entry_route == "text":
+                result = asyncio.run(
+                    engine.post_text(
+                        caption, platforms,
+                        per_destination=per_platform_captions or None,
+                    )
+                )
+            elif entry_route == "image":
+                result = asyncio.run(
+                    engine.post_manual_image(video_path, caption, platforms)
+                )
+            elif entry_route == "carousel" and len(entry_media) >= 2:
+                result = asyncio.run(
+                    engine.post_manual_carousel(
+                        entry_media, caption, platforms,
+                        per_platform_captions or None,
+                    )
+                )
+            else:
+                result = asyncio.run(
+                    engine.post_manual(
+                        video_path, caption, platforms,
+                        per_platform_captions=per_platform_captions or None,
+                    )
+                )
+            success = result.all_success
+            error_msg = None
+            if not success:
+                failed = [f"{p}: {ur.error}" for p, ur in result.results.items() if not ur.success]
+                error_msg = "; ".join(failed)
+
+            post_results = {platform: upload_result.to_dict() for platform, upload_result in result.results.items()}
+            # G11 on the fire path (D2): all-deferred is a requeue, not a failure.
+            _rows = result.results
+            _deferred_rows = [
+                ur for ur in _rows.values()
+                if not ur.success and (ur.metadata or {}).get("deferred")
+            ]
+            if not success and _rows and len(_deferred_rows) == len(_rows):
+                _resume_iso = next(
+                    (
+                        (ur.metadata or {}).get("resume_after")
+                        for ur in _deferred_rows
+                        if (ur.metadata or {}).get("resume_after")
+                    ),
+                    None,
+                )
+                _resume_at = None
+                if _resume_iso:
+                    try:
+                        from datetime import datetime as _dt
+
+                        _resume_at = _dt.fromisoformat(str(_resume_iso))
+                    except ValueError:
+                        _resume_at = None
+                manager.requeue(
+                    entry_id, next_time=_resume_at,
+                    error="deferred: outside posting window",
+                )
+                if not as_json:
+                    console.print(f"  [yellow]⏸[/yellow] {entry_id}: deferred (window), requeued")
+                continue
+
+            manager.mark_complete(
+                entry_id,
+                success=success,
+                error=error_msg,
+                post_results=post_results,
+            )
+
+            if success:
+                published = True
+            else:
+                entry_code = _post_exit_code(result, platforms)
+                if entry_code == EXIT_SUCCESS:
+                    # A partial success: something did reach a platform, so
+                    # this entry must not fail the batch.
+                    published = True
+                else:
+                    failure_codes.add(entry_code)
+
+            if not as_json:
+                if success:
+                    console.print(f"  [green]✓[/green] {entry_id}: posted successfully")
+                else:
+                    console.print(f"  [yellow]⚠[/yellow] {entry_id}: partial — {error_msg}")
+        except Exception as e:
+            manager.mark_complete(entry_id, success=False, error=str(e))
+            failure_codes.add(EXIT_GENERAL)
+            if not as_json:
+                console.print(f"  [red]✗[/red] {entry_id}: {e}")
+
+    if published or not failure_codes:
+        # Something was published, or nothing failed at all.
+        exit_code = EXIT_SUCCESS
+    else:
+        exit_code = failure_codes.pop() if len(failure_codes) == 1 else EXIT_GENERAL
+
+    if as_json:
+        # Same payload shape as before (status/count/posts), emitted once the
+        # work is done so it can carry the verdict; exit_code only on failure.
+        payload: dict[str, Any] = {
+            "status": "processing",
+            "count": len(due),
+            "posts": [{"id": entry["id"], "status": "pending"} for entry in due],
+        }
+        if exit_code != EXIT_SUCCESS:
+            payload["exit_code"] = exit_code
+        json_output(payload, True)
+    else:
+        console.print(f"\n[green]Processed {len(due)} scheduled post(s)[/green]")
+        if exit_code != EXIT_SUCCESS and not quiet:
+            console.print(f"[bold red]{_post_failure_message(exit_code)}[/bold red]")
+
+    if exit_code != EXIT_SUCCESS:
+        # Every due entry failed: the store records it, and so does the status.
+        sys.exit(exit_code)
+
+
+@schedule.command("install")
+@click.option("--interval", "-i", default=15, type=int, help="Run interval in minutes (default: 15)")
+@click.option("--remove", "uninstall", is_flag=True, help="Remove the OS scheduler instead of installing")
+@json_option
+@click.pass_context
+def schedule_install(ctx: click.Context, interval: int, uninstall: bool, as_json: bool):
+    """Install an OS-level scheduler to run 'xpst schedule run' periodically.
+
+    Creates a LaunchAgent on macOS, a scheduled task on Windows, or a
+    crontab entry on Linux. Use --remove to uninstall.
+    """
+    import os
+    import platform as _platform
+
+    system = _platform.system()
+    exe_name = "xpst.exe" if _platform.system() == "Windows" else "xpst"
+    xpst_bin = os.path.realpath(os.path.join(os.path.dirname(sys.executable), exe_name))
+
+    if uninstall:
+        result = _uninstall_os_scheduler(system, xpst_bin, as_json)
+    else:
+        result = _install_os_scheduler(system, xpst_bin, interval, as_json)
+
+    if not result:
+        sys.exit(EXIT_GENERAL)
+
+
+def _launchd_agent_path() -> str:
+    """PATH for the LaunchAgent environment.
+
+    launchd services start from ``/usr/bin:/bin:/usr/sbin:/sbin`` only, so a
+    user-installed helper (yt-dlp in ~/.local/bin, ffmpeg in /opt/homebrew/bin)
+    is invisible to the daemon even when ``xpst doctor`` reports it — the
+    divergence defect D4. Give the agent the standard system dirs plus the
+    user's own install dirs so daemon, CLI, and doctor agree.
+    """
+    home = Path.home()
+    parts = [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        str(home / ".local" / "bin"),
+        str(home / "bin"),
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ]
+    return ":".join(parts)
+
+
+def _write_launchd_plist(plist_dir: Path, xpst_bin: str) -> Path:
+    """Write the com.xpst.schedule LaunchAgent plist. Returns its path."""
+    plist_dir = Path(plist_dir)
+    plist_dir.mkdir(parents=True, exist_ok=True)
+    plist_path = plist_dir / "com.xpst.schedule.plist"
+    plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.xpst.schedule</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{xpst_bin}</string>
+        <string>serve</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{_launchd_agent_path()}</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{get_config_dir() / "logs" / "launchagent.log"}</string>
+    <key>StandardErrorPath</key>
+    <string>{get_config_dir() / "logs" / "launchagent.err"}</string>
+</dict>
+</plist>"""
+    with open(plist_path, "w") as f:
+        f.write(plist_content)
+    return plist_path
+
+
+def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bool) -> bool:
+    """Install OS-specific scheduler entry. Returns True on success."""
+    import os
+
+    if system == "Darwin":
+        plist_dir = Path(os.path.expanduser("~/Library/LaunchAgents"))
+        plist_path = _write_launchd_plist(plist_dir, xpst_bin)
+
+        # Load the agent (use modern launchctl bootstrap to avoid password prompts)
+        import subprocess
+        # Try bootstrap (modern, no password prompt) — fall back to legacy load
+        gui_uid = str(os.getuid())
+        boot_result = subprocess.run(
+            ["launchctl", "bootstrap", f"gui/{gui_uid}", str(plist_path)],
+            capture_output=True, text=True,
+        )
+        if boot_result.returncode != 0:
+            # Already loaded? Try bootout then bootstrap
+            subprocess.run(
+                ["launchctl", "bootout", f"gui/{gui_uid}/com.xpst.schedule"],
+                capture_output=True,
+            )
+            boot_result = subprocess.run(
+                ["launchctl", "bootstrap", f"gui/{gui_uid}", str(plist_path)],
+                capture_output=True, text=True,
+            )
+        result = boot_result
+
+        if result.returncode == 0:
+            if as_json:
+                json_output({"ok": True, "os": "macos", "path": str(plist_path), "command": "serve", "supervised": True}, True)
+            else:
+                console.print(f"[green]✓[/green] LaunchAgent installed: [bold]{plist_path}[/bold]")
+                console.print("  Runs `xpst serve` continuously (scheduler + dashboard)")
+                console.print("  KeepAlive restarts it automatically if it exits")
+                console.print("  Logs: ~/.xpst/logs/launchagent.log")
+                console.print("  Uninstall: [dim]xpst schedule install --remove[/dim]")
+            return True
+        else:
+            err = result.stderr.strip()
+            if as_json:
+                json_output({"ok": False, "error": f"launchctl load failed: {err}"}, True)
+            else:
+                console.print(f"[red]Failed to load LaunchAgent:[/red] {err}")
+            return False
+
+    elif system == "Linux":
+        import subprocess
+
+        if shutil.which("crontab") is None:
+            raise RuntimeError(
+                "crontab not found on PATH. Install cron to use scheduled posting on "
+                "Linux (e.g. 'sudo apt install cron' or 'sudo dnf install cronie')."
+            )
+
+        # cron does NOT expand '~', so the log path must be fully resolved.
+        cron_log = get_config_dir() / "logs" / "cron.log"
+        # The pidfile guard makes repeated `serve` invocations idempotent:
+        # if the daemon is already running the new process exits 0, so this
+        # periodic tick doubles as a poor-man's supervisor (self-healing).
+        cron_line = f"*/{interval} * * * * {xpst_bin} serve >> {cron_log} 2>&1"
+
+        # Read existing crontab
+        existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        lines = existing.stdout.strip().split("\n") if existing.returncode == 0 and existing.stdout.strip() else []
+        marker = "# xPST serve supervisor"
+
+        # Remove old xpst entries (legacy `schedule run` ticks and any prior
+        # install) before appending the new supervisor line.
+        filtered = _crontab_without_xpst(lines)
+        filtered.append(marker)
+        filtered.append(cron_line)
+        new_crontab = "\n".join(filtered) + "\n"
+
+        proc = subprocess.run(["crontab", "-"], input=new_crontab, capture_output=True, text=True)
+        if proc.returncode == 0:
+            if as_json:
+                json_output({"ok": True, "os": "linux", "interval_min": interval, "command": "serve"}, True)
+            else:
+                console.print(f"[green]✓[/green] Crontab entry installed (every {interval} minutes, keep-alive)")
+                console.print("  Runs `xpst serve` (pidfile-guarded; idempotent)")
+                console.print("  Logs: ~/.xpst/logs/cron.log")
+                console.print("  Uninstall: [dim]xpst schedule install --remove[/dim]")
+            return True
+        else:
+            if as_json:
+                json_output({"ok": False, "error": proc.stderr.strip()}, True)
+            else:
+                console.print(f"[red]Failed to set crontab:[/red] {proc.stderr.strip()}")
+            return False
+
+    elif system == "Windows":
+        import subprocess
+        task_name = "XpstServeSupervisor"
+        cmd = f'"{xpst_bin}" serve'
+
+        result = subprocess.run(
+            ["schtasks", "/Create", "/TN", task_name, "/TR", cmd,
+             "/SC", "ONLOGON", "/F"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            if as_json:
+                json_output({"ok": True, "os": "windows", "task": task_name, "command": "serve"}, True)
+            else:
+                console.print(f"[green]✓[/green] Scheduled task '{task_name}' created (runs `xpst serve` at logon)")
+                console.print("  Uninstall: [dim]xpst schedule install --remove[/dim]")
+            return True
+        else:
+            if as_json:
+                json_output({"ok": False, "error": result.stderr.strip()}, True)
+            else:
+                console.print(f"[red]Failed to create task:[/red] {result.stderr.strip()}")
+            return False
+
+    else:
+        if as_json:
+            json_output({"ok": False, "error": f"Unsupported OS: {system}"}, True)
+        else:
+            console.print(f"[red]Unsupported OS:[/red] {system}")
+        return False
+
+
+def _crontab_without_xpst(lines: list[str]) -> list[str]:
+    """Filter out any prior xPST scheduler entries from a crontab listing.
+
+    Removes both the legacy marker + ``schedule run`` ticks and the current
+    ``serve`` supervisor marker + line, including the xPST comment markers.
+    """
+    filtered: list[str] = []
+    skip_next = False
+    for line in lines:
+        markerish = "# xPST" in line
+        xpst_cmd = ("xpst schedule run" in line) or ("xpst serve" in line)
+        if skip_next:
+            skip_next = False
+            continue
+        if markerish or xpst_cmd:
+            skip_next = True  # swallow the marker/command line pair
+            continue
+        filtered.append(line)
+    return [line for line in filtered if line.strip()]
+
+
+def _uninstall_os_scheduler(system: str, xpst_bin: str, as_json: bool) -> bool:
+    """Remove OS-specific scheduler entry. Returns True on success."""
+    import os
+    import subprocess
+
+    if system == "Darwin":
+        plist_path = Path(os.path.expanduser("~/Library/LaunchAgents/com.xpst.schedule.plist"))
+        if not plist_path.exists():
+            if as_json:
+                json_output({"ok": False, "error": "LaunchAgent not found"}, True)
+            else:
+                console.print("[yellow]LaunchAgent not found — nothing to remove[/yellow]")
+            return True
+
+        # Use modern launchctl bootout (no password prompt) — fall back to legacy unload
+        gui_uid = str(os.getuid())
+        subprocess.run(
+            ["launchctl", "bootout", f"gui/{gui_uid}/com.xpst.schedule"],
+            capture_output=True,
+        )
+        # Also try legacy unload as fallback for older macOS
+        subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
+        plist_path.unlink()
+        if as_json:
+            json_output({"ok": True, "removed": str(plist_path)}, True)
+        else:
+            console.print(f"[green]✓[/green] LaunchAgent removed: {plist_path}")
+        return True
+
+    elif system == "Linux":
+        if shutil.which("crontab") is None:
+            raise RuntimeError(
+                "crontab not found on PATH. Install cron to manage scheduled posting on Linux."
+            )
+
+        existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        if existing.returncode != 0 or not existing.stdout.strip():
+            if as_json:
+                json_output({"ok": True, "message": "No crontab entries found"}, True)
+            else:
+                console.print("[yellow]No crontab entries found[/yellow]")
+            return True
+
+        lines = existing.stdout.strip().split("\n")
+        filtered = _crontab_without_xpst(lines)
+
+        new_crontab = "\n".join(filtered) + "\n" if filtered else ""
+        if new_crontab.strip():
+            subprocess.run(["crontab", "-"], input=new_crontab, capture_output=True, text=True)
+        else:
+            subprocess.run(["crontab", "-r"], capture_output=True, text=True)
+
+        if as_json:
+            json_output({"ok": True, "removed": "crontab entry"}, True)
+        else:
+            console.print("[green]✓[/green] xPST crontab entry removed")
+        return True
+
+    elif system == "Windows":
+        import subprocess
+        task_name = "XpstServeSupervisor"
+        # Ensure a legacy Task Scheduler entry is removed as well.
+        subprocess.run(
+            ["schtasks", "/Delete", "/TN", "XpstScheduleRun", "/F"],
+            capture_output=True, text=True,
+        )
+        result = subprocess.run(
+            ["schtasks", "/Delete", "/TN", task_name, "/F"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            if as_json:
+                json_output({"ok": True, "removed": task_name}, True)
+            else:
+                console.print(f"[green]✓[/green] Scheduled task '{task_name}' removed")
+            return True
+        else:
+            if as_json:
+                json_output({"ok": False, "error": result.stderr.strip()}, True)
+            else:
+                console.print(f"[red]Failed to delete task:[/red] {result.stderr.strip()}")
+            return False
+
+    else:
+        if as_json:
+            json_output({"ok": False, "error": f"Unsupported OS: {system}"}, True)
+        else:
+            console.print(f"[red]Unsupported OS:[/red] {system}")
+        return False
+
+
+def _deep_merge_import(base: dict, override: dict) -> dict:
+    """Recursively merge override into base for config import."""
+    result = dict(base)
+    for k, v in override.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge_import(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
+def _flatten_dict(d: dict, prefix: str = "") -> dict[str, Any]:
+    """Flatten a nested dict to dotted-key paths."""
+    items: dict[str, Any] = {}
+    for k, v in d.items():
+        key = f"{prefix}.{k}" if prefix else k
+        if isinstance(v, dict):
+            items.update(_flatten_dict(v, key))
+        else:
+            items[key] = v
+    return items
+
+
+_KNOWN_CONFIG_KEYS = {
+    "accounts", "video", "reliability", "monitoring", "notifications",
+    "rate_limits", "schedule",
+}
+
+_KNOWN_ACCOUNT_PLATFORMS = {"tiktok", "youtube", "x", "instagram", "local"}
+
+_KNOWN_ENCODING_KEYS = {"resolution", "crf", "bitrate", "maxrate", "bufsize", "profile", "level", "gop", "fps", "color", "pix_fmt", "passthrough"}
+
+
+def _validate_config_dict(data: dict) -> tuple[list[str], list[str]]:
+    """Validate an imported config dict against known XPSTConfig structure.
+
+    Returns:
+        (errors, warnings) — errors block import, warnings are informational.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not isinstance(data, dict):
+        errors.append("Config must be a YAML mapping (dict)")
+        return errors, warnings
+
+    # Check for unknown top-level keys
+    for key in data:
+        if key not in _KNOWN_CONFIG_KEYS:
+            warnings.append(f"Unknown top-level key: '{key}'")
+
+    # Validate accounts
+    accounts = data.get("accounts", {})
+    if accounts and isinstance(accounts, dict):
+        for plat in accounts:
+            if plat not in _KNOWN_ACCOUNT_PLATFORMS:
+                warnings.append(f"Unknown platform in accounts: '{plat}'")
+
+    # Validate encoding sections
+    video = data.get("video", {})
+    if video and isinstance(video, dict):
+        encoding = video.get("encoding", {})
+        if encoding and isinstance(encoding, dict):
+            for plat, enc in encoding.items():
+                if isinstance(enc, dict):
+                    for key in enc:
+                        if key not in _KNOWN_ENCODING_KEYS:
+                            warnings.append(f"Unknown encoding key for {plat}: '{key}'")
+
+    # Validate required top-level types
+    for key in ("rate_limits", "reliability", "monitoring", "schedule"):
+        if key in data and not isinstance(data[key], dict):
+            errors.append(f"'{key}' must be a mapping, got {type(data[key]).__name__}")
+
+    return errors, warnings
+
+
+def _compute_config_diff(old: dict, new: dict) -> dict[str, list[str]]:
+    """Compute added, removed, and changed keys between two config dicts."""
+    old_flat = _flatten_dict(old)
+    new_flat = _flatten_dict(new)
+
+    old_keys = set(old_flat.keys())
+    new_keys = set(new_flat.keys())
+
+    added = sorted(new_keys - old_keys)
+    removed = sorted(old_keys - new_keys)
+    changed = sorted(k for k in old_keys & new_keys if old_flat[k] != new_flat[k])
+
+    # Store old/new values for changed keys so display can show them
+    old_values = {k: old_flat[k] for k in changed}
+    new_values = {k: new_flat[k] for k in changed}
+
+    return {"added": added, "removed": removed, "changed": changed, "_old_values": old_values, "_new_values": new_values}
+
+
+def _display_config_diff(changes: dict[str, list[str]], warnings: list[str]) -> None:
+    """Display config import diff to console with color-coded changes."""
+    if changes["added"]:
+        console.print("\n[green]Added keys:[/green]")
+        for key in changes["added"]:
+            console.print(f"  [green]+[/green] {key}")
+    if changes["removed"]:
+        console.print("\n[red]Removed keys:[/red]")
+        for key in changes["removed"]:
+            console.print(f"  [red]-[/red] {key}")
+    if changes["changed"]:
+        console.print("\n[yellow]Changed values:[/yellow]")
+        for key in changes["changed"]:
+            old_val = changes.get("_old_values", {}).get(key, "?")
+            new_val = changes.get("_new_values", {}).get(key, "?")
+            console.print(f"  [yellow]~[/yellow] {key}: [red]{old_val}[/red] → [green]{new_val}[/green]")
+    if warnings:
+        console.print("\n[yellow]Warnings:[/yellow]")
+        for w in warnings:
+            console.print(f"  [yellow]⚠[/yellow] {w}")
+    console.print()
+
+
+# ──────────────────────────────────────────────
+# Analytics Export Command
+# ──────────────────────────────────────────────
+
+@analytics.command("export")
+@click.option("--format", "fmt", default="json", type=click.Choice(["json", "csv"]), help="Export format")
+@click.option("--output", "-o", required=True, type=click.Path(), help="Output file path")
+@click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
+@click.option("--refresh", "-r", is_flag=True, help="Force refresh (ignore cache)")
+@json_option
+@click.pass_context
+def analytics_export(ctx: click.Context, fmt: str, output: str, platforms: str | None, refresh: bool, as_json: bool):
+    """Export analytics data to a file.
+
+    Collects engagement metrics from all platforms and writes to JSON or CSV.
+    """
+    import asyncio
+    import csv as csv_mod
+    from datetime import datetime as _dt
+
+    config = load_config(ctx.obj.get("config_path"))
+
+    from xpst.analytics import AnalyticsCollector
+
+    collector = AnalyticsCollector(config.config_dir)
+    if refresh:
+        collector._cache_ttl = 0
+
+    post_ids = collector._discover_post_ids()
+    if platforms:
+        platform_list = [p.strip() for p in platforms.split(",")]
+        post_ids = {k: v for k, v in post_ids.items() if k in platform_list}
+
+    total_ids = sum(len(v) for v in post_ids.values())
+    if total_ids == 0:
+        if as_json:
+            json_output({"ok": False, "error": "No posts found in state"}, True)
+        else:
+            console.print("[yellow]No posts found in state. Run `xpst run` first.[/yellow]")
+        return
+
+    data = asyncio.run(collector.collect_all(post_ids))
+    totals = collector.get_total_metrics(data)
+    platform_totals = collector.get_platform_totals(data)
+
+    out_path = Path(output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if fmt == "json":
+        export_data = {
+            "platforms": {p: {pid: m for pid, m in posts.items()} for p, posts in data.items()},
+            "totals": totals,
+            "platform_totals": platform_totals,
+            # Issue #297: exported numbers carry the collection outcome that
+            # produced them, so a consumer never reads a failed fetch as data.
+            "collection_status": {
+                platform: collector.collection_status(platform) for platform in data
+            },
+            "exported_at": _dt.now().isoformat(),
+        }
+        with open(out_path, "w") as f:
+            _json.dump(export_data, f, indent=2, default=str, ensure_ascii=False)
+    elif fmt == "csv":
+        import io
+        with open(out_path, "wb") as raw_f:
+            # Write UTF-8 BOM for Excel compatibility
+            raw_f.write(b"\xef\xbb\xbf")
+            f = io.TextIOWrapper(raw_f, encoding="utf-8", newline="")
+            writer = csv_mod.writer(f)
+            writer.writerow(["platform", "post_id", "caption", "views", "likes", "comments", "shares", "saves", "timestamp"])
+            for platform, posts in data.items():
+                for post_id, metrics in posts.items():
+                    writer.writerow([
+                        platform,
+                        post_id,
+                        metrics.get("caption", ""),
+                        metrics.get("views", 0),
+                        metrics.get("likes", 0),
+                        metrics.get("comments", 0),
+                        metrics.get("shares", 0),
+                        metrics.get("saves", 0),
+                        metrics.get("timestamp", ""),
+                    ])
+            f.detach()  # prevent TextIOWrapper from closing raw_f twice
+
+    if as_json:
+        json_output({"ok": True, "format": fmt, "output": str(out_path), "totals": totals}, True)
+    else:
+        console.print(f"[green]✓[/green] Analytics exported to [bold]{out_path}[/bold] ({fmt})")
+        console.print(f"  Views: {totals['views']:,}  Likes: {totals['likes']:,}  Comments: {totals['comments']:,}  Shares: {totals['shares']:,}")
+
+
+# ──────────────────────────────────────────────
+# Plugins Group
+# ──────────────────────────────────────────────
+
+@main.group()
+@click.pass_context
+def plugins(ctx: click.Context):
+    """Manage xPST plugins"""
+    pass
+
+
+@plugins.command("docs")
+@click.option("--output", "-o", default=None, type=click.Path(), help="Output file (default: stdout)")
+@json_option
+@click.pass_context
+def plugins_docs(ctx: click.Context, output: str | None, as_json: bool):
+    """Generate markdown documentation for installed plugins.
+
+    Introspects all installed plugins and produces a markdown file
+    documenting each plugin's name, description, capabilities, and
+    configuration options.
+    """
+    from xpst.plugins import PluginManager
+
+    pm = PluginManager()
+    pm.discover()
+    plugin_list = pm.list_plugins()
+
+    if not plugin_list:
+        if as_json:
+            json_output({"ok": True, "plugins": 0, "message": "No plugins installed"}, True)
+        else:
+            console.print("[dim]No plugins installed. Place .py files in ~/.xpst/plugins/[/dim]")
+        return
+
+    # Build markdown
+    from datetime import datetime as _dt
+
+    lines: list[str] = []
+    lines.append("# xPST Plugin Documentation\n")
+    lines.append(f"Auto-generated on {_dt.now().strftime('%Y-%m-%d %H:%M')}\n")
+    lines.append(f"**{len(plugin_list)} plugin(s) installed**\n")
+    lines.append("---\n")
+
+    for pinfo in plugin_list:
+        name = pinfo.get("name", "unknown")
+        lines.append(f"## {name}\n")
+        lines.append(f"- **Version:** {pinfo.get('version', 'unknown')}")
+        lines.append(f"- **Description:** {pinfo.get('description', 'No description')}")
+        caps = []
+        if pinfo.get("has_uploader"):
+            caps.append("Uploader")
+        if pinfo.get("has_source"):
+            caps.append("Source")
+        lines.append(f"- **Capabilities:** {', '.join(caps) if caps else 'None'}")
+
+        # Try to get more details from the plugin
+        plugin_data = pm.get(name)
+        if plugin_data:
+            config_opts = plugin_data.get("config_options", [])
+            if config_opts:
+                lines.append("- **Config Options:**")
+                for opt in config_opts:
+                    if isinstance(opt, dict):
+                        opt_name = opt.get("name", "?")
+                        opt_desc = opt.get("description", "")
+                        opt_default = opt.get("default", "")
+                        lines.append(f"  - `{opt_name}`: {opt_desc} (default: `{opt_default}`)")
+                    else:
+                        lines.append(f"  - `{opt}`")
+        lines.append("")
+
+    md_content = "\n".join(lines)
+
+    if output:
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w") as f:
+            f.write(md_content)
+        if as_json:
+            json_output({"ok": True, "output": str(out_path), "plugins": len(plugin_list)}, True)
+        else:
+            console.print(f"[green]✓[/green] Plugin docs written to [bold]{out_path}[/bold]")
+    else:
+        if as_json:
+            json_output({"ok": True, "content": md_content, "plugins": len(plugin_list)}, True)
+        else:
+            console.print(md_content)
+
+
+@plugins.command("list")
+@json_option
+@click.pass_context
+def plugins_list(ctx: click.Context, as_json: bool):
+    """List installed plugins."""
+    from xpst.plugins import PluginManager
+
+    pm = PluginManager()
+    pm.discover()
+    plugin_list = pm.list_plugins()
+
+    if as_json:
+        json_output({"plugins": plugin_list, "count": len(plugin_list)}, True)
+        return
+
+    if not plugin_list:
+        console.print("[dim]No plugins installed.[/dim]")
+        return
+
+    table = Table(title="Installed Plugins", show_lines=True)
+    table.add_column("Name", style="bold")
+    table.add_column("Version")
+    table.add_column("Description", max_width=50)
+    table.add_column("Uploader")
+    table.add_column("Source")
+
+    for p in plugin_list:
+        table.add_row(
+            p["name"],
+            p.get("version", "?"),
+            p.get("description", ""),
+            "✓" if p.get("has_uploader") else "✗",
+            "✓" if p.get("has_source") else "✗",
+        )
+
+    console.print(table)
+
+
+def confirm(message: str) -> bool:
+    """Prompt the user for a yes/no confirmation.
+
+    Args:
+        message: Question to display.
+
+    Returns:
+        True if user confirmed, False otherwise.
+    """
+
+    response = console.input(f"[cyan]{message} (y/n): [/cyan]")
+    return response.lower() in ("y", "yes")
+
+
+# Knowledge base commands (optional; safe to import — heavy deps load lazily).
+from xpst.knowledge.cli_kb import kb as _kb_group  # noqa: E402
+
+main.add_command(_kb_group)
+
+
+# ── Phase B: Follower tracking ──────────────────────────────────────────
+
+
+@main.command()
+@json_option
+@click.pass_context
+def followers(ctx: click.Context, as_json: bool):
+    """Show follower counts per platform with growth history.
+
+    Fetches live follower counts from each connected platform and
+    compares against stored snapshots to show growth trends.
+    """
+    import asyncio
+    import json as _json
+
+    from xpst.analytics_store import AnalyticsStore
+
+    config = load_config(ctx.obj.get("config_path"))
+    store = AnalyticsStore()
+
+    # Get stored follower snapshots
+    latest = store.latest_followers()
+
+    # Try to fetch live counts (best-effort, non-blocking on failure)
+    live_counts: dict[str, int] = {}
+    try:
+        from xpst.engine import CrossPostEngine
+        engine = CrossPostEngine(config)
+        for platform_name, uploader in engine._platforms.items():
+            try:
+                count = asyncio.run(uploader.get_followers())
+                if count > 0:
+                    live_counts[platform_name] = count
+                    store.record_followers(platform_name, count)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Build output
+    platforms_data: list[dict] = []
+    total = 0
+    all_platforms = set(list(latest.keys()) + list(live_counts.keys()))
+    for p in sorted(all_platforms):
+        live = live_counts.get(p, 0)
+        stored = latest.get(p, {}).get("count", 0)
+        count = live or stored
+        history = store.follower_history(p, limit=7)
+        growth = 0
+        if len(history) >= 2:
+            growth = count - history[0]["count"]
+        total += count
+        platforms_data.append({
+            "platform": p,
+            "count": count,
+            "growth": growth,
+            "history": history,
+        })
+
+    output = {"total_followers": total, "platforms": platforms_data}
+
+    if as_json:
+        click.echo(_json.dumps(output, indent=2, default=str))
+    else:
+        console.print(f"\n[bold]Total followers:[/bold] {total:,}\n")
+        for pdata in platforms_data:
+            growth_str = f" (+{pdata['growth']:,})" if pdata["growth"] > 0 else ""
+            console.print(f"  {pdata['platform']}: {pdata['count']:,}{growth_str}")
+        console.print()
+
+
+# ── Phase B: Best time to post ──────────────────────────────────────────
+
+
+@main.command()
+@click.option("--platform", "-p", default=None, help="Filter to a specific platform")
+@json_option
+@click.pass_context
+def best_time(ctx: click.Context, platform: str | None, as_json: bool):
+    """Show recommended posting times based on engagement history.
+
+    Analyzes when your posts get the highest engagement and recommends
+    the best day-of-week and hour to post per platform.
+    """
+    import json as _json
+
+    from xpst.best_time import BestTimeAnalyzer
+
+    config = load_config(ctx.obj.get("config_path"))
+    analyzer = BestTimeAnalyzer(
+        Path(config.config_dir) / "analytics.db"
+        if config.config_dir != "~/.xpst"
+        else None
+    )
+
+    if platform:
+        best = analyzer.best_for_platform(platform)
+        if as_json:
+            click.echo(_json.dumps({"platform": platform, "best_time": best}, indent=2, default=str))
+        elif best:
+            console.print(
+                f"\n[bold]Best time for {platform}:[/bold] "
+                f"{best['day_name']} at {best['hour']}:00 "
+                f"(avg {best['avg_engagement_rate']}% engagement, "
+                f"{best['post_count']} posts)\n"
+            )
+            _warn_if_noise(best.get("avg_engagement_rate"), best.get("post_count"))
+        else:
+            console.print(f"\nNo data yet for {platform}.\n")
+    else:
+        best_all = analyzer.best_overall()
+        if as_json:
+            click.echo(_json.dumps({"best_times": best_all}, indent=2, default=str))
+        elif best_all:
+            console.print("\n[bold]Best times to post:[/bold]\n")
+            for p, slots in best_all.items():
+                if slots:
+                    top = slots[0]
+                    console.print(
+                        f"  {p}: {top['day_name']} at {top['hour']}:00 "
+                        f"(avg {top['avg_engagement_rate']}% engagement)"
+                    )
+                    _warn_if_noise(top.get("avg_engagement_rate"), top.get("post_count"))
+            console.print()
+        else:
+            console.print("\nNo posting history yet. Post a few videos to get recommendations.\n")
+
+
+def _warn_if_noise(avg_engagement_rate, post_count) -> None:
+    """Flag recommendations computed from zero engagement (audit #6).
+
+    With avg_engagement_rate == 0 every time slot scores identically, so the
+    'recommendation' is arbitrary noise presented with false confidence.
+    """
+    try:
+        if float(avg_engagement_rate or 0) <= 0.0:
+            console.print(
+                "  [yellow]⚠ No engagement data behind this yet — treat it as a "
+                "placeholder, not a real recommendation. Post videos with metrics "
+                "tracking enabled to train it.[/yellow]"
+            )
+    except (TypeError, ValueError):
+        pass
+
+
+# ── Phase F: Caption Generation ─────────────────────────────────────────
+
+
+@main.command(name="suggest-caption")
+@click.argument("video_path", type=click.Path(exists=True))
+@click.option("--platform", "-p", default="instagram", help="Target platform for char limits")
+@json_option
+@click.pass_context
+def suggest_caption(ctx: click.Context, video_path: str, platform: str, as_json: bool):
+    """Generate AI caption suggestions from a video file.
+
+    Uses the video's transcript (via the KB transcriber) to generate 3
+    caption variants. Falls back to deterministic extraction when no LLM
+    is configured.
+
+    Platform-specific character limits are enforced:
+    X /280, Threads /500, Instagram /2200, YouTube /5000
+    """
+    import json as _json
+    from pathlib import Path
+
+    from xpst.caption_gen import generate_caption
+
+    # Try to get transcript from KB, or use file metadata as fallback
+    transcript_text = ""
+    try:
+        from xpst.knowledge.config import KnowledgeConfig
+        from xpst.knowledge.ingest.transcribe import FasterWhisperTranscriber
+
+        kb_config = KnowledgeConfig.from_env()
+        transcriber = FasterWhisperTranscriber(model_size=kb_config.whisper_model)
+        transcript = transcriber.transcribe(Path(video_path))
+        transcript_text = transcript.text if hasattr(transcript, "text") else str(transcript)
+    except Exception:
+        # Fallback: use filename as caption seed
+        transcript_text = Path(video_path).stem.replace("_", " ").replace("-", " ")
+
+    captions = generate_caption(transcript_text, platform=platform)
+
+    if as_json:
+        click.echo(_json.dumps({
+            "video_path": video_path,
+            "platform": platform,
+            "char_limit": _get_platform_char_limit(platform),
+            "suggestions": captions,
+        }, indent=2, default=str))
+    else:
+        console.print(f"\n[bold]Caption suggestions for {platform}:[/bold]\n")
+        for i, c in enumerate(captions, 1):
+            console.print(f"  [cyan]Option {i}[/cyan] ({c.get('style', 'default')}):")
+            console.print(f"  {c['caption']}")
+            console.print(f"  [dim]Hashtags: {c.get('hashtags', '')}[/dim]\n")
+
+
+def _get_platform_char_limit(platform: str) -> int:
+    """Return the character limit for a platform."""
+    from xpst.caption_gen import PLATFORM_CHAR_LIMITS
+    return PLATFORM_CHAR_LIMITS.get(platform, 2200)
+
+
+# ── Phase F: AI Content Generation (captions + ideas) ──────────────────
+
+
+@main.group(name="generate")
+def generate_group() -> None:
+    """AI content creation: captions and post ideas (works without an LLM)."""
+
+
+@generate_group.command(name="caption")
+@click.option("--text", "-t", required=True, help="Source text (transcript, description, or seed)")
+@click.option("--platform", "-p", default="instagram", help="Target platform for char limits")
+@json_option
+@click.pass_context
+def generate_caption_cmd(ctx: click.Context, text: str, platform: str, as_json: bool) -> None:
+    """Generate 3 caption variants from text.
+
+    Uses the KB LLM when XPST_KB_LLM_ENABLED is set, otherwise falls back to
+    deterministic extraction. Platform char limits are enforced:
+    X /280, Threads /500, Instagram /2200, YouTube /5000.
+    """
+    from xpst.caption_gen import generate_caption
+
+    captions = generate_caption(text, platform=platform)
+
+    if as_json:
+        click.echo(_json.dumps({
+            "text": text,
+            "platform": platform,
+            "char_limit": _get_platform_char_limit(platform),
+            "suggestions": captions,
+        }, indent=2, default=str))
+        return
+    console.print(f"\n[bold]Caption suggestions for {platform}:[/bold]\n")
+    for i, c in enumerate(captions, 1):
+        console.print(f"  [cyan]Option {i}[/cyan] ({c.get('style', 'default')}):")
+        console.print(f"  {c['caption']}")
+        console.print(f"  [dim]Hashtags: {c.get('hashtags', '')}[/dim]\n")
+
+
+@generate_group.command(name="ideas")
+@click.option("--topic", "-t", required=True, help="Content topic to generate ideas for")
+@click.option("--count", "-n", default=5, show_default=True, type=click.IntRange(1, 10), help="Number of ideas (1-10)")
+@json_option
+@click.pass_context
+def generate_ideas_cmd(ctx: click.Context, topic: str, count: int, as_json: bool) -> None:
+    """Generate N post ideas for a topic.
+
+    Uses the KB LLM when XPST_KB_LLM_ENABLED is set, otherwise falls back to
+    deterministic template generation — no LLM required.
+    """
+    from xpst.caption_gen import generate_ideas
+
+    ideas = generate_ideas(topic, count=count)
+
+    if as_json:
+        click.echo(_json.dumps({
+            "topic": topic,
+            "count": len(ideas),
+            "ideas": ideas,
+        }, indent=2, default=str))
+        return
+    console.print(f"\n[bold]Post ideas for '{topic}':[/bold]\n")
+    for i, idea in enumerate(ideas, 1):
+        console.print(f"  [cyan]{i}.[/cyan] {idea['idea']}")
+        hook = idea.get("hook")
+        if hook:
+            console.print(
+                f"      [dim]hook: {hook} · source: {idea.get('source', 'deterministic')}[/dim]"
+            )
+
+
+# ── Phase E/F: Security Audit ───────────────────────────────────────────
+
+
+@main.command()
+@json_option
+@click.pass_context
+def security_audit(ctx: click.Context, as_json: bool):
+    """Run an automated security check on the xPST installation.
+
+    Verifies:
+    - Credential files have 0600 permissions
+    - No plaintext credential storage
+    - Dashboard binds to localhost
+    - MCP readonly mode is available
+    - FFmpeg is available
+    - Provider mode is set
+    """
+    import json as _json
+
+    from xpst.security_audit import run_security_checks
+
+    config = load_config(ctx.obj.get("config_path"))
+    output = run_security_checks(config)
+    output["check_count"] = len(output["checks"])
+
+    if as_json:
+        click.echo(_json.dumps(output, indent=2, default=str))
+    else:
+        all_pass = output["overall_status"] == "pass"
+        status_color = "green" if all_pass else "red"
+        console.print(f"\n[bold]Security Audit:[/bold] [{status_color}]{'PASS' if all_pass else 'FAIL'}[/{status_color}]\n")
+        for check in output["checks"]:
+            icon = "✅" if check["passed"] else "❌"
+            detail = check.get("detail") or check.get("mode") or ""
+            suffix = " (advisory)" if check.get("advisory") and not check["passed"] else ""
+            console.print(f"  {icon} {check['check']}{suffix}: {detail}")
+        console.print()
+
+
+# ── Phase F: Transcript + Search CLI ─────────────────────────────────────
+
+
+@main.command()
+@click.argument("video_id")
+@json_option
+@click.pass_context
+def transcript(ctx: click.Context, video_id: str, as_json: bool):
+    """Get the transcript for a video by ID or content_hash (D2/F1.4).
+
+    Transcripts are cached by content_hash so cross-posted videos share
+    the same transcript.
+    """
+    import json as _json
+
+    from xpst.knowledge.workspace import Workspace
+
+    ws = Workspace.resolve("default", create=False)
+
+    # Try direct lookup
+    result = ws.get_transcript(video_id)
+    if result is None:
+        result = ws.get_transcript(f"content:{video_id}")
+    if result is None:
+        # Search transcripts dir
+        import os
+        tdir = ws.transcripts_dir
+        if tdir.exists():
+            for fname in os.listdir(tdir):
+                if video_id in fname:
+                    result = ws.get_transcript(fname.replace(".json", ""))
+                    break
+
+    if result is None:
+        if as_json:
+            click.echo(_json.dumps({"error": "Transcript not found", "video_id": video_id}))
+        else:
+            console.print(f"[red]Transcript not found for:[/red] {video_id}")
+        ctx.exit(1)
+    else:
+        if as_json:
+            click.echo(_json.dumps(result, indent=2, default=str))
+        else:
+            console.print(f"[bold]Transcript for {video_id}[/bold]\n")
+            console.print(result.get("text", ""))
+            segs = result.get("segments", [])
+            if segs:
+                console.print(f"\n[dim]{len(segs)} segments[/dim]")
+
+
+@main.command()
+@click.argument("query")
+@click.option("--limit", "-l", default=10, help="Max results")
+@json_option
+@click.pass_context
+def search(ctx: click.Context, query: str, limit: int, as_json: bool):
+    """Search the knowledge base for nuggets and topics (F1.5).
+
+    Uses semantic search when embeddings are available, falls back to
+    substring matching.
+    """
+    import json as _json
+
+    from xpst.knowledge.query import query_nuggets
+
+    result = query_nuggets(query, k=limit)
+
+    if as_json:
+        click.echo(_json.dumps(result, indent=2, default=str))
+    else:
+        console.print(f"[bold]Search: '{query}'[/bold] ({result.get('mode', 'unknown')})\n")
+        for hit in result.get("hits", []):
+            nugget = hit.get("nugget", hit) if isinstance(hit, dict) else {}
+            point = nugget.get("point", str(hit)[:80]) if isinstance(nugget, dict) else str(hit)[:80]
+            score = hit.get("score") if isinstance(hit, dict) else None
+            score_str = f" ({score:.2f})" if score is not None else ""
+            console.print(f"  • {point}{score_str}")
+        if not result.get("hits"):
+            console.print("[dim]No results found.[/dim]")
+
+
+@main.group()
+def media():
+    """Local media helper binaries (ffmpeg / ffprobe).
+
+    xPST no longer ships ffmpeg inside the desktop app (~87 MB of a 192 MB
+    bundle). It uses the ffmpeg already on your machine, and only downloads a
+    verified static build — once, with a checksum — when there is none.
+    """
+
+
+@media.command("status")
+@json_option
+def media_status(as_json: bool):
+    """Show which ffmpeg/ffprobe xPST will use, and where it came from.
+
+        xpst media status
+        xpst media status --json
+    """
+    from xpst.media.binaries import media_bin_dir, media_binary_status
+
+    status = media_binary_status()
+    payload = {
+        "bin_dir": str(media_bin_dir()),
+        "binaries": status,
+        "ok": all(item["ok"] for item in status.values()),
+    }
+    if as_json:
+        json_output(payload, True)
+        return
+    for name, item in status.items():
+        if item["ok"]:
+            console.print(f"[green]✓[/green] [bold]{name}[/bold] ({item['source']}): {item['path']}")
+        else:
+            console.print(f"[yellow]•[/yellow] [bold]{name}[/bold]: not found")
+    if not payload["ok"]:
+        console.print(
+            "[dim]Run [bold]xpst media fetch[/bold] to download a verified static build, "
+            "or install ffmpeg (macOS: brew install ffmpeg).[/dim]"
+        )
+
+
+@media.command("fetch")
+@click.option("--binary", "binaries", multiple=True, type=click.Choice(["ffmpeg", "ffprobe"]),
+              help="Fetch only this binary (repeatable; default: both)")
+@json_option
+def media_fetch(binaries: tuple[str, ...], as_json: bool):
+    """Download ffmpeg/ffprobe into ~/.xpst/bin (resumable, checksum-verified).
+
+    Only needed on a machine with no ffmpeg of its own. Nothing is downloaded
+    when a system ffmpeg (or XPST_FFMPEG_PATH) already resolves.
+    """
+    from xpst.media.binaries import MEDIA_BINARIES, ensure_media_binaries, media_bin_dir
+
+    names = binaries or MEDIA_BINARIES
+    report = ensure_media_binaries(names=names, fetch=True, log=lambda line: console.print(f"[dim]{line}[/dim]"))
+    failures = {name: info for name, info in report.items() if not info["ok"]}
+    payload = {
+        "bin_dir": str(media_bin_dir()),
+        "binaries": report,
+        "ok": not failures,
+    }
+    if as_json:
+        json_output(payload, True)
+        if failures:
+            sys.exit(EXIT_GENERAL)
+        return
+    for name, item in report.items():
+        if item["ok"]:
+            console.print(f"[green]✓[/green] [bold]{name}[/bold] ready: {item['path']}")
+        else:
+            console.print(f"[red]✗[/red] [bold]{name}[/bold] unavailable: {item.get('error')}")
+    if failures:
+        sys.exit(EXIT_GENERAL)
+
+
+# ──────────────────────────────────────────────
+# Live-stream relay commands
+# ──────────────────────────────────────────────
+
+
+@main.group()
+@click.pass_context
+def stream(ctx: click.Context):
+    """Live streaming: one ingest, many destinations, no re-encode.
+
+    xPST prepares the destinations and writes the relay configuration;
+    MediaMTX (external child process, same footing as ffmpeg) moves the bytes.
+    Nothing here uploads video or contacts a platform: `destinations` reports
+    which platforms can hand an app an ingest key and which are copy/paste by
+    design.
+    """
+
+
+@stream.command("destinations")
+@json_option
+@click.pass_context
+def stream_destinations(ctx: click.Context, as_json: bool) -> None:
+    """Show every platform's live-ingest path and whether a key is stored."""
+    from xpst.stream.keys import destination_status
+
+    config = load_config(ctx.obj.get("config_path"))
+    status = destination_status(config.config_dir, config=config)
+    if as_json:
+        json_output(status, as_json)
+        if not status["ok"]:
+            ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    table = Table(title="Live stream destinations", show_header=True, header_style="bold")
+    table.add_column("Platform")
+    table.add_column("Ingest path")
+    table.add_column("Key")
+    table.add_column("Fetch")
+    table.add_column("What you must do", max_width=56)
+    for row in status["platforms"]:
+        if row["ingest_class"] == "unsupported":
+            continue
+        key_cell = "[green]stored[/green]" if row["key_present"] else "[dim]—[/dim]"
+        action = row["operator_action"] if row["ingest_class"] == "manual" else "fetch from the platform API"
+        fetch = row.get("fetch")
+        if fetch is None:
+            fetch_cell = "[dim]—[/dim]"
+        elif fetch["credentials_present"]:
+            fetch_cell = "[green]ready[/green]"
+        else:
+            fetch_cell = f"[yellow]{', '.join(fetch['missing'])}[/yellow]"
+        table.add_row(row["display_name"], row["ingest_class"], key_cell, fetch_cell, action)
+    console.print(table)
+    console.print(
+        "[dim]Fetch a key where the platform documents an endpoint with `xpst stream fetch-key "
+        "<platform>`; store one by hand with `xpst stream set-key <platform>`; write the relay "
+        "config with `xpst stream relay-config --output mediamtx.yml`.[/dim]"
+    )
+    missing = status.get("missing_credentials") or []
+    if missing:
+        console.print("[dim]App credentials are missing for:[/dim]")
+        for row in missing:
+            console.print(
+                f"  [yellow]{row['platform']}[/yellow] ({', '.join(row['missing'])}) — "
+                f"[dim]{row['registration_url']}[/dim]"
+            )
+        console.print("[dim]Run `xpst stream app-credentials <platform> --help` for the steps.[/dim]")
+    if not status["ok"]:
+        console.print(f"[red]{status['error']}[/red]")
+        ctx.exit(EXIT_CONFIG_ERROR)
+
+
+@stream.command("fetch-key")
+@click.argument("platform")
+@click.option("--title", default="", help="Title for a resource the platform must create (YouTube/Facebook)")
+@json_option
+@click.pass_context
+def stream_fetch_key(ctx: click.Context, platform: str, title: str, as_json: bool) -> None:
+    """Fetch this account's ingest key from the platform and store it.
+
+    Only the platforms that document an endpoint are asked; a per-session
+    platform is refused with the page you must copy the key from, never with a
+    silently empty result. Nothing is published: YouTube creates a stream
+    resource (not a broadcast) and Facebook creates an unpublished live video.
+    """
+    from xpst.stream.destinations import STREAM_INGEST_PATHS
+    from xpst.stream.ingest import IngestKeyError, fetch_and_store_key
+
+    config = load_config(ctx.obj.get("config_path"))
+    row = STREAM_INGEST_PATHS.get(platform.strip().lower())
+    if row is None:
+        message = (
+            f"Unknown stream platform '{platform}'. Known: {', '.join(sorted(STREAM_INGEST_PATHS))}"
+        )
+        if as_json:
+            json_output({"ok": False, "code": "not_supported", "message": message}, as_json)
+            ctx.exit(EXIT_CONFIG_ERROR)
+        console.print(f"[red]{message}[/red]")
+        ctx.exit(EXIT_CONFIG_ERROR)
+
+    try:
+        fetched = fetch_and_store_key(config.config_dir, platform, config=config, title=title)
+    except IngestKeyError as exc:
+        if as_json:
+            json_output(exc.to_dict(), as_json)
+            ctx.exit(EXIT_CONFIG_ERROR)
+        console.print(f"[red]{exc}[/red]")
+        if exc.action:
+            console.print(f"[yellow]Next step:[/yellow] {exc.action}")
+        if exc.docs_url:
+            console.print(f"[dim]{exc.docs_url}[/dim]")
+        ctx.exit(EXIT_CONFIG_ERROR)
+    except Exception as exc:  # noqa: BLE001 - a vendor library error must not traceback at the operator
+        message = f"{row.display_name}: {type(exc).__name__}: {exc}"
+        if as_json:
+            json_output({"ok": False, "code": "platform_error", "platform": row.platform, "message": message}, as_json)
+            ctx.exit(EXIT_CONFIG_ERROR)
+        console.print(f"[red]{message}[/red]")
+        ctx.exit(EXIT_CONFIG_ERROR)
+
+    if as_json:
+        json_output({"ok": True, "stored": True, **fetched.masked()}, True)
+        return
+    console.print(
+        f"[green]Fetched and stored {row.display_name} ingest credentials[/green] "
+        f"[dim]({fetched.ingest_url})[/dim]"
+    )
+
+
+@stream.command("app-credentials")
+@click.argument("platform")
+@click.option("--client-id", default=None, help="Provider application client id")
+@click.option("--access-token", default=None, help="User access token (omit to be prompted without echo)")
+@click.option("--user-id", default=None, help="Broadcaster/channel id the token belongs to")
+@click.option("--clear", "clear", is_flag=True, help="Remove the stored credentials")
+@json_option
+@click.pass_context
+def stream_app_credentials(
+    ctx: click.Context,
+    platform: str,
+    client_id: str | None,
+    access_token: str | None,
+    user_id: str | None,
+    clear: bool,
+    as_json: bool,
+) -> None:
+    """Store the app credentials xPST needs to fetch a key by itself.
+
+    With no options this prints the stored state (never the secrets) and the
+    registration steps. The token is prompted without echo when omitted so it
+    does not land in shell history.
+    """
+    from xpst.stream.ingest import (
+        APP_REGISTRATIONS,
+        IngestKeyError,
+        clear_app_credentials,
+        load_app_credentials,
+        registration,
+        store_app_credentials,
+    )
+
+    name = platform.strip().lower()
+    spec = registration(name)
+    if spec is None:
+        known = ", ".join(sorted(APP_REGISTRATIONS))
+        message = f"{platform!r} does not use xPST app credentials (known: {known})"
+        if as_json:
+            json_output({"ok": False, "code": "not_supported", "message": message}, as_json)
+            ctx.exit(EXIT_CONFIG_ERROR)
+        console.print(f"[yellow]{message}[/yellow]")
+        console.print(
+            "[dim]YouTube reuses `xpst auth youtube`; Facebook reuses `xpst auth facebook`.[/dim]"
+        )
+        ctx.exit(EXIT_CONFIG_ERROR)
+
+    config = load_config(ctx.obj.get("config_path"))
+
+    if clear:
+        removed = clear_app_credentials(config.config_dir, name)
+        if as_json:
+            json_output({"ok": removed, "platform": name, "removed": removed}, True)
+            return
+        console.print(
+            f"[green]Removed the stored {spec.display_name} app credentials.[/green]"
+            if removed
+            else f"[yellow]No stored {spec.display_name} app credentials.[/yellow]"
+        )
+        return
+
+    if client_id is None and access_token is None:
+        current = load_app_credentials(config.config_dir, name)
+        if as_json:
+            json_output({"ok": True, "credentials": current.masked(), "registration": spec.to_dict()}, True)
+            return
+        console.print(
+            f"[bold]{spec.display_name}[/bold] app credentials: "
+            + ("[green]stored[/green]" if current.complete and current.user_id else "[yellow]incomplete[/yellow]")
+        )
+        masked = current.masked()
+        console.print(f"  client id:     {masked['client_id'] or '[dim]—[/dim]'}")
+        console.print(f"  access token:  {masked['access_token'] or '[dim]—[/dim]'}")
+        console.print(f"  user id:       {current.user_id or '[dim]—[/dim]'}")
+        if current.source:
+            console.print(f"  source:        {current.source}")
+        console.print("[bold]Registration steps[/bold]")
+        for step in spec.steps:
+            console.print(f"  • {step}")
+        console.print(f"  scopes: {', '.join(spec.scopes)}")
+        return
+
+    resolved_id = client_id or click.prompt(f"{spec.display_name} client id", type=str)
+    resolved_token = access_token
+    if resolved_token is None:
+        resolved_token = click.prompt("Access token", hide_input=True, type=str)
+    resolved_user = user_id or click.prompt(f"{spec.display_name} broadcaster/channel id", type=str)
+
+    try:
+        stored = store_app_credentials(
+            config.config_dir,
+            name,
+            client_id=resolved_id,
+            access_token=resolved_token,
+            user_id=resolved_user,
+        )
+    except IngestKeyError as exc:
+        if as_json:
+            json_output(exc.to_dict(), as_json)
+            ctx.exit(EXIT_CONFIG_ERROR)
+        console.print(f"[red]{exc}[/red]")
+        ctx.exit(EXIT_CONFIG_ERROR)
+
+    if as_json:
+        json_output({"ok": True, **stored.masked()}, True)
+        return
+    console.print(f"[green]Stored {spec.display_name} app credentials[/green] (encrypted at rest)")
+    console.print(f"[dim]Try `xpst stream fetch-key {name}`.[/dim]")
+
+
+@stream.command("live")
+@click.option("--platform", "platforms", multiple=True, help="Restrict to these platforms (default: twitch, kick)")
+@json_option
+@click.pass_context
+def stream_live(ctx: click.Context, platforms: tuple[str, ...], as_json: bool) -> None:
+    """Who is live right now, for the platforms whose credentials exist.
+
+    A platform without credentials is reported as unavailable with the
+    registration step rather than omitted or shown as offline — "cannot see"
+    and "not live" are different answers.
+    """
+    from xpst.stream.ingest import live_status
+
+    config = load_config(ctx.obj.get("config_path"))
+    status = live_status(config.config_dir, platforms=platforms or None)
+    if as_json:
+        json_output(status, True)
+        return
+
+    if not status["platforms"] and not status["unavailable"]:
+        console.print("[yellow]No platform is credentialled for live status.[/yellow]")
+    for row in status["platforms"]:
+        state = "[green]LIVE[/green]" if row["live"] else "[dim]offline[/dim]"
+        viewers = f" — {row['viewer_count']} viewers" if row["viewer_count"] is not None else ""
+        console.print(f"{row['platform']}: {state}{viewers} {row['title']}".rstrip())
+    for row in status["unavailable"]:
+        console.print(f"[yellow]{row['platform']}[/yellow]: unavailable ({row['code']}) — {row.get('action') or ''}")
+        if row.get("docs_url"):
+            console.print(f"  [dim]{row['docs_url']}[/dim]")
+
+
+@stream.command("set-key")
+@click.argument("platform")
+@click.option("--ingest-url", default=None, help="RTMP/RTMPS ingest URL reported by the platform")
+@click.option("--key", "stream_key", default=None, help="Stream key (omit to be prompted without echo)")
+@json_option
+@click.pass_context
+def stream_set_key(
+    ctx: click.Context,
+    platform: str,
+    ingest_url: str | None,
+    stream_key: str | None,
+    as_json: bool,
+) -> None:
+    """Store one platform's ingest URL and stream key (encrypted at rest)."""
+    from xpst.stream.destinations import STREAM_INGEST_PATHS
+    from xpst.stream.keys import store_destination
+    from xpst.stream.relay import RelayConfigError
+
+    config = load_config(ctx.obj.get("config_path"))
+    row = STREAM_INGEST_PATHS.get(platform.strip().lower())
+    if row is None:
+        console.print(
+            f"[red]Unknown stream platform '{platform}'.[/red] "
+            f"Known: {', '.join(sorted(STREAM_INGEST_PATHS))}"
+        )
+        ctx.exit(EXIT_CONFIG_ERROR)
+    if row.ingest_class == "unsupported":
+        console.print(f"[red]{row.display_name} has no live ingest path:[/red] {row.note}")
+        ctx.exit(EXIT_CONFIG_ERROR)
+
+    resolved_url = ingest_url or click.prompt(f"{row.display_name} ingest URL", type=str)
+    resolved_key = stream_key
+    if resolved_key is None:
+        resolved_key = click.prompt("Stream key", hide_input=True, type=str)
+
+    try:
+        destination = store_destination(config.config_dir, platform, resolved_url, resolved_key)
+    except RelayConfigError as exc:
+        if as_json:
+            json_output({"ok": False, "error": str(exc), "platform": platform}, as_json)
+        console.print(f"[red]{exc}[/red]")
+        ctx.exit(EXIT_CONFIG_ERROR)
+
+    if as_json:
+        json_output({"ok": True, **destination.masked()}, True)
+        return
+    console.print(
+        f"[green]Stored {row.display_name} ingest credentials[/green] "
+        f"[dim]({destination.ingest_url})[/dim]"
+    )
+    if row.ingest_class == "manual":
+        console.print(
+            "[yellow]This platform issues a per-session key — re-run this command "
+            "before every stream.[/yellow]"
+        )
+
+
+@stream.command("clear-key")
+@click.argument("platform")
+@json_option
+@click.pass_context
+def stream_clear_key(ctx: click.Context, platform: str, as_json: bool) -> None:
+    """Remove a stored ingest key for one platform."""
+    from xpst.stream.keys import clear_destination
+
+    config = load_config(ctx.obj.get("config_path"))
+    removed = clear_destination(config.config_dir, platform)
+    if as_json:
+        json_output({"ok": removed, "platform": platform, "removed": removed}, True)
+        return
+    console.print(
+        f"[green]Removed the stored {platform} ingest key.[/green]" if removed
+        else f"[yellow]No stored ingest key for {platform}.[/yellow]"
+    )
+
+
+@stream.command("relay-config")
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    help="Write the MediaMTX config here (default: print it to stdout)",
+)
+@click.option("--path-name", default="xpst", show_default=True, help="MediaMTX path the encoder publishes to")
+@click.option("--rtmp-port", default=1935, show_default=True, type=int, help="Local RTMP ingest port")
+@json_option
+@click.pass_context
+def stream_relay_config(
+    ctx: click.Context,
+    output: str | None,
+    path_name: str,
+    rtmp_port: int,
+    as_json: bool,
+) -> None:
+    """Build the relay config for every stored destination.
+
+    Without --output the YAML is printed, keys included, so it can be piped.
+    With --output the file is written 0600 and only a key-free summary is
+    printed.
+    """
+    from xpst.stream.keys import load_destinations
+    from xpst.stream.relay import (
+        RelayConfigError,
+        build_relay_config,
+        relay_summary,
+        render_relay_config,
+        write_relay_config,
+    )
+
+    config = load_config(ctx.obj.get("config_path"))
+    try:
+        destinations = load_destinations(config.config_dir)
+        if output:
+            target = write_relay_config(
+                output, destinations, path_name=path_name, rtmp_port=rtmp_port
+            )
+            summary = relay_summary(destinations, path_name=path_name, rtmp_port=rtmp_port)
+            summary["output"] = str(target)
+            if as_json:
+                json_output(summary, True)
+                return
+            console.print(
+                f"[green]Wrote the relay config to {target}[/green] "
+                f"[dim]({summary['destination_count']} destination(s), mode 0600)[/dim]"
+            )
+            console.print(f"[dim]Encoder: push RTMP to {summary['relay_ingest_url']}[/dim]")
+            return
+
+        rendered = render_relay_config(
+            build_relay_config(destinations, path_name=path_name, rtmp_port=rtmp_port)
+        )
+    except RelayConfigError as exc:
+        if as_json:
+            json_output({"ok": False, "error": str(exc)}, as_json)
+        console.print(f"[red]{exc}[/red]")
+        ctx.exit(EXIT_CONFIG_ERROR)
+
+    if as_json:
+        summary = relay_summary(destinations, path_name=path_name, rtmp_port=rtmp_port)
+        summary["config"] = rendered
+        json_output(summary, True)
+        return
+    sys.stdout.write(rendered)
+
+
+# ──────────────────────────────────────────────
+# Live chat (read-only, merged timeline)
+# ──────────────────────────────────────────────
+
+
+@main.group()
+@click.pass_context
+def chat(ctx: click.Context):
+    """Live chat from Twitch, YouTube and Kick, read-only and merged.
+
+    Nothing here can send, moderate or answer anyone: Twitch is read over an
+    anonymous IRC connection that has no write permission, and the YouTube and
+    Kick readers only list/subscribe. The feature is one ordered timeline with
+    a platform tag per message, plus an honest verdict for any platform that
+    could not be read.
+    """
+
+
+@chat.command("platforms")
+@click.option("--platform", "platforms", multiple=True, help="Restrict to these platforms (default: all)")
+@json_option
+@click.pass_context
+def chat_platforms(ctx: click.Context, platforms: tuple[str, ...], as_json: bool) -> None:
+    """What xPST can read right now, and what is missing if it cannot.
+
+    No network: a platform with no channel configured and one with no
+    credential are reported differently, because the next step differs.
+    """
+    from xpst.chat import chat_readiness
+
+    config = load_config(ctx.obj.get("config_path"))
+    readiness = chat_readiness(config.config_dir, platforms=list(platforms) or None, config=config)
+    if as_json:
+        json_output(readiness, as_json)
+        return
+
+    table = Table(title="Live chat (read-only)", show_header=True, header_style="bold")
+    table.add_column("Platform")
+    table.add_column("Transport")
+    table.add_column("Verified")
+    table.add_column("Channels")
+    table.add_column("Missing")
+    for row in readiness["platforms"]:
+        channels = ", ".join(row.get("channels") or []) or "[dim]—[/dim]"
+        verified = "[green]live-proven[/green]" if row.get("verified") else "[yellow]unproven[/yellow]"
+        missing = ", ".join(row.get("missing") or []) or "[green]ready[/green]"
+        table.add_row(row.get("display_name") or row["platform"], row.get("transport", ""), verified, channels, missing)
+    console.print(table)
+    for row in readiness["unavailable"]:
+        console.print(f"[yellow]{row['platform']}[/yellow]: {row['code']} — {row.get('action') or row.get('message')}")
+    console.print(
+        "[dim]Set channels with chat.twitch_channels / chat.kick_channels in config, or per call with "
+        "`xpst chat timeline --twitch-channel <login>`. `timeline` reads a bounded window.[/dim]"
+    )
+
+
+@chat.command("timeline")
+@click.option("--platform", "platforms", multiple=True, help="Restrict to these platforms (default: all)")
+@click.option("--twitch-channel", "twitch_channels", multiple=True, help="Twitch login to read (repeatable)")
+@click.option("--kick-channel", "kick_channels", multiple=True, help="Kick channel slug to read (repeatable)")
+@click.option("--youtube-video", "youtube_video_id", default="", help="YouTube live video id (default: the channel's active broadcast)")
+@click.option("--duration", "duration_s", type=float, default=20.0, show_default=True, help="How long to read for, in seconds")
+@click.option("--limit", type=int, default=500, show_default=True, help="Maximum messages in the merged timeline")
+@json_option
+@click.pass_context
+def chat_timeline_cmd(
+    ctx: click.Context,
+    platforms: tuple[str, ...],
+    twitch_channels: tuple[str, ...],
+    kick_channels: tuple[str, ...],
+    youtube_video_id: str,
+    duration_s: float,
+    limit: int,
+    as_json: bool,
+) -> None:
+    """Read every requested platform's chat for a bounded window and merge it.
+
+    One ordered feed, each message tagged with its platform. A platform that
+    cannot be read appears under `unavailable` with a code and the next step —
+    never as an empty list pretending the chat was quiet.
+    """
+    from xpst.chat import chat_timeline
+
+    config = load_config(ctx.obj.get("config_path"))
+    payload = chat_timeline(
+        config,
+        config_dir=config.config_dir,
+        platforms=list(platforms) or None,
+        duration_s=duration_s,
+        twitch_channels=list(twitch_channels) if twitch_channels else None,
+        kick_channels=list(kick_channels) if kick_channels else None,
+        youtube_video_id=youtube_video_id,
+        limit=limit,
+    )
+    if as_json:
+        json_output(payload, as_json)
+        if not payload["ok"]:
+            ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    from rich.markup import escape
+
+    for message in payload["messages"]:
+        stamp = message["timestamp"][11:19] if message["timestamp"] else "--:--:--"
+        # Chat text is written by strangers: `[/]` or `[bold]` in a message must
+        # print literally, not be parsed as Rich markup (a malformed tag raises
+        # MarkupError and takes the whole tail down).
+        console.print(
+            f"[dim]{stamp}[/dim] [cyan]{message['platform']:<7}[/cyan] "
+            f"[bold]{escape(message['author'])}[/bold]: {escape(message['text'])}"
+        )
+    counts = payload["counts"]
+    console.print(
+        f"[dim]{counts['total']} message(s) — twitch {counts['twitch']}, youtube {counts['youtube']}, "
+        f"kick {counts['kick']}; read for {payload['window']['served_s']:.0f}s[/dim]"
+    )
+    for row in payload["platforms"]:
+        if row["status"] == "empty":
+            console.print(f"[dim]{row['platform']}: read, no messages in the window[/dim]")
+    for row in payload["unavailable"]:
+        console.print(f"[yellow]{row['platform']}[/yellow]: unavailable ({row['code']}) — {row.get('action') or ''}")
+        if row.get("docs_url"):
+            console.print(f"  [dim]{row['docs_url']}[/dim]")
+    if payload.get("truncated"):
+        console.print(f"[yellow]Timeline truncated to the newest {payload['limit']} messages.[/yellow]")
+    if not payload["ok"]:
+        console.print("[red]No requested platform could be read.[/red]")
+        ctx.exit(EXIT_CONFIG_ERROR)
+
+
+if __name__ == "__main__":
+    main()

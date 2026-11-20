@@ -1,0 +1,1338 @@
+"""
+Upload service — extracted from engine.py.
+
+Handles the full upload pipeline for a single video to a single platform:
+circuit breaker check → anti-bot checks → quota check → encode → upload
+with retry → record result → send notification.
+
+Integrates AntiBotProtection for human-like upload behavior:
+- Time-of-day checks (don't post at 3 AM)
+- Conservative rate limits (well below platform maximums)
+- Random delays between uploads (2-5 minutes)
+- Caption variation per platform
+
+Edge case handling:
+- Disk space check before encoding
+- Graceful auth expiry handling (skip + log)
+- Rate limit pause/resume (exponential backoff)
+- Partial upload cleanup on crash
+- Temp file cleanup on encoding failure
+"""
+
+import asyncio
+import hashlib
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from xpst.media.loudness import (
+    build_loudnorm_filter,
+    has_loudnorm,
+    loudness_target,
+    measure_loudness,
+)
+from xpst.media.pipeline import plan_transform
+from xpst.media.specs import verify_media
+from xpst.platforms.base import PlatformUploader, UploadResult, normalize_upload_result
+from xpst.reconcile import AttemptLedger, uploader_reconciler
+from xpst.utils.circuit_breaker import CircuitBreakerManager, CircuitBreakerOpenError
+from xpst.utils.content_hash import compute_content_hash
+from xpst.utils.disk import DiskSpaceError, check_disk_space
+from xpst.utils.errors import truncate_error
+from xpst.utils.logger import get_logger
+from xpst.utils.notifications import WebhookNotifier
+from xpst.utils.progress import create_upload_tracker
+from xpst.utils.quota import QuotaExhaustedError, QuotaManager
+from xpst.utils.retry import STANDARD_RETRY, retry_operation
+from xpst.utils.shutdown import ShutdownHandler
+from xpst.utils.video import VideoProcessor, _pick_video_stream
+
+logger = get_logger(__name__)
+
+# Platforms that use unofficial APIs and may violate ToS
+_TOS_UNOFFICIAL_PLATFORMS = {"instagram", "x"}
+
+
+def _as_str(value: Any) -> str | None:
+    """Return value when it is a real string, else None (mock-safe)."""
+    return value if isinstance(value, str) and value else None
+
+
+_COOLDOWN_ERROR_TOKEN = "RATE_LIMIT_COOLDOWN"
+
+
+def _is_cooldown_deferral(error: str | None) -> bool:
+    """True when the error is our own cooldown deferral (scheduling, not failure)."""
+    return bool(error) and _COOLDOWN_ERROR_TOKEN in error
+
+
+def _parse_retry_after_s(error: str | None) -> float | None:
+    """Pull a Retry-After hint out of an error string, if the platform sent one.
+
+    Providers surface it in different shapes (``Retry-After: 120``,
+    ``retry_after=120``, ``{'retry_after': 120}``); the value is the number
+    that follows the token. None when absent — the escalation ladder then
+    decides the pause on its own.
+
+    Delegates to :func:`xpst.utils.retry.parse_declared_retry_after_s` so the
+    retry layer's futility test and the cooldown state machine read the same
+    hint from the same parser.
+    """
+    from xpst.utils.retry import parse_declared_retry_after_s
+
+    return parse_declared_retry_after_s(error)
+
+
+class AuthExpiredError(Exception):
+    """Raised when platform authentication has expired.
+
+    This is a signal to skip the platform gracefully and prompt for re-auth,
+    rather than retrying which would just waste time.
+    """
+
+
+class UploadService:
+    """Handles the full upload pipeline for a single video to a single platform.
+
+    Consolidates the duplicated upload logic from check_and_post(),
+    post_manual(), and backfill() into a single service.
+
+    Integrates AntiBotProtection for human-like behavior:
+    - Checks posting hours before each upload
+    - Enforces conservative daily rate limits
+    - Adds randomized delays between platform uploads
+    - Varies captions per platform to avoid detection
+
+    Edge case handling:
+    - Pre-encode disk space check (prevents disk-full mid-encode)
+    - Auth expiry detection with graceful skip
+    - Rate limit pause with exponential backoff
+    - Partial upload cleanup via crash recovery
+    - Temp file cleanup on encoding failure
+    """
+
+    def __init__(
+        self,
+        video_processor: VideoProcessor,
+        circuit_breakers: CircuitBreakerManager,
+        quota_manager: QuotaManager,
+        state: Any,  # StateManager
+        notifier: WebhookNotifier,
+        shutdown_handler: ShutdownHandler,
+        config: Any,  # XPSTConfig
+        anti_bot: Any | None = None,  # AntiBotProtection
+    ) -> None:
+        self.video_processor = video_processor
+        self.circuit_breakers = circuit_breakers
+        self.quota_manager = quota_manager
+        self.state = state
+        self.notifier = notifier
+        self.shutdown_handler = shutdown_handler
+        self.config = config
+        self.anti_bot = anti_bot
+        self._crash_recovery: Any = None  # Injected by engine
+        # Durable per-platform rate-limit cooldown state machine (10-01 halt
+        # hardening). Replaces the old in-memory pause dict that a daemon
+        # restart silently wiped. Test doubles may pass a path or disable
+        # persistence; anything unresolved degrades to in-process cooling.
+        from xpst.utils.cooldown_store import CooldownStore
+
+        store_dir = getattr(config, "config_dir", None)
+        if not isinstance(store_dir, (str, Path)):
+            store_dir = None
+            try:
+                from xpst.utils.platform import get_config_dir
+
+                store_dir = get_config_dir()
+            except Exception:  # pragma: no cover - defensive import-time guard
+                pass
+        self.rate_cooldowns = (
+            CooldownStore(store_dir)
+            if store_dir is not None
+            else CooldownStore(store_dir, persist=False)
+        )
+        self._rate_limit_paused: dict[str, float] = {}  # legacy in-process marker
+        # Records unknown-outcome attempts so a retry reconciles the destination
+        # read-back before it can publish a duplicate (see xpst.reconcile).
+        self._attempt_ledger = AttemptLedger()
+
+    def _caption_for_destination(self, caption: str, platform_name: str) -> str:
+        """Caption actually handed to ``platform_name``.
+
+        Anti-bot caption variation is OPT-IN (``anti_bot.caption_variation``,
+        default false). It used to run on every video/image upload, appending
+        engagement-bait suffixes the operator never wrote — silent mutation of
+        published copy. When it is enabled, the caller records this returned
+        text (``metadata.caption_sent`` and the state caption), so the report
+        always matches what went live.
+        """
+        if not self.anti_bot:
+            return caption
+        enabled = bool(
+            getattr(getattr(self.config, "anti_bot", None), "caption_variation", False)
+        )
+        if not enabled:
+            return caption
+        return self.anti_bot.vary_caption(caption, platform_name)
+
+    def _deferred(self, platform_name: str, *, ignore_window: bool = False) -> UploadResult | None:
+        """The shared anti-bot time-of-day gate (G11: deferral != failure).
+
+        Returns a deferred result when the anti-bot window says "not now" on
+        ANY gated upload path. The caller sets ``ignore_window`` when the
+        human/agent deliberately asked to post right now (CLI ``--now``,
+        MCP/HTTP ``force``): the flag's whole promise is a bypass at the
+        manual surface, so the gate honours it here — that is the one place
+        it can actually take effect. The text route is not gated at all:
+        the schedule store cannot carry a text post and
+        :mod:`xpst.services.manual_defer` already declares a manual text post
+        never deferrable, so gating it here produced a "deferred" row with
+        nothing queued — the user's intent evaporated, exactly the D2 failure
+        G11 forbids.
+        """
+        if ignore_window:
+            return None
+        if self.anti_bot and not self.anti_bot.should_post_now():
+            logger.info(
+                "Anti-bot: outside posting hours, deferring %s upload",
+                platform_name,
+            )
+            resume = ""
+            try:
+                resume = self.anti_bot.next_posting_time().isoformat()
+            except Exception:  # noqa: BLE001 - resume time is a courtesy, not a gate
+                pass
+            return UploadResult(
+                success=False,
+                error="Outside posting hours (8am-11pm), deferred",
+                platform=platform_name,
+                metadata={"deferred": True, "resume_after": resume},
+            )
+        return None
+
+    async def upload_to_platform(
+        self,
+        uploader: PlatformUploader,
+        video_path: Path,
+        caption: str,
+        platform_name: str,
+        video_id: str,
+        source_platform: str = "",
+        visibility: str | None = None,
+        ignore_window: bool = False,
+        dry_run: bool = False,
+        video_mode: str | None = None,
+    ) -> UploadResult:
+        """Single method that handles the full upload pipeline.
+
+        Steps: anti-bot checks → circuit breaker check → quota check →
+        disk space check → encode → upload with retry → record result →
+        send notification.
+
+        ``ignore_window`` carries a deliberate manual bypass (CLI ``--now`` /
+        MCP+HTTP ``force``): the time-of-day gate is skipped and the post
+        goes out immediately, honouring the flag's documented promise.
+
+        ``dry_run`` performs every preflight and scheduling decision but
+        touches no live API: an upload attempted while the platform is in a
+        rate-limit cooldown is reported as a deferred schedule instead of
+        blocking, and the uploader itself is never awaited past this gate.
+
+        Returns:
+            UploadResult with success/failure and metadata.
+        """
+        # ── Anti-bot: Time-of-day check (shared gate, G11) ──
+        deferred = self._deferred(platform_name, ignore_window=ignore_window)
+        if deferred is not None:
+            return deferred
+
+        # ── Anti-bot: Conservative daily limit check ──
+        if self.anti_bot and not self.anti_bot.can_upload(platform_name):
+            logger.warning(
+                "Anti-bot: daily limit reached for %s, skipping",
+                platform_name,
+            )
+            return UploadResult(
+                success=False,
+                error="Anti-bot: daily upload limit reached",
+                platform=platform_name,
+                metadata={"deferred": True},
+            )
+
+        # ── Anti-bot: Wait between platform uploads ──
+        if self.anti_bot:
+            wait_time = self.anti_bot.should_wait_between_platforms(platform_name)
+            if wait_time > 0:
+                logger.info(
+                    "Anti-bot: waiting %.0fs before %s upload",
+                    wait_time,
+                    platform_name,
+                )
+                await asyncio.sleep(wait_time)
+
+        # ── Rate-limit cooldown gate (persistent state machine) ──
+        # The pause now lives in CooldownStore, so a daemon restart no longer
+        # forgets an active cooldown and re-triggers the same Meta wall on the
+        # first post after boot (the 10-01 halt failure mode). While cooling:
+        # defer (schedule, do not fail, do not encode, do not call the API).
+        cooldown_remaining = self.rate_cooldowns.remaining_s(platform_name)
+        if cooldown_remaining > 0:
+            resume = datetime.fromtimestamp(
+                datetime.now().timestamp() + cooldown_remaining
+            ).isoformat(timespec="seconds")
+            logger.info(
+                "Rate-limit cooldown: deferring %s upload, %.0fs remaining",
+                platform_name,
+                cooldown_remaining,
+            )
+            return UploadResult(
+                success=False,
+                error=(
+                    f"RATE_LIMIT_COOLDOWN: {platform_name} cooling, "
+                    f"resume after {resume}"
+                ),
+                platform=platform_name,
+                metadata={
+                    "deferred": True,
+                    "cooldown": True,
+                    "dry_run": dry_run,
+                    "resume_after": resume,
+                    "remaining_s": round(cooldown_remaining, 1),
+                },
+            )
+
+        # ── Anti-bot: Vary caption ──
+        caption = self._caption_for_destination(caption, platform_name)
+
+        # ToS warning for unofficial API platforms
+        if platform_name in _TOS_UNOFFICIAL_PLATFORMS:
+            logger.warning(
+                "Using unofficial API for %s - may violate platform ToS",
+                platform_name,
+            )
+
+        # Check circuit breaker
+        if not self.circuit_breakers.allow_request(platform_name):
+            logger.warning("Circuit breaker open for %s, skipping", platform_name)
+            return UploadResult(
+                success=False,
+                error="Circuit breaker open",
+                platform=platform_name,
+            )
+
+        # Pre-flight quota check (fail fast, before encode/upload)
+        try:
+            self.quota_manager.preflight(platform_name)
+        except QuotaExhaustedError as exc:
+            logger.warning("Pre-flight quota check failed for %s: %s", platform_name, exc)
+            return UploadResult(
+                success=False,
+                error=str(exc),
+                platform=platform_name,
+                metadata={"quota": exc.to_dict()},
+            )
+
+        # ── Disk space check before encoding ──
+        try:
+            check_disk_space(video_path.parent)
+        except DiskSpaceError as e:
+            logger.error("Disk space check failed: %s", e)
+            return UploadResult(
+                success=False,
+                error=f"Insufficient disk space: {e}",
+                platform=platform_name,
+            )
+
+        # ── Durable-row idempotency guard (G03/G04/G09) ──
+        # The file fingerprint is the cross-flow identity: unidirectional,
+        # bidirectional, manual, and re-posted copies of the same bytes all
+        # resolve to one hash, and the recorded state row is the proof. This
+        # single chokepoint check closes the cross-flow double-post paths.
+        content_hash = compute_content_hash(file_path=video_path, filename=video_path.name)
+        try:
+            existing_id = self.state.get_by_hash(content_hash)
+        except AttributeError:
+            existing_id = None
+        if existing_id and self.state.is_video_posted(existing_id, platform_name):
+            logger.info(
+                "Skipping %s upload — identical content already posted as %s (hash %s)",
+                platform_name,
+                existing_id,
+                content_hash,
+            )
+            return UploadResult(
+                success=True,
+                platform=platform_name,
+                metadata={
+                    "already_posted": True,
+                    "dedup": "content_hash",
+                    "duplicate_of": existing_id,
+                },
+            )
+
+        # ── Pre-flight capability check (G08): platforms hard-cap video
+        # duration (X 140s, YT Shorts 60s). Enforce it BEFORE encode/upload
+        # with an actionable reason instead of burning an upload on a
+        # guaranteed platform-side rejection.
+        duration_limit = self._duration_limit(uploader)
+        if duration_limit:
+            duration = self._probe_duration(video_path)
+            if duration and duration > duration_limit:
+                reason = (
+                    f"Video is {duration:.0f}s — over {platform_name}'s "
+                    f"{duration_limit}s limit. Trim it or exclude {platform_name}."
+                )
+                logger.warning("Pre-flight skip for %s: %s", platform_name, reason)
+                return UploadResult(
+                    success=False,
+                    error=reason,
+                    platform=platform_name,
+                    metadata={"capability": "duration", "preflight": True},
+                )
+
+        # Encode for platform
+        encoded_path = video_path
+        try:
+            self.shutdown_handler.update_phase("encoding")
+            logger.info("Encoding for %s...", platform_name)
+            encoded_path = await self._encode_for_platform(video_path, platform_name)
+            if encoded_path != video_path:
+                self.shutdown_handler.add_temp_file(encoded_path)
+        except Exception as e:
+            logger.error("Encoding failed for %s: %s", platform_name, e)
+            # Clean up partial encoded file
+            if encoded_path != video_path and encoded_path.exists():
+                try:
+                    encoded_path.unlink()
+                except OSError:
+                    pass
+            return UploadResult(
+                success=False,
+                error=f"Encoding failed: {truncate_error(str(e))}",
+                platform=platform_name,
+            )
+
+        # Quality report (ISC-20): record exactly what is being sent so the
+        # user can verify fidelity without re-probing the platform.
+        quality_report: dict[str, Any] = {"transcoded": encoded_path != video_path}
+        try:
+            info = self.video_processor.get_video_info(encoded_path)
+            stream = next(
+                (s for s in info.get("streams", []) if s.get("codec_type") == "video"),
+                {},
+            )
+            quality_report.update(
+                {
+                    "width": stream.get("width"),
+                    "height": stream.get("height"),
+                    "bit_rate": int(stream.get("bit_rate") or info.get("format", {}).get("bit_rate") or 0),
+                }
+            )
+            logger.info(
+                "Sending to %s: %sx%s @ %.1f Mbps (transcoded=%s)",
+                platform_name,
+                quality_report.get("width"),
+                quality_report.get("height"),
+                (quality_report.get("bit_rate") or 0) / 1_000_000,
+                quality_report["transcoded"],
+            )
+        except Exception as e:
+            logger.debug("Quality probe skipped: %s", e)
+
+        # ── Pre-upload media verification (max-fidelity pipeline) ──
+        # Check the EXACT file being sent against the platform's ingest spec.
+        # Warnings are logged and recorded; hard errors (wrong container, no
+        # video stream, over the size cap) block the upload — the platform
+        # would reject or irrecoverably mangle the file.
+        preflight = verify_media(
+            encoded_path,
+            platform_name,
+            ffmpeg_path=_as_str(getattr(self.video_processor, "ffmpeg_path", None)),
+        )
+        quality_report["preflight"] = preflight.to_dict()
+        for w in preflight.warnings:
+            logger.warning("Media pre-flight [%s]: %s", w.name, w.detail)
+        if not preflight.ok:
+            errors = "; ".join(f"{c.name}: {c.detail}" for c in preflight.errors)
+            logger.error("Blocking upload to %s — pre-flight failed: %s", platform_name, errors)
+            return UploadResult(
+                success=False,
+                error=f"Media pre-flight verification failed: {truncate_error(errors)}",
+                platform=platform_name,
+                metadata={"preflight": preflight.to_dict()},
+            )
+
+        # Upload with retry and progress tracking
+        self.shutdown_handler.update_phase("uploading")
+        try:
+            tracker = create_upload_tracker(
+                f"{platform_name.title()} upload ({video_id})",
+                encoded_path,
+            )
+
+            retry_kwargs: dict[str, Any] = {
+                "config": STANDARD_RETRY,
+                "platform": platform_name,
+                # First-sight throttle → one strike in the persistent cooldown
+                # state machine (escalating ladder, Retry-After honoured, Meta
+                # family cooled). Survives daemon restart, unlike the old
+                # in-memory pause dict — the 10-01 halt failure mode.
+                "on_rate_limit": self._note_rate_limit(platform_name),
+                # X maps duplicate posts to success server-side; IG/YT do
+                # not, so an unknown outcome there is reconciled against the
+                # destination before any retry (G07) — never blind-retried.
+                "ambiguous_safe": platform_name == "x",
+                **self._reconcile_gate(
+                    uploader, content_hash=content_hash, caption=caption
+                ),
+            }
+            # Only pass visibility to uploaders that accept it (YouTube
+            # honours it; every other platform ignores it harmlessly).
+            if visibility is not None and self._accepts_visibility(uploader):
+                retry_kwargs["visibility"] = visibility
+
+            # The per-post format choice (``--shorts`` / ``--long``) reaches only
+            # uploaders that take a ``mode`` keyword; every other destination
+            # enforces its own declared envelope instead of being told a mode it
+            # does not have.
+            if video_mode is not None and self._accepts_keyword(uploader, "mode"):
+                retry_kwargs["mode"] = video_mode
+
+            raw_upload_result = await retry_operation(
+                uploader.upload,
+                encoded_path,
+                caption,
+                **retry_kwargs,
+            )
+            # Provider acknowledgments are not publication proof. Normalize at
+            # this single chokepoint before any state, quota, or success path.
+            upload_result = normalize_upload_result(raw_upload_result, platform_name)
+            # Caption fidelity (D6): the anti-bot path may have appended a
+            # variation suffix. Record the EXACT copy handed to this
+            # destination so the engine's result.captions reports what went
+            # live, not what the caller requested.
+            upload_result.metadata["caption_sent"] = caption
+
+            if upload_result.is_published:
+                tracker.complete()
+                upload_result.metadata.setdefault("quality", quality_report)
+                self.crash_recovery_clear(video_id, platform_name)
+                self.state.mark_video_posted(
+                    video_id,
+                    platform_name,
+                    post_id=upload_result.post_id,
+                    post_url=upload_result.post_url,
+                    caption=caption,
+                    content_hash=content_hash,
+                    source_platform=source_platform,
+                )
+                self.circuit_breakers.record_success(platform_name)
+                self.state.update_platform_health(platform_name, True)
+                self.quota_manager.record_upload(platform_name)
+                # A clean publish decays the cooldown strike count so a
+                # recovered platform walks back down the escalation ladder.
+                self.rate_cooldowns.note_success(platform_name)
+
+                # Record in anti-bot tracker
+                if self.anti_bot:
+                    self.anti_bot.record_upload(platform_name)
+            else:
+                tracker.fail(upload_result.error or "upload did not publish")
+                # Check for auth expiry in error
+                if self._is_auth_expired(upload_result.error):
+                    logger.error(
+                        "Auth expired for %s: %s — needs re-authentication",
+                        platform_name,
+                        upload_result.error,
+                    )
+                    self.notifier.notify_upload_failure(
+                        platform=platform_name,
+                        video_id=video_id,
+                        error=f"AUTH EXPIRED: {upload_result.error}",
+                    )
+
+                # The cooldown strike was already recorded at first sight of
+                # the throttle (retry_operation's on_rate_limit hook). Make
+                # sure the legacy in-process marker agrees, for callers that
+                # still read it.
+                if self._is_rate_limit(upload_result.error):
+                    import time
+
+                    remaining = self.rate_cooldowns.remaining_s(platform_name)
+                    if remaining > 0:
+                        self._rate_limit_paused[platform_name] = (
+                            time.time() + remaining
+                        )
+
+                if upload_result.metadata.get("deferred") or _is_cooldown_deferral(
+                    upload_result.error
+                ):
+                    # G11: an anti-bot deferral is scheduling, not failure —
+                    # recording it as failure polluted the DLQ and platform
+                    # health and masked real problems.
+                    logger.info(
+                        "Deferred %s upload for %s (not recorded as failure)",
+                        platform_name,
+                        video_id,
+                    )
+                else:
+                    self.state.mark_video_failed(
+                        video_id,
+                        platform_name,
+                        upload_result.error or "Unknown error",
+                    )
+                    self.circuit_breakers.record_failure(
+                        platform_name,
+                        upload_result.error,
+                    )
+                    self.state.update_platform_health(platform_name, False)
+                # Notify if circuit breaker just opened
+                if self.circuit_breakers._breakers.get(platform_name, None):
+                    breaker = self.circuit_breakers._breakers[platform_name]
+                    if breaker.is_open:
+                        self.notifier.notify_circuit_breaker(
+                            platform_name,
+                            upload_result.error or "Repeated failures",
+                        )
+
+            return upload_result
+
+        except CircuitBreakerOpenError as e:
+            logger.warning("Circuit breaker open: %s", e)
+            return UploadResult(
+                success=False,
+                error=str(e),
+                platform=platform_name,
+            )
+
+        except Exception as e:
+            logger.error("Upload failed for %s: %s", platform_name, e)
+            self.circuit_breakers.record_failure(platform_name, str(e))
+            self.state.update_platform_health(platform_name, False)
+            # Record the failure in state — otherwise the video silently
+            # stays "pending" forever (no DLQ entry, no retry visibility).
+            try:
+                self.state.mark_video_failed(
+                    video_id,
+                    platform_name,
+                    str(e)[:500],
+                )
+            except Exception:  # noqa: BLE001 - state write must not mask the upload error
+                logger.debug("Could not record failure state for %s", video_id)
+            return UploadResult(
+                success=False,
+                error=f"Upload failed: {truncate_error(str(e))}",
+                platform=platform_name,
+            )
+
+    def _note_rate_limit(self, platform_name: str):
+        """Build the once-only on_rate_limit hook for one upload call."""
+        fired = {"done": False}
+
+        def _note(error_text: str) -> None:
+            if fired["done"]:
+                return
+            fired["done"] = True
+            self.rate_cooldowns.record_hit(
+                platform_name,
+                retry_after_s=_parse_retry_after_s(error_text),
+                reason=error_text,
+            )
+
+        return _note
+
+    def _reconcile_gate(
+        self,
+        uploader: PlatformUploader,
+        *,
+        content_hash: str,
+        caption: str,
+    ) -> dict[str, Any]:
+        """Extra ``retry_operation`` kwargs that make a retry reconcile first.
+
+        A destination that exposes a read-only ``reconcile_publish`` gets its
+        unknown-outcome attempt recorded and read back before any retry: FOUND
+        publishes from evidence, ABSENT allows the retry, UNKNOWN blocks it.
+        Test doubles and adapters without a real read-back yield no reconciler,
+        which keeps the safe block-without-retry behaviour.
+        """
+        return {
+            "reconciler": uploader_reconciler(uploader),
+            "ledger": self._attempt_ledger,
+            "content_hash": content_hash,
+            "caption": caption,
+        }
+
+    @staticmethod
+    def _accepts_keyword(uploader: PlatformUploader, keyword: str) -> bool:
+        """Whether an uploader's ``upload`` accepts ``keyword``.
+
+        Shared by the optional pass-throughs (``visibility`` for YouTube,
+        ``mode`` for the short/long choice) so the service forwards an option
+        only to an adapter that declares it, instead of breaking every other
+        sender's signature.
+        """
+        import inspect
+
+        try:
+            params = inspect.signature(uploader.upload).parameters
+        except (TypeError, ValueError):
+            return False
+        if keyword in params:
+            return True
+        return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+    @staticmethod
+    def _accepts_visibility(uploader: PlatformUploader) -> bool:
+        """Whether an uploader's ``upload`` accepts a ``visibility`` keyword.
+
+        YouTube honours it; the other platform uploaders deliberately do not,
+        so this is how the shared service forwards the option without breaking
+        their signatures.
+        """
+        return UploadService._accepts_keyword(uploader, "visibility")
+
+    def _is_auth_expired(self, error: str | None) -> bool:
+        """Check if an error indicates authentication expiry.
+
+        Args:
+            error: Error message string.
+
+        Returns:
+            True if error indicates expired auth.
+        """
+        if not error:
+            return False
+        error_lower = error.lower()
+        auth_indicators = [
+            "401",
+            "unauthorized",
+            "login required",
+            "session expired",
+            "token expired",
+            "auth expired",
+            "authentication failed",
+            "invalid credentials",
+        ]
+        return any(ind in error_lower for ind in auth_indicators)
+
+    def _is_rate_limit(self, error: str | None) -> bool:
+        """Check if an error indicates a rate limit.
+
+        Args:
+            error: Error message string.
+
+        Returns:
+            True if error indicates rate limiting.
+        """
+        if not error:
+            return False
+        error_lower = error.lower()
+        rate_limit_indicators = [
+            "429",
+            "rate limit",
+            "too many requests",
+            "throttl",
+        ]
+        return any(ind in error_lower for ind in rate_limit_indicators)
+
+    def _calculate_rate_limit_pause(self, platform_name: str) -> float:
+        """Legacy pause ladder (60s doubling, 1h cap), kept for API compat.
+
+        The authoritative schedule now lives in
+        :attr:`UploadService.rate_cooldowns` (persistent CooldownStore,
+        24h cap) — this helper only feeds the legacy in-process marker dict.
+
+        Args:
+            platform_name: Platform that hit the limit.
+
+        Returns:
+            Pause duration in seconds.
+        """
+        # Track consecutive rate limits per platform
+        if not hasattr(self, "_rate_limit_count"):
+            self._rate_limit_count: dict[str, int] = {}
+
+        count = self._rate_limit_count.get(platform_name, 0)
+        self._rate_limit_count[platform_name] = count + 1
+
+        # Exponential backoff: 60, 120, 240, ... max 3600
+        pause = min(60 * (2**count), 3600)
+        return pause
+
+    async def upload_carousel_to_platform(
+        self,
+        uploader: PlatformUploader,
+        media_paths: list[Path],
+        caption: str,
+        platform_name: str,
+        video_id: str,
+        source_platform: str = "",
+        ignore_window: bool = False,
+    ) -> UploadResult:
+        """Upload a carousel/multi-media post to a single platform.
+
+        Same pipeline as upload_to_platform but uses upload_carousel.
+        """
+        # Anti-bot time-of-day gate (shared with every other upload path, D2).
+        deferred = self._deferred(platform_name, ignore_window=ignore_window)
+        if deferred is not None:
+            return deferred
+
+        # ToS warning for unofficial API platforms
+        if platform_name in _TOS_UNOFFICIAL_PLATFORMS:
+            logger.warning(
+                "Using unofficial API for %s - may violate platform ToS",
+                platform_name,
+            )
+
+        # Check circuit breaker
+        if not self.circuit_breakers.allow_request(platform_name):
+            logger.warning("Circuit breaker open for %s, skipping", platform_name)
+            return UploadResult(
+                success=False,
+                error="Circuit breaker open",
+                platform=platform_name,
+            )
+
+        # Pre-flight quota check (fail fast, before encode/upload)
+        try:
+            self.quota_manager.preflight(platform_name)
+        except QuotaExhaustedError as exc:
+            logger.warning("Pre-flight quota check failed for %s: %s", platform_name, exc)
+            return UploadResult(
+                success=False,
+                error=str(exc),
+                platform=platform_name,
+                metadata={"quota": exc.to_dict()},
+            )
+
+        # Carousel identity for the idempotency guard: fingerprint of the
+        # first media file plus the full ordered name list.
+        content_hash = compute_content_hash(
+            file_path=media_paths[0],
+            filename="|".join(p.name for p in media_paths),
+        )
+        try:
+            existing_id = self.state.get_by_hash(content_hash)
+        except AttributeError:
+            existing_id = None
+        if existing_id and self.state.is_video_posted(existing_id, platform_name):
+            logger.info(
+                "Skipping %s carousel — identical media set already posted as %s",
+                platform_name,
+                existing_id,
+            )
+            return UploadResult(
+                success=True,
+                platform=platform_name,
+                metadata={"already_posted": True, "dedup": "content_hash"},
+            )
+
+        # Upload carousel
+        try:
+            tracker = create_upload_tracker(
+                f"{platform_name.title()} carousel upload",
+                media_paths[0],
+            )
+
+            raw_upload_result = await retry_operation(
+                uploader.upload_carousel,
+                media_paths,
+                caption,
+                config=STANDARD_RETRY,
+                platform=platform_name,
+                ambiguous_safe=platform_name == "x",
+                **self._reconcile_gate(
+                    uploader, content_hash=content_hash, caption=caption
+                ),
+            )
+            upload_result = normalize_upload_result(raw_upload_result, platform_name)
+
+            if upload_result.is_published:
+                tracker.complete()
+                self.state.mark_video_posted(
+                    video_id,
+                    platform_name,
+                    post_id=upload_result.post_id,
+                    post_url=upload_result.post_url,
+                    caption=caption,
+                    content_hash=content_hash,
+                    source_platform=source_platform,
+                )
+                self.circuit_breakers.record_success(platform_name)
+                self.quota_manager.record_upload(platform_name)
+                self.notifier.notify_upload_success(
+                    platform=platform_name,
+                    video_id=video_id,
+                    post_url=upload_result.post_url or "",
+                )
+            else:
+                tracker.fail(upload_result.error or "upload did not publish")
+                self.circuit_breakers.record_failure(
+                    platform_name,
+                    upload_result.error,
+                )
+                self.notifier.notify_upload_failure(
+                    platform=platform_name,
+                    video_id=video_id,
+                    error=upload_result.error or "Unknown error",
+                )
+
+            return upload_result
+
+        except Exception as e:
+            logger.error("Carousel upload failed for %s: %s", platform_name, e)
+            return UploadResult(
+                success=False,
+                error=f"Upload failed: {truncate_error(str(e))}",
+                platform=platform_name,
+            )
+
+    async def upload_image_to_platform(
+        self,
+        uploader: PlatformUploader,
+        image_path: Path,
+        caption: str,
+        platform_name: str,
+        video_id: str,
+        source_platform: str = "",
+        ignore_window: bool = False,
+    ) -> UploadResult:
+        """Publish a single image to one platform.
+
+        Same pipeline as :meth:`upload_carousel_to_platform` (circuit breaker,
+        quota, content-hash dedup, retry, state, notification) minus encoding:
+        an image is never handed to ffmpeg, and the destination's own image
+        limits are enforced inside the adapter before any upload call.
+        """
+        # Anti-bot time-of-day gate: identical to the video route (D2 — one
+        # gate on every upload path, so a deferred post behaves the same no
+        # matter which modality it carries).
+        deferred = self._deferred(platform_name, ignore_window=ignore_window)
+        if deferred is not None:
+            return deferred
+
+        if platform_name in _TOS_UNOFFICIAL_PLATFORMS:
+            logger.warning(
+                "Using unofficial API for %s - may violate platform ToS",
+                platform_name,
+            )
+
+        if not self.circuit_breakers.allow_request(platform_name):
+            logger.warning("Circuit breaker open for %s, skipping", platform_name)
+            return UploadResult(
+                success=False,
+                error="Circuit breaker open",
+                platform=platform_name,
+            )
+
+        try:
+            self.quota_manager.preflight(platform_name)
+        except QuotaExhaustedError as exc:
+            logger.warning("Pre-flight quota check failed for %s: %s", platform_name, exc)
+            return UploadResult(
+                success=False,
+                error=str(exc),
+                platform=platform_name,
+                metadata={"quota": exc.to_dict()},
+            )
+
+        # Idempotency guard, keyed on the image bytes + caption (the same
+        # content-hash mechanism the video and carousel paths use).
+        content_hash = compute_content_hash(
+            file_path=image_path,
+            filename=f"{image_path.name}|{caption}",
+        )
+        try:
+            existing_id = self.state.get_by_hash(content_hash)
+        except AttributeError:
+            existing_id = None
+        if existing_id and self.state.is_video_posted(existing_id, platform_name):
+            logger.info(
+                "Skipping %s image — identical image + caption already posted as %s",
+                platform_name,
+                existing_id,
+            )
+            return UploadResult(
+                success=True,
+                platform=platform_name,
+                metadata={"already_posted": True, "dedup": "content_hash"},
+            )
+
+        try:
+            tracker = create_upload_tracker(
+                f"{platform_name.title()} image upload",
+                image_path,
+            )
+
+            # ``ambiguous_safe=False``: a timeout/connection failure may mean the
+            # image was already published and the response was lost. Blindly
+            # retrying would double-post, which no platform here de-duplicates.
+            raw_upload_result = await retry_operation(
+                uploader.upload_image,
+                image_path,
+                caption,
+                config=STANDARD_RETRY,
+                platform=platform_name,
+                ambiguous_safe=False,
+                **self._reconcile_gate(
+                    uploader, content_hash=content_hash, caption=caption
+                ),
+            )
+            upload_result = normalize_upload_result(raw_upload_result, platform_name)
+
+            if upload_result.is_published:
+                tracker.complete()
+                self.state.mark_video_posted(
+                    video_id,
+                    platform_name,
+                    post_id=upload_result.post_id,
+                    post_url=upload_result.post_url,
+                    caption=caption,
+                    content_hash=content_hash,
+                    source_platform=source_platform,
+                )
+                self.circuit_breakers.record_success(platform_name)
+                self.quota_manager.record_upload(platform_name)
+                self.notifier.notify_upload_success(
+                    platform=platform_name,
+                    video_id=video_id,
+                    post_url=upload_result.post_url or "",
+                )
+            else:
+                tracker.fail(upload_result.error or "upload did not publish")
+                self.circuit_breakers.record_failure(platform_name, upload_result.error)
+                self.notifier.notify_upload_failure(
+                    platform=platform_name,
+                    video_id=video_id,
+                    error=upload_result.error or "Unknown error",
+                )
+
+            return upload_result
+
+        except Exception as e:  # noqa: BLE001 — a failed image upload is a result, not a crash
+            logger.error("Image upload failed for %s: %s", platform_name, e)
+            return UploadResult(
+                success=False,
+                error=f"Upload failed: {truncate_error(str(e))}",
+                platform=platform_name,
+            )
+
+    async def upload_text_to_platform(
+        self,
+        uploader: PlatformUploader,
+        text: str,
+        platform_name: str,
+        video_id: str,
+        source_platform: str = "",
+    ) -> UploadResult:
+        """Publish a text-only post to a single platform.
+
+        Same pipeline as :meth:`upload_to_platform` — ToS warning, circuit
+        breaker, quota preflight, retry, state, notifications — with the media
+        stages removed: there is no file to encode, nothing to upload and no
+        content hash to dedup on. The post is recorded in state under
+        ``video_id`` so text posts show up in the same "what did I post"
+        surface as everything else instead of vanishing.
+
+        A text post is NOT retried on an unknown-outcome failure for destinations
+        without server-side duplicate detection: the destination is reconciled
+        (read back) first and the result surfaced for a deliberate retry only
+        when that proves the post absent — never a blind double-post.
+
+        No time-of-day gate: a manual text post is deliberately never
+        window-gated (see :mod:`xpst.services.manual_defer` — the schedule
+        store cannot carry it, so a "deferred" row would be a black hole, and
+        a tweet at midnight is cheap enough not to warrant a queue
+        round-trip). Text reaches this method only through a manual surface;
+        the daemon never queues it.
+        """
+        # ToS warning for unofficial API platforms
+        if platform_name in _TOS_UNOFFICIAL_PLATFORMS:
+            logger.warning(
+                "Using unofficial API for %s - may violate platform ToS",
+                platform_name,
+            )
+
+        # Check circuit breaker
+        if not self.circuit_breakers.allow_request(platform_name):
+            logger.warning("Circuit breaker open for %s, skipping", platform_name)
+            return UploadResult(
+                success=False,
+                error="Circuit breaker open",
+                platform=platform_name,
+            )
+
+        # Pre-flight quota check (fail fast, before the network call)
+        try:
+            self.quota_manager.preflight(platform_name)
+        except QuotaExhaustedError as exc:
+            logger.warning("Pre-flight quota check failed for %s: %s", platform_name, exc)
+            return UploadResult(
+                success=False,
+                error=str(exc),
+                platform=platform_name,
+                metadata={"quota": exc.to_dict()},
+            )
+
+        try:
+            # Text posts have no media file, so identity is the post body: a
+            # retry reconciles against that content before it can duplicate.
+            text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+            raw_upload_result = await retry_operation(
+                uploader.post_text,
+                text,
+                config=STANDARD_RETRY,
+                platform=platform_name,
+                ambiguous_safe=platform_name == "x",
+                **self._reconcile_gate(
+                    uploader, content_hash=text_hash, caption=text
+                ),
+            )
+            upload_result = normalize_upload_result(raw_upload_result, platform_name)
+
+            if upload_result.is_published:
+                self.state.mark_video_posted(
+                    video_id,
+                    platform_name,
+                    post_id=upload_result.post_id,
+                    post_url=upload_result.post_url,
+                    caption=text,
+                    source_platform=source_platform,
+                )
+                self.circuit_breakers.record_success(platform_name)
+                self.quota_manager.record_upload(platform_name)
+                self.notifier.notify_upload_success(
+                    platform=platform_name,
+                    video_id=video_id,
+                    post_url=upload_result.post_url or "",
+                )
+            else:
+                self.circuit_breakers.record_failure(
+                    platform_name,
+                    upload_result.error or "text post did not publish",
+                )
+                self.notifier.notify_upload_failure(
+                    platform=platform_name,
+                    video_id=video_id,
+                    error=upload_result.error or "Unknown error",
+                )
+
+            return upload_result
+
+        except Exception as e:
+            logger.error("Text post failed for %s: %s", platform_name, e)
+            return UploadResult(
+                success=False,
+                error=f"Text post failed: {truncate_error(str(e))}",
+                platform=platform_name,
+            )
+
+    async def _encode_for_platform(
+        self,
+        video_path: Path,
+        platform: str,
+    ) -> Path:
+        """Encode a video file for a specific platform's requirements.
+
+        Runs the max-fidelity decision tree (xpst.media.pipeline):
+        passthrough when the source already fits, zero-loss stream-copy
+        remux when only the container is foreign, platform-profile transcode
+        (with EBU R128 loudness normalization) otherwise.
+
+        Handles ffmpeg temp file cleanup on failure.
+        """
+        config = self._encoding_config(platform)
+
+        if config.passthrough:
+            return video_path
+
+        plan = plan_transform(video_path, platform, config, self.video_processor)
+
+        if plan.action == "passthrough":
+            logger.info("Passthrough for %s — %s", platform, "; ".join(plan.reasons))
+            return video_path
+
+        if plan.action == "remux":
+            output_path = video_path.with_name(f"{video_path.stem}_mp4.mp4")
+            if output_path.exists() and output_path.stat().st_size > 1000:
+                if self._cached_encode_is_valid(output_path, video_path):
+                    logger.info("Using cached remux for %s", platform)
+                    return output_path
+                logger.warning("Discarding stale or corrupt cached remux: %s", output_path)
+                try:
+                    output_path.unlink()
+                except OSError:
+                    pass
+            try:
+                return self.video_processor.remux_for_platform(video_path, output_path)
+            except Exception as e:
+                logger.error("Remux failed for %s: %s", platform, e)
+                if output_path.exists():
+                    try:
+                        output_path.unlink()
+                    except OSError:
+                        pass
+                raise
+
+        # transcode
+        output_path = video_path.with_stem(f"{video_path.stem}_{platform}")
+
+        if output_path.exists() and output_path.stat().st_size > 1000:
+            if self._cached_encode_is_valid(output_path, video_path):
+                logger.info("Using cached encoding for %s", platform)
+                return output_path
+            logger.warning(
+                "Discarding stale or corrupt cached encode for %s: %s",
+                platform,
+                output_path,
+            )
+            try:
+                output_path.unlink()
+            except OSError:
+                pass
+
+        loudnorm_filter = self._loudness_filter_for(video_path, platform)
+
+        try:
+            kwargs: dict[str, Any] = {}
+            if loudnorm_filter:
+                kwargs["loudnorm_filter"] = loudnorm_filter
+            return self.video_processor.encode_for_platform(video_path, output_path, platform, config, **kwargs)
+        except Exception as e:
+            logger.debug("Encode failed, cleaning up: %s", e)
+            # Clean up partial output on ffmpeg failure
+            if output_path.exists():
+                try:
+                    output_path.unlink()
+                    logger.debug("Cleaned up partial encode: %s", output_path)
+                except OSError:
+                    pass
+            raise
+
+    def _encoding_config(self, platform: str) -> Any:
+        """Resolve the platform's EncodingConfig from the video config."""
+        if platform == "youtube":
+            return self.config.video.encoding_youtube
+        if platform == "instagram":
+            return self.config.video.encoding_instagram
+        if platform == "x":
+            return self.config.video.encoding_x
+        if platform == "tiktok":
+            # TikTok has a dedicated profile (GOP=2*fps, bufsize 20M,
+            # AAC 128k) — it no longer borrows Instagram's.
+            return self.config.video.encoding_tiktok
+        if platform == "threads":
+            # Threads: high-quality profile shared with Instagram
+            return self.config.video.encoding_instagram
+        if platform == "facebook":
+            # Facebook Page video: the Meta-family profile shared with
+            # Instagram/Threads. FacebookUploader declares VIDEO_DESTINATION
+            # (its manifest is test-enforced), so a missing branch here made
+            # every declared-Facebook encode raise ValueError.
+            return self.config.video.encoding_instagram
+        raise ValueError(f"Unknown platform: {platform}")
+
+    def _loudness_filter_for(self, video_path: Path, platform: str) -> str | None:
+        """Build a linear-mode EBU R128 loudnorm filter for this platform.
+
+        Two-pass: measure the source, then normalize to the platform's LUFS
+        target in linear mode (no dynamics distortion). Returns None (skip
+        normalization) whenever anything is unavailable — a loudness hiccup
+        must never block an upload, and files without audio need nothing.
+        """
+        ffmpeg = getattr(self.video_processor, "ffmpeg_path", None)
+        ffmpeg = ffmpeg if isinstance(ffmpeg, str) else None
+        if not has_loudnorm(ffmpeg):
+            logger.debug("ffmpeg lacks loudnorm — skipping loudness normalization")
+            return None
+
+        try:
+            info = self.video_processor.get_video_info(video_path)
+            has_audio = any(s.get("codec_type") == "audio" for s in info.get("streams", []))
+        except Exception:  # noqa: BLE001 - unprobeable file → no normalization
+            return None
+        if not has_audio:
+            return None
+
+        target = loudness_target(platform)
+        ffmpeg = self.video_processor.ffmpeg_path
+        ffmpeg = ffmpeg if isinstance(ffmpeg, str) else None
+        measured = measure_loudness(ffmpeg, video_path, target_i=target)
+        if measured is None:
+            # One-pass dynamic mode as a last resort still lands the target
+            # loudness (at some dynamics cost) — better than shipping off-target.
+            return f"loudnorm=I={target}:TP=-1.5:LRA=11"
+        f = build_loudnorm_filter(measured, target_i=target)
+        if f is None:
+            return None
+        logger.info(
+            "Loudness: source %.1f LUFS → target %.1f LUFS for %s (two-pass linear)",
+            measured["input_i"],
+            target,
+            platform,
+        )
+        return f
+
+    def _cached_encode_is_valid(self, cached_path: Path, source_path: Path) -> bool:
+        """Whether a cached encode may be uploaded as-is.
+
+        Guards against two silent-corruption paths:
+        - a truncated/partial file left by a killed or disk-full encode
+          (was previously accepted on size alone: >1000 bytes);
+        - a stale encode of an older, same-named source (the cache key is
+          the file stem only, so re-exported content would silently get the
+          old video's bytes).
+        """
+        try:
+            info = self.video_processor.get_video_info(cached_path)
+        except Exception:  # noqa: BLE001 - unprobeable cache is a corrupt cache
+            return False
+        stream = _pick_video_stream(info.get("streams", []))
+        if stream is None:
+            return False
+        # The pipeline only ever produces H.264 (libx264 or a hardware H.264
+        # encoder; every platform profile demands it). A cache file whose video
+        # stream probes as any other codec was not produced by this pipeline —
+        # the platform check would have rejected it before upload, and the next
+        # encode would silently overwrite the cache anyway. Serve nothing that
+        # does not match what we would have encoded.
+        if (stream.get("codec_name") or "").lower() not in ("h264", "avc"):
+            return False
+        try:
+            return cached_path.stat().st_mtime >= source_path.stat().st_mtime
+        except OSError:
+            return False
+
+    @staticmethod
+    def _duration_limit(uploader: PlatformUploader) -> int | None:
+        """Platform max video duration from the provider manifest (G08).
+
+        ``manifest`` is a PROPERTY, not a callable — the old ``manifest()``
+        raised TypeError that the swallow below hid, so no platform duration
+        limit was ever applied. Read the attribute directly.
+        """
+        try:
+            extra = getattr(uploader.manifest, "extra", None) or {}
+        except Exception:
+            return None
+        for key in ("max_duration_seconds", "max_video_duration_seconds"):
+            value = extra.get(key)
+            if isinstance(value, (int, float)) and value > 0:
+                return int(value)
+        return None
+
+    def _probe_duration(self, video_path: Path) -> float | None:
+        """Source duration in seconds via ffprobe; None if unprobeable."""
+        try:
+            info = self.video_processor.get_video_info(video_path)
+            return float(info.get("format", {}).get("duration", 0)) or None
+        except Exception as e:
+            logger.debug("Duration probe failed (will rely on platform): %s", e)
+            return None
+
+    def crash_recovery_clear(self, video_id: str, platform_name: str) -> None:
+        """Clear crash recovery checkpoint on success (no-op if no crash_recovery)."""
+        if hasattr(self, "_crash_recovery") and self._crash_recovery:
+            self._crash_recovery.clear_checkpoint(video_id, platform_name)

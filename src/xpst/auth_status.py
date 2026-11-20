@@ -1,0 +1,733 @@
+"""Live authentication-status collection for ``xpst auth status``.
+
+The status command historically reported credential-file PRESENCE, not
+liveness — an expired Instagram session file showed ``authenticated: true``
+while the session was actually dead (instagrapi 403 LoginRequired).
+
+This module routes the status command through the SAME live session
+validation used by ``xpst health``: the per-platform uploader
+``check_health()`` validators (the engine ``check_health`` /
+dashboard ``_live_auth`` pattern from PRs #66 and #70):
+
+- youtube: token refresh + channels.list probe
+- x:       twikit cookie probe (``client.user()``)
+- instagram: sessionid probe via instagrapi (``account_info()``) or a
+  Meta Graph API ``/me`` probe when ``auth_mode == "graph_api"`` and a
+  graph token is configured
+- tiktok:  Content Posting API token probe, or a source check
+  (yt-dlp + cookie jar) in ``source_only`` mode
+- threads/messenger: their uploader probes; an unconfigured platform
+  fails with a guidance error instead of reporting "connected"
+
+Every entry also carries a truthful badge derived from the probe it just
+ran — ``token_state``/``badge``/``badge_label``/``badge_reason`` and the
+``checked_at`` timestamp the badge is based on (see
+:mod:`xpst.token_state`).  That makes this function the single source of
+truth the CLI, web UI, desktop app and MCP all render from: a stored
+credential is never enough for a green badge.
+
+Non-interactive by design: every validator used here fails CLOSED
+(returns ``authenticated=False`` with an ``error``) — none of them
+prompts, launches a browser, or blocks on stdin. The full engine is NOT
+constructed: engine ``__init__`` registers a shutdown handler, runs
+crash recovery and hard-requires FFmpeg, none of which a status read
+should need. Only the uploaders (and their session manager) are built,
+exactly mirroring ``engine._init_platforms``.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import importlib
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from xpst.utils.graph_api import graph_api_url
+from xpst.utils.logger import get_logger
+from xpst.utils.sessions import SessionManager
+
+if TYPE_CHECKING:
+    from xpst.config import XPSTConfig
+
+logger = get_logger(__name__)
+
+# Per-platform live-check ceiling. The validators hit live APIs (twikit,
+# instagrapi, googleapiclient, graph.facebook.com); without a timeout a
+# hung network call would freeze `xpst auth status --json` indefinitely.
+LIVE_CHECK_TIMEOUT_SECONDS = 90
+
+
+def _age_days(path: str | Path | None) -> int | None:
+    """Session age in whole days from a credential file's mtime.
+
+    Age can never be negative: clock skew or coarse filesystem timestamps
+    can put st_mtime marginally ahead of now (same rule as the G53
+    session-health check in cli.py).
+    """
+    if not path:
+        return None
+    p = Path(path).expanduser()
+    if not p.exists():
+        return None
+    try:
+        return max(0, int((time.time() - p.stat().st_mtime) // 86400))
+    except OSError:
+        return None
+
+
+def _credential_file_for(config: XPSTConfig, platform: str) -> str | None:
+    """Primary credential file per platform (drives session_age_days)."""
+    if platform == "youtube":
+        return config.youtube.token_file or None
+    if platform == "x":
+        return config.x.cookies_file or None
+    if platform == "instagram":
+        return config.instagram.session_file or None
+    if platform == "tiktok":
+        return config.tiktok.cookies_file or None
+    if platform == "bluesky":
+        # Bluesky's credential is encrypted in the store, not a file on disk, so
+        # there is no mtime to report. Returns None rather than inventing one.
+        return None
+    return None
+
+
+def _auth_mode_for(config: XPSTConfig, platform: str) -> str:
+    """Effective auth mode per platform.
+
+    - youtube: always ``oauth``
+    - x: ``cookies`` | ``api_v2`` (from config)
+    - instagram: ``graph_api`` only when configured AND a graph token is
+      actually present; otherwise the session (instagrapi sessionid)
+      path is what will really be used → ``session``
+    - tiktok: ``content_posting_api`` when Content Posting API
+      credentials exist, else ``source_only`` (yt-dlp downloads)
+    """
+    if platform == "youtube":
+        return "oauth"
+    if platform == "x":
+        return config.x.auth_mode if config.x.auth_mode in ("cookies", "api_v2") else "cookies"
+    if platform == "instagram":
+        if config.instagram.auth_mode == "graph_api" and config.instagram.graph_access_token:
+            return "graph_api"
+        return "session"
+    if platform == "tiktok":
+        if config.tiktok.client_key and (config.tiktok.access_token or config.tiktok.refresh_token):
+            return "content_posting_api"
+        return "source_only"
+    if platform == "threads":
+        return "oauth"
+    if platform == "bluesky":
+        return "app_password"
+    if platform in ("messenger", "facebook"):
+        return "oauth"
+    if platform == "local":
+        return "local"
+    return "unknown"
+
+
+async def _graph_api_probe(token: str) -> tuple[bool, str | None, dict[str, Any]]:
+    """Probe a Meta Graph API token with GET /me?fields=id (no prompt)."""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                graph_api_url("me"),
+                params={"fields": "id", "access_token": token},
+            )
+        if resp.status_code == 200:
+            data = resp.json()
+            return True, None, {"graph_user_id": str(data.get("id", ""))}
+        return False, f"Graph API probe failed: HTTP {resp.status_code}", {}
+    except Exception as exc:  # noqa: BLE001 — status must never crash
+        return False, f"Graph API probe failed: {str(exc)[:200]}", {}
+
+
+def _tiktok_source_check(config: XPSTConfig) -> tuple[bool, str | None, dict[str, Any]]:
+    """Source-mode TikTok check: yt-dlp present + a usable cookie jar.
+
+    Mirrors sources/tiktok.py check_health() without running yt-dlp
+    subprocesses (fast, offline, non-interactive).
+    """
+    import shutil
+
+    from xpst.utils.platform import resolve_ytdlp_path
+
+    yt_dlp_path = str(resolve_ytdlp_path() or "")
+    if not yt_dlp_path:
+        yt_dlp_path = shutil.which(str(Path.home() / "bin" / "yt-dlp")) or ""
+    cookies_available = False
+    if config.tiktok.cookies_from_browser:
+        cookies_available = True  # assume the browser session exists
+    elif config.tiktok.cookies_file:
+        cookies_available = Path(config.tiktok.cookies_file).expanduser().exists()
+
+    ok = bool(yt_dlp_path and cookies_available)
+    error = None
+    if not yt_dlp_path:
+        error = "yt-dlp not found — TikTok source cannot download"
+    elif not cookies_available:
+        error = "No TikTok cookies available (cookie jar missing / cookies_from_browser unset)"
+    details = {
+        "yt_dlp_installed": bool(yt_dlp_path),
+        "yt_dlp_path": yt_dlp_path or None,
+        "cookies_available": cookies_available,
+        "username_configured": bool(config.tiktok.username),
+    }
+    return ok, error, details
+
+
+def _build_uploaders(config: XPSTConfig) -> dict[str, Any]:
+    """Instantiate enabled uploaders exactly like engine._init_platforms.
+
+    Import failures (missing optional dependencies such as instagrapi) are
+    swallowed — that platform then reports ``disabled`` instead of
+    crashing the whole status command in dep-less environments.
+    """
+    uploaders: dict[str, Any] = {}
+
+    if config.youtube.enabled:
+        try:
+            from xpst.platforms.youtube import YouTubeUploader
+
+            uploaders["youtube"] = YouTubeUploader(config)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("YouTube uploader unavailable: %s", exc)
+
+    if config.x.enabled:
+        try:
+            from xpst.platforms.x import XUploader
+
+            uploaders["x"] = XUploader(config)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("X uploader unavailable: %s", exc)
+
+    if config.bluesky.enabled:
+        try:
+            from xpst.platforms.bluesky import BlueskyUploader
+
+            uploaders["bluesky"] = BlueskyUploader(config)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Bluesky uploader unavailable: %s", exc)
+
+    if config.instagram.enabled:
+        try:
+            from xpst.platforms.instagram import InstagramUploader
+
+            uploaders["instagram"] = InstagramUploader(config)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Instagram uploader unavailable: %s", exc)
+
+    if config.tiktok.enabled:
+        try:
+            from xpst.platforms.tiktok import TikTokUploader
+
+            uploaders["tiktok"] = TikTokUploader(config)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("TikTok uploader unavailable: %s", exc)
+
+    if config.threads.enabled:
+        try:
+            from xpst.platforms.threads import ThreadsUploader
+
+            uploaders["threads"] = ThreadsUploader(config)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Threads uploader unavailable: %s", exc)
+
+    if config.messenger.enabled:
+        try:
+            from xpst.platforms.messenger import MessengerAdapter
+
+            uploaders["messenger"] = MessengerAdapter(config)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Messenger adapter unavailable: %s", exc)
+
+    if config.facebook.enabled:
+        try:
+            from xpst.platforms.facebook import FacebookPageUploader
+
+            uploaders["facebook"] = FacebookPageUploader(config)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Facebook Page uploader unavailable: %s", exc)
+
+    # Same session-manager wiring the engine does (secure auth path).
+    session_manager = SessionManager(config.config_dir)
+    for uploader in uploaders.values():
+        uploader._session_manager = session_manager
+
+    return uploaders
+
+
+#: Uploader classes per platform, for probing a DISABLED provider's stored
+#: credential. ``_build_uploaders`` only instantiates enabled platforms, but a
+#: switched-off provider still holds a credential that can die (card
+#: t_95928695 D5), so the probe needs its own instance.
+_PROBE_UPLOADER_CLASSES: dict[str, tuple[str, str]] = {
+    "youtube": ("xpst.platforms.youtube", "YouTubeUploader"),
+    "x": ("xpst.platforms.x", "XUploader"),
+    "instagram": ("xpst.platforms.instagram", "InstagramUploader"),
+}
+
+
+def _probe_uploader_for(config: XPSTConfig, platform: str) -> Any | None:
+    """Build an uploader for a disabled platform, or None when unavailable."""
+
+    entry = _PROBE_UPLOADER_CLASSES.get(platform)
+    if entry is None:
+        return None
+    module_name, class_name = entry
+    try:
+        module = importlib.import_module(module_name)
+        uploader = getattr(module, class_name)(config)
+        uploader._session_manager = SessionManager(config.config_dir)
+        return uploader
+    except Exception as exc:  # noqa: BLE001 - a missing dep is "cannot probe"
+        logger.debug("Cannot probe %s's stored credential: %s", platform, exc)
+        return None
+
+
+async def _check_via_uploader(uploader: Any) -> dict[str, Any]:
+    """Run one uploader's check_health() with a hard timeout.
+
+    ``live_checked`` is reported for every outcome because every outcome is
+    the result of a live probe: a probe that ran and rejected the credential
+    is proof the credential is unusable, and a probe that crashed is a
+    verdict of "probed, not usable". Leaving the key out let role-level
+    callers (TikTok's ``destination_check``) fall back to
+    ``live_checked: false``, which ``provider_truth._state_for`` reads as
+    "not probed" and then reports READY for a logged-out browser session.
+    """
+    try:
+        health = await asyncio.wait_for(
+            uploader.check_health(), timeout=LIVE_CHECK_TIMEOUT_SECONDS
+        )
+        return {
+            "authenticated": bool(health.authenticated),
+            "session_valid": bool(health.session_valid),
+            "live_checked": True,
+            "error": health.error,
+            "details": dict(health.details or {}),
+        }
+    except asyncio.TimeoutError:
+        return {
+            "authenticated": False,
+            "session_valid": False,
+            "live_checked": True,
+            "error": f"Live check timed out after {LIVE_CHECK_TIMEOUT_SECONDS}s",
+            "details": {},
+        }
+    except Exception as exc:  # noqa: BLE001 — fail closed, never crash status
+        return {
+            "authenticated": False,
+            "session_valid": False,
+            "live_checked": True,
+            "error": f"Live check failed: {str(exc)[:200]}",
+            "details": {},
+        }
+
+
+async def _local_source_check(config: XPSTConfig) -> dict[str, Any]:
+    """Check the local source without network access."""
+    path = Path(config.local.path).expanduser() if config.local.path else None
+    exists = bool(path and path.exists())
+    return {
+        "authenticated": exists,
+        "session_valid": exists,
+        "auth_mode": "local",
+        "live_checked": True,
+        "error": None if exists else "Local source is not configured",
+        "details": {"path_configured": bool(config.local.path), "path_exists": exists},
+    }
+
+
+async def collect_live_auth_status_async(
+    config: XPSTConfig,
+    uploaders: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Collect live probes and return the canonical role-aware mapping.
+
+    The returned mapping is keyed by every supported provider, including
+    disabled Threads and messaging-only Messenger.  The flat authentication
+    fields are retained for CLI/MCP compatibility; role-specific checks are
+    nested under ``roles`` and ``role_status``.
+    """
+    if uploaders is None:
+        uploaders = _build_uploaders(config)
+
+    raw: dict[str, dict[str, Any]] = {}
+    for name in ("youtube", "x", "instagram", "bluesky"):
+        entry: dict[str, Any] = {
+            "authenticated": False,
+            "session_valid": False,
+            "auth_mode": _auth_mode_for(config, name),
+            "session_age_days": _age_days(_credential_file_for(config, name)),
+            "live_checked": True,
+            "error": None,
+            "details": {},
+        }
+        uploader = uploaders.get(name)
+        if not getattr(config, name).enabled or uploader is None:
+            entry["error"] = "disabled"
+            # A disabled provider still HOLDS a credential, and that credential
+            # can die while nothing is posting there (an Instagram session does
+            # exactly that; card t_95928695 D5). Probe the stored one —
+            # read-only, no upload — so the health report can warn instead of
+            # reporting "disabled" and nothing else, which is how enabling it
+            # later fails on the first post.
+            credential = _credential_file_for(config, name)
+            if credential and Path(str(credential)).expanduser().is_file():
+                probe_target = uploader or _probe_uploader_for(config, name)
+                if probe_target is not None:
+                    probe = await _check_via_uploader(probe_target)
+                    entry["details"]["stored_credential"] = {
+                        "checked": True,
+                        "alive": bool(probe.get("authenticated")),
+                        "error": probe.get("error"),
+                        "probe": "check_health",
+                    }
+        elif name == "instagram" and entry["auth_mode"] == "graph_api":
+            ok, error, details = await _graph_api_probe(config.instagram.graph_access_token)
+            # Account type rides the status payload so every surface can show
+            # it. The stored verdict (connect-time or last probe) always rides;
+            # a live re-probe runs only while the verdict is missing or
+            # "personal" — once professional, the type stops costing a call,
+            # and a personal account gets a fresh answer every refresh, which
+            # is how the post-switch re-check resolves without re-running
+            # connect.
+            details.setdefault("account_type", config.instagram.account_type)
+            details.setdefault("account_type_source", config.instagram.account_type_source)
+            if config.instagram.graph_ig_user_id and config.instagram.account_type in ("", "personal"):
+                import asyncio
+
+                from xpst.platforms.instagram_account import (
+                    detect_graph_account_type,
+                    persist_account_type,
+                )
+
+                finding = await asyncio.to_thread(
+                    detect_graph_account_type,
+                    config.instagram.graph_ig_user_id,
+                    config.instagram.graph_access_token,
+                )
+                persist_account_type(config, finding)
+                if finding.account_type.value != "unknown":
+                    details["account_type"] = finding.account_type.value
+                    details["account_type_source"] = finding.source
+            entry.update(authenticated=ok, session_valid=ok, error=error, details=details)
+        else:
+            entry.update(await _check_via_uploader(uploader))
+        raw[name] = entry
+
+    # TikTok is intentionally two independent capabilities.  A source check
+    # must not be replaced by a failed Content Posting API check and vice versa.
+    tiktok_publish_mode = str(
+        getattr(config.tiktok, "publish_mode", "auto") or "auto"
+    ).lower()
+    browser_publish = tiktok_publish_mode in ("browser", "browser_only")
+    tiktok_base: dict[str, Any] = {
+        "auth_mode": _auth_mode_for(config, "tiktok"),
+        "session_age_days": _age_days(_credential_file_for(config, "tiktok")),
+        "live_checked": True,
+        "error": None,
+        "details": {},
+    }
+    if browser_publish:
+        # The web session is the credential on this route; say so in the
+        # payload instead of the source_only/content_posting_api dichotomy.
+        tiktok_base["auth_mode"] = "session"
+    if not config.tiktok.enabled:
+        source_check = {
+            "authenticated": False,
+            "session_valid": False,
+            "live_checked": True,
+            "error": "disabled",
+            "details": {},
+        }
+        destination_check = dict(source_check)
+    else:
+        source_ok, source_error, source_details = _tiktok_source_check(config)
+        source_check = {
+            "authenticated": source_ok,
+            "session_valid": source_ok,
+            "auth_mode": "source_only",
+            "live_checked": True,
+            "error": source_error,
+            "details": source_details,
+        }
+        if browser_publish:
+            # Browser-native publish mode: the logged-in web session IS the
+            # credential, so probe the uploader (which dispatches to the
+            # browser probe) even when no Content Posting API OAuth
+            # credentials exist.  The probe is the publishability answer, so
+            # it also carries the provider-level verdict below.
+            uploader = uploaders.get("tiktok")
+            if uploader is None:
+                destination_check = {
+                    "authenticated": False,
+                    "session_valid": False,
+                    "auth_mode": "session",
+                    # Not a "no probe ran" unknown: the route is positively
+                    # unusable because its publisher could not be built.
+                    "live_checked": True,
+                    "error": (
+                        "TIKTOK_BROWSER_DEPENDENCY_MISSING — the browser "
+                        "publisher could not be built (install the browser "
+                        'extras: pip install "xpst[browser]" then '
+                        "`python -m playwright install chromium`)"
+                    ),
+                    "details": {"route": "tiktok_browser", "probe_ran": False},
+                }
+            else:
+                destination_check = await _check_via_uploader(uploader)
+            destination_check["auth_mode"] = "session"
+        elif tiktok_base["auth_mode"] == "content_posting_api":
+            uploader = uploaders.get("tiktok")
+            destination_check = (
+                await _check_via_uploader(uploader)
+                if uploader is not None
+                else {
+                    "authenticated": False,
+                    "session_valid": False,
+                    "auth_mode": "content_posting_api",
+                    "live_checked": True,
+                    "error": "disabled",
+                    "details": {},
+                }
+            )
+        else:
+            destination_check = {
+                "authenticated": False,
+                "session_valid": False,
+                "auth_mode": "source_only",
+                "live_checked": True,
+                "error": "TikTok Content Posting API is not configured",
+                "details": {"auth_mode": "source_only"},
+            }
+    # Which verdict speaks for the provider: on a publish route (Content
+    # Posting API or browser session) the posting destination is the promise,
+    # so its check wins; only a source-only route is described by the source
+    # check.  Keying this off the compat auth_mode and then calling
+    # ``update(source_check)`` is what made browser mode report
+    # ``auth_mode: source_only`` plus a "no posting credentials" badge while
+    # its destination role said session/ready, and made ``can_post`` answer a
+    # download question.
+    publish_route = tiktok_base["auth_mode"] in ("content_posting_api", "session")
+    compat = destination_check if publish_route else source_check
+    tiktok_base.update(compat)
+    tiktok_base["source_check"] = source_check
+    tiktok_base["destination_check"] = destination_check
+    raw["tiktok"] = tiktok_base
+
+    for name in ("threads", "facebook", "messenger"):
+        entry = {
+            "authenticated": False,
+            "session_valid": False,
+            "auth_mode": _auth_mode_for(config, name),
+            "session_age_days": None,
+            "live_checked": True,
+            "error": None,
+            "details": {},
+        }
+        uploader = uploaders.get(name)
+        if not getattr(config, name).enabled or uploader is None:
+            entry["error"] = "disabled"
+        else:
+            entry.update(await _check_via_uploader(uploader))
+        raw[name] = entry
+
+    raw["local"] = await _local_source_check(config)
+
+    from xpst.provider_truth import build_canonical_status
+
+    canonical = build_canonical_status(config, raw)
+    # Keep the mtime field and role-specific raw details on the canonical
+    # entries; these were part of the original auth-status JSON contract.
+    for name, entry in raw.items():
+        canonical[name].update(
+            {
+                key: entry[key]
+                for key in ("session_age_days",)
+                if key in entry
+            }
+        )
+    attach_badge_truth(config, canonical)
+    return canonical
+
+
+#: Badge fields copied onto canonical entries for JSON/UI consumers.
+BADGE_FIELD_NAMES: tuple[str, ...] = (
+    "token_state",
+    "badge",
+    "badge_label",
+    "badge_reason",
+    "badge_action",
+    "checked_at",
+    "checked_at_iso",
+    "check_age_seconds",
+    "expires_at",
+    "expires_at_iso",
+    "expires_in_seconds",
+    "auto_refresh",
+    "token_metadata",
+)
+
+
+def attach_badge_truth(
+    config: XPSTConfig,
+    canonical: dict[str, dict[str, Any]],
+    *,
+    checked_at: float | None = None,
+) -> None:
+    """Attach truthful badge fields to every canonical provider entry (in place).
+
+    Reads the persisted refresh report so a failed automatic refresh keeps the
+    badge at ``needs_reauth`` instead of silently reverting to "expiring".
+    """
+    from xpst.token_refresh import load_refresh_report
+    from xpst.token_state import enrich_live_status
+
+    moment = time.time() if checked_at is None else float(checked_at)
+    stamped: dict[str, dict[str, Any]] = {}
+    for name, entry in canonical.items():
+        item = dict(entry)
+        if item.get("live_checked"):
+            item["checked_at"] = moment
+        stamped[name] = item
+
+    badges = enrich_live_status(
+        config,
+        stamped,
+        refresh_report=load_refresh_report(config),
+        now=moment,
+    )
+    for name, entry in canonical.items():
+        info = badges.get(name)
+        if not info:
+            # Platforms outside the badge surface (e.g. the local source) keep
+            # their own truth and simply carry no badge.
+            continue
+        for field in BADGE_FIELD_NAMES:
+            if field in info:
+                entry[field] = info[field]
+
+
+def collect_live_auth_status(
+    config: XPSTConfig,
+    uploaders: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Sync wrapper: live per-platform auth status for the CLI.
+
+    Total failure of the collection itself (e.g. no event loop possible)
+    degrades to all-false entries with an error — the command still
+    returns honest, backward-compatible JSON instead of crashing.
+    """
+    platforms = (
+        "youtube",
+        "x",
+        "instagram",
+        "bluesky",
+        "tiktok",
+        "threads",
+        "facebook",
+        "messenger",
+        "local",
+    )
+    try:
+        return asyncio.run(collect_live_auth_status_async(config, uploaders))
+    except Exception as exc:  # noqa: BLE001 — status must never crash
+        logger.warning("Live auth status collection failed: %s", exc)
+        fallback = {
+            name: {
+                "authenticated": False,
+                "session_valid": False,
+                "auth_mode": "unknown",
+                "session_age_days": None,
+                "live_checked": True,
+                "error": f"Live check failed: {str(exc)[:200]}",
+                "details": {},
+            }
+            for name in platforms
+        }
+        from xpst.provider_truth import build_canonical_status
+
+        canonical = build_canonical_status(config, fallback)
+        for name in platforms:
+            canonical[name]["session_age_days"] = None
+        # A total collection failure is not a licence to guess: every platform
+        # gets a non-green badge for the same reason the collection failed.
+        attach_badge_truth(config, canonical)
+        return canonical
+
+
+#: Facts a platform-level health entry carries, in display order.  Every one of
+#: them comes from the canonical entry — no surface may invent its own version.
+PLATFORM_HEALTH_FIELDS: tuple[str, ...] = (
+    "authenticated",
+    "session_valid",
+    "live_checked",
+    "state",
+    "auth_mode",
+    "enabled",
+    "error",
+    "details",
+    "probe_class",
+    "probe_error",
+    "probe_retryable",
+    "session_age_days",
+    "badge",
+    "token_state",
+    "badge_reason",
+    "checked_at",
+    "checked_at_iso",
+    "check_age_seconds",
+    # Role-qualified posting truth (see xpst.provider_truth.posting_truth): a
+    # platform can be a healthy SOURCE and never accept a post, so "is this
+    # account connected" cannot be answered from ``authenticated`` alone.
+    # Carried here so every surface that renders this block (health, MCP) tells
+    # the same story as doctor/auth status without re-deriving it.
+    "posting_destination",
+    "posting_role",
+    "posting_state",
+    "posting_error",
+    "can_post",
+    "source_only",
+    "posting_note",
+)
+
+
+def platform_health_entries(
+    canonical: dict[str, dict[str, Any]],
+    platforms: tuple[str, ...] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Platform-level health entries derived from canonical status.
+
+    One implementation for every surface that reports "is this account
+    connected": ``xpst health`` used to run its own per-platform probes through
+    the engine while ``xpst doctor``/``auth status`` rendered the canonical
+    collector, so the same box could report different verdicts for the same
+    account (see ``tests/test_status_surface_agreement.py``).
+
+    Args:
+        canonical: Output of :func:`collect_live_auth_status` (or the async form).
+        platforms: Provider names to include, in order. Defaults to every
+            provider except the local source.
+
+    Returns:
+        ``{platform: {fact: value}}`` containing only the fields the canonical
+        entry actually carries — an absent fact stays absent rather than being
+        filled in with a guess.
+    """
+    names = platforms if platforms is not None else tuple(
+        name for name in canonical if name != "local"
+    )
+    entries: dict[str, dict[str, Any]] = {}
+    for name in names:
+        entry = canonical.get(name)
+        if not isinstance(entry, dict):
+            continue
+        entries[name] = {
+            field: entry[field] for field in PLATFORM_HEALTH_FIELDS if field in entry
+        }
+    return entries

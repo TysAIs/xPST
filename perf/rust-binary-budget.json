@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "metric": "RELEASE_BINARY_BYTES",
+  "definition": "On-disk size in bytes of a release binary built by this workspace with `cargo build --release` (the profile in the root Cargo.toml: opt-level=z, lto=fat, codegen-units=1, panic=abort, strip=symbols). File bytes, not disk blocks, so the number does not depend on the filesystem.",
+  "measured_with": "scripts/check_rust_binary_size.py",
+  "cold_start_measured_with": "scripts/measure_rust_boot.py",
+  "d4": {
+    "source": "docs/DIRECTION.md D-4",
+    "single_binary_max_bytes": 26214400,
+    "install_max_bytes_with_media_tools": 125829120,
+    "install_max_bytes_without_media_tools": 31457280,
+    "cold_boot_median_ms": 1000
+  },
+  "budgets": {
+    "xpst": {
+      "max_bytes": 2097152,
+      "rationale": "Measured 961,960 bytes on 2026-11-17 (x86_64-linux, rustc 1.99.1) from `cargo build --release --workspace`. The budget is the measured number doubled and rounded up to a whole MiB: enough headroom that P1-P4 can add HTTP/TLS, stores and providers without the gate becoming a nuisance, tight enough that any single dependency that doubles the binary fails the PR. On 2026-11-18 the same build measured 1,324,968 bytes after serde_yaml/unsafe-libyaml became serde-saphyr (+~204 kB of parser code), still 63% of the budget. On 2026-11-19, on the tree that also carries the rmcp 3.11.0 move, it measured 1,325,944 bytes (63.2%). The budget stands: it was chosen for growth, not re-derived from each measurement.",
+      "measured": {
+        "bytes": 1325944,
+        "mib": 1.264,
+        "measured_utc": "2026-11-19",
+        "host": "x86_64-linux, rustc 1.99.1, `cargo build --release --workspace`",
+        "single_crate_build_bytes": 1324672
+      }
+    },
+    "xpst-mcp": {
+      "max_bytes": 6291456,
+      "rationale": "Measured 3,146,912 bytes on 2026-11-17 from the same workspace build (rmcp + tokio + chrono + the YAML binding statically linked in); the budget is that measurement doubled and rounded up to a MiB. On 2026-11-18 the binary measured 1,826,288 bytes: serde_yaml/unsafe-libyaml became serde-saphyr (+~204 kB of parser code) and chrono-tz, which embedded the whole IANA database, was replaced by jiff, which reads the platform's zoneinfo (-~1.3 MB). On 2026-11-19, on the tree that also carries the rmcp 3.11.0 move, it measured 2,274,048 bytes (36.1%): the newer SDK's model and transport tables cost ~448 kB over that number, and removing chrono-tz still accounts for the rest of the drop from 3,630,144 bytes. The budget was deliberately NOT lowered with the measurement: it is a ceiling chosen for what the crate is expected to grow into, and re-deriving it from a smaller number would turn a one-off win into a tighter gate.",
+      "measured": {
+        "bytes": 2274048,
+        "mib": 2.169,
+        "measured_utc": "2026-11-19",
+        "host": "x86_64-linux, rustc 1.99.1, `cargo build --release --workspace`"
+      }
+    }
+  },
+  "notes": [
+    "This file is the record of the decision, not a copy of the current output: raise a budget only together with a new measurement and a sentence saying what grew and why, in the same commit that changes it.",
+    "`cargo build --release --workspace` and `cargo build --release -p xpst-cli` differ by the workspace feature unification reaching serde/clap differently (961,960 vs 961,912 measured on 2026-11-17; 1,325,944 vs 1,324,672 on 2026-11-19). The gate is run on the workspace build; the smaller number is recorded only so the difference is not mistaken for nondeterminism.",
+    "A binary with no entry in `budgets` is a gate failure (exit 2), not a pass: an unmeasured binary cannot be claimed to be within a budget.",
+    "Two binaries are budgeted because the workspace emits two: `xpst` (crates/xpst-cli) and `xpst-mcp` (crates/xpst-mcp). `xpst-app` and `src-tauri` are libraries/bundles, not workspace binaries; the desktop installer size is gated separately in .github/workflows/tauri-release.yml.",
+    "Cold start is measured by scripts/measure_rust_boot.py, whose report carries the host, the binary SHA-256 and per-sample cache_purge flags; the 1 s number is D-4's target for the desktop shell on the Mac mini host class, so the CLI number is a floor, not a substitute."
+  ]
+}

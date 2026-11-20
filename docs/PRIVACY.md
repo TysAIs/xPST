@@ -1,0 +1,57 @@
+# Privacy
+
+xPST is local-first. There is no xPST cloud service, hosted account, telemetry endpoint, or subscription backend in this repository.
+
+## What Stays Local
+
+- Video files
+- Captions and schedule data
+- Upload history and state files
+- Browser cookies and session files
+- OAuth tokens
+- Configuration files
+
+## What Leaves The Machine
+
+Data leaves the machine only when xPST talks to a platform or service that the user configures:
+
+- YouTube API requests for YouTube uploads and metadata
+- Instagram requests made through the configured Instagram session
+- X/Twitter requests made through the configured X session
+- TikTok/source requests made through downloader workflows
+- Optional webhook notifications, such as Discord or Telegram
+
+## Credential Storage
+
+xPST's `CredentialStore` uses Fernet-encrypted `.enc` files by default. An OS
+keychain can be selected explicitly with `XPST_USE_KEYRING=1` when the platform
+keychain is available. If `cryptography` is unavailable, xPST refuses to write a
+credential rather than falling back to plaintext.
+
+Encryption at rest covers the store, not every file in the directory. Three
+library-native files are plaintext JSON because the runtime reads them directly:
+`~/.xpst/credentials/youtube_token.json` (OAuth token, including the refresh
+token), `x_cookies.json` (X auth cookies) and `instagram_session.json`
+(Instagram `sessionid`). They are owner-only `0600` and are rewritten on every
+refresh. Treat the whole `~/.xpst/` directory as sensitive: a dotfile sync or an
+unencrypted backup copies those files in the clear. `SECURITY.md` states exactly
+what is and is not encrypted.
+
+## Repository Hygiene
+
+Nothing in this repository identifies a real person. Tracked files, test
+fixtures, documentation and built artifacts (sdist, wheel, desktop bundle) are
+scanned by `scripts/scan_public_safety.py`, and the gate fails CI on secrets,
+personal e-mail addresses, absolute home paths, machine names and the personal
+handles listed in the checked-in deny list at `.public-safety-denylist`.
+Fixtures use fictional identities; the deny list holds names, not data. Git
+history is scanned on demand and reported, never rewritten automatically.
+
+## User Responsibility
+
+Users are responsible for:
+
+- Keeping local account files private
+- Reviewing platform Terms of Service before enabling integrations
+- Avoiding spam, platform manipulation, and unauthorized scraping
+- Removing credentials with `xpst disconnect <platform> --yes` or by deleting local xPST credential files when needed

@@ -1,0 +1,1111 @@
+"""Shared, side-effect-free post planning and media preflight.
+
+The service is the common seam for future CLI, desktop, and MCP clients.  It
+only reads local configuration, credential-file metadata, quota usage, and
+media files.  It never uploads, records quota usage, refreshes credentials,
+changes state, creates temporary output, or performs network I/O.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol
+from urllib.parse import urlparse
+
+from xpst import visibility as visibility_module
+from xpst.config import EncodingConfig, XPSTConfig
+from xpst.content import (
+    ContentRequest,
+    ContentType,
+    MediaTransport,
+    UnknownContentTypeError,
+    coerce_content_type,
+    content_profile,
+    media_transport_blocker,
+    text_limit,
+)
+from xpst.media.pipeline import TransformPlan, plan_transform
+from xpst.media.specs import (
+    MODALITY_CHECK,
+    PLATFORM_SPECS,
+    Check,
+    MediaReport,
+    verify_media,
+)
+from xpst.utils.logger import get_logger
+from xpst.utils.quota import QuotaManager
+from xpst.utils.video import VideoProcessor
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+logger = get_logger(__name__)
+
+_SUPPORTED_PLATFORMS = tuple(PLATFORM_SPECS)
+# Caption limits come from ``xpst.content.text_limit`` — the same table the
+# senders read — so a caption over a destination's real limit (X at 280,
+# Instagram/TikTok at 2200, Threads at 500) is a named preflight blocker instead
+# of being truncated silently inside the uploader.  ``_plan_platform`` reads it
+# directly; there is deliberately no second table here, because a copy the gate
+# never reads would let a test pin a number nothing enforces
+# (``tests/test_per_destination_overrides.py`` pins the enforced table against
+# each uploader's own declaration).
+
+# ── Canonical zero-destination guard ───────────────────────────────────────
+# A post with no destination uploads nothing, yet every surface used to report
+# it as a completed run: ``xpst run`` printed "No new videos to post" and exited
+# 0, ``xpst post`` exited 0, and ``xpst_run`` returned a hard-coded ok. The
+# refusal is therefore stated ONCE, here, and consumed by the CLI, the MCP
+# server, the HTTP API and the desktop UI so no two surfaces can word it
+# (or classify it) differently.
+NO_DESTINATIONS_CODE = "NO_DESTINATIONS"
+NO_DESTINATIONS_MESSAGE = "Choose at least one destination platform."
+
+# Canonical destination order for "all configured platforms". Matches the
+# engine's registration order so a UI list and a CLI resolution never differ —
+# including ``facebook``, which the engine registers as a destination when
+# ``accounts.facebook.enabled`` is true. Omitting it here meant `xpst post` with
+# no ``-p`` never targeted a configured Page at all (card t_95928695 D4).
+DESTINATION_ORDER = ("youtube", "x", "instagram", "tiktok", "threads", "facebook")
+
+
+def destinations_blocker(target_platforms: Sequence[str] | None) -> PreflightIssue | None:
+    """Return the canonical no-destination blocker, or ``None`` when one exists.
+
+    Blank entries are not destinations. ``--platforms ","`` parses to two empty
+    names and the engine silently skips any name it has no uploader for, which
+    is exactly the empty run this refuses.
+    """
+    for platform in target_platforms or ():
+        if str(platform).strip():
+            return None
+    return PreflightIssue(NO_DESTINATIONS_CODE, NO_DESTINATIONS_MESSAGE, "blocker")
+
+
+def enabled_destinations(config: XPSTConfig) -> list[str]:
+    """Every platform enabled as a posting destination in local configuration."""
+    return [
+        name
+        for name in DESTINATION_ORDER
+        if bool(getattr(getattr(config, name, None), "enabled", False))
+    ]
+
+
+#: Human-readable reason a destination that is *requested* is switched off in
+#: configuration. A disabled destination cannot publish anything, so it is a
+#: hard blocker for any run (live or planned) that names it — see
+#: :meth:`PostPreflightService._plan_platform`.
+_DISABLED_DESTINATION_HINT = (
+    "Enable it with `xpst connect {platform}` or remove it from --platforms."
+)
+
+
+def platform_disabled_blocker(platform: str) -> PreflightIssue:
+    """The canonical blocker for a destination the config has switched off.
+
+    One place owns the code, the sentence, and the hint, so the planner, the
+    CLI dry-run, and any future surface refuse a disabled destination with
+    identical words (the same reason ``NO_DESTINATIONS`` is shared).
+    """
+    return PreflightIssue(
+        "PLATFORM_DISABLED",
+        f"{platform} is disabled in local configuration — nothing would be "
+        f"published there. {_DISABLED_DESTINATION_HINT.format(platform=platform)}",
+        "blocker",
+    )
+
+
+def resolve_destinations(
+    config: XPSTConfig,
+    requested: Sequence[str] | None = None,
+    *,
+    content_type: str | None = None,
+    all_connected: bool = False,
+) -> list[str]:
+    """Resolve the destination list a post will run against.
+
+    An explicit request wins (normalized, deduped, request order preserved) —
+    including destinations that are not connected, which the plan reports as
+    ``skipped_unconnected`` rather than dropping. Otherwise the set is
+    ``format route ∩ connected accounts`` (R3): a destination is never added
+    because it is merely configured if it cannot take this format, and ``--all``
+    (``all_connected=True``) is the explicit "every connected account that
+    accepts this format" request.
+
+    Resolution lives in :mod:`xpst.services.route_plan` so the CLI, MCP, HTTP
+    and scheduler share one answer; this function is the compatibility name.
+    """
+    from xpst.services.route_plan import resolve_targets
+
+    return list(
+        resolve_targets(
+            config,
+            requested,
+            all_connected=all_connected,
+            content_type=content_type,
+        ).targets
+    )
+
+#: Content types that carry no media, so "at least one media path is required"
+#: does not apply to them.
+_MEDIA_LESS_CONTENT_TYPES = frozenset({ContentType.TEXT, ContentType.THREAD})
+
+
+def content_needs_media(content_type: str | None) -> bool:
+    """Whether a content type requires media (the pre-contract default: yes).
+
+    An unrecognized or absent value keeps the legacy behaviour — a plan without
+    a file is blocked — so a typo can never turn into a media-less post.
+    """
+    if not content_type:
+        return True
+    try:
+        return coerce_content_type(content_type) not in _MEDIA_LESS_CONTENT_TYPES
+    except UnknownContentTypeError:
+        return True
+
+
+def plan_content_type(request: ContentRequest) -> str | None:
+    """The content type an execution plan should hold ``request`` to, or ``None``.
+
+    Only a type the request actually states counts. A plan may not infer a
+    media-less type from a missing media list: the legacy shape (a caption and no
+    file, nothing stated) is missing its media, and diagnosing it as a refused
+    text post names the wrong problem — and hides the one it has. Surfaces that
+    accept a text body turn it into an explicit ``text`` request first
+    (:meth:`ContentRequest.from_payload`), so the media requirement is lifted only
+    when a body is really there to publish.
+    """
+    return request.effective_content_type.value if request.is_explicit_content_type else None
+
+
+@dataclass(frozen=True)
+class PreflightIssue:
+    """A stable, machine-readable warning or hard blocker."""
+
+    code: str
+    message: str
+    severity: str
+    media_path: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "severity": self.severity,
+            "media_path": self.media_path,
+        }
+
+
+@dataclass(frozen=True)
+class AuthReadiness:
+    """Local-only authentication readiness; no health endpoint is contacted."""
+
+    ready: bool
+    status: str
+    detail: str
+    auth_mode: str = "unknown"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ready": self.ready,
+            "status": self.status,
+            "detail": self.detail,
+            "auth_mode": self.auth_mode,
+        }
+
+
+@dataclass(frozen=True)
+class QuotaReadiness:
+    """Read-only quota snapshot for a target platform."""
+
+    ready: bool
+    remaining: dict[str, int | None]
+    detail: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ready": self.ready,
+            "remaining": self.remaining,
+            "detail": self.detail,
+        }
+
+
+@dataclass(frozen=True)
+class PlatformReadiness:
+    """Enabled, auth, and quota gates for one target."""
+
+    enabled: bool
+    auth: AuthReadiness
+    quota: QuotaReadiness
+
+    @property
+    def ready(self) -> bool:
+        return self.enabled and self.auth.ready and self.quota.ready
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "auth": self.auth.to_dict(),
+            "quota": self.quota.to_dict(),
+            "ready": self.ready,
+        }
+
+
+@dataclass(frozen=True)
+class PostPlanRequest:
+    """Input accepted by :class:`PostPreflightService`.
+
+    Values are normalized at construction time, but caption values are never
+    trimmed or otherwise changed.  That makes the selected caption safe to
+    display and send verbatim after a later execution step.
+    """
+
+    media_paths: Sequence[Path | str]
+    target_platforms: Sequence[str]
+    base_caption: str = ""
+    per_platform_captions: Mapping[str, str] = field(default_factory=dict)
+    platform_captions: Mapping[str, str] | None = None
+    captions: Mapping[str, str] | None = None
+    #: What the caller is posting, in the canonical vocabulary. ``text`` (and
+    #: ``thread``) carry no media, so the media requirement does not apply to
+    #: them; every other value keeps the legacy "a file is required" rule.
+    content_type: str | None = None
+    #: Upload-time visibility the caller asked for (``public`` / ``unlisted`` /
+    #: ``private``), or ``None`` when nothing was asked. A destination whose
+    #: route cannot honour it is a hard blocker (:data:`VISIBILITY_UNAVAILABLE`)
+    #: — never a silent public post — and a destination with no such mode at all
+    #: carries the advisory warning instead. Both come from
+    #: :mod:`xpst.visibility`, the one registry every surface reads.
+    visibility: str | None = None
+    config: XPSTConfig | None = None
+    include_transform: bool = True
+    include_readiness: bool = True
+    check_loudness: bool = True
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "media_paths", tuple(self.media_paths))
+        if self.content_type is not None:
+            object.__setattr__(self, "content_type", str(self.content_type).strip().lower() or None)
+        normalized = tuple(dict.fromkeys(str(platform).strip().lower() for platform in self.target_platforms))
+        object.__setattr__(self, "target_platforms", normalized)
+        caption_overrides: dict[str, str] = {}
+        for mapping in (self.captions, self.platform_captions, self.per_platform_captions):
+            if mapping:
+                caption_overrides.update(
+                    {str(platform).strip().lower(): caption for platform, caption in mapping.items()}
+                )
+        object.__setattr__(self, "per_platform_captions", caption_overrides)
+
+
+@dataclass
+class MediaFilePlan:
+    """Local file facts, probe/spec results, and transform decision."""
+
+    path: str
+    file_type: str
+    exists: bool | None
+    is_file: bool | None
+    size_bytes: int | None
+    ffprobe: dict[str, Any] | None
+    media_spec: dict[str, Any]
+    duration_seconds: float | None
+    aspect_ratio: float | None
+    transform: TransformPlan | None
+    warnings: tuple[PreflightIssue, ...] = ()
+    hard_blockers: tuple[PreflightIssue, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return not self.hard_blockers
+
+    @property
+    def file_exists(self) -> bool | None:
+        """Compatibility spelling for clients that prefer an explicit name."""
+        return self.exists
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "path": self.path,
+            "file_type": self.file_type,
+            "exists": self.exists,
+            "file_exists": self.file_exists,
+            "is_file": self.is_file,
+            "size_bytes": self.size_bytes,
+            "ffprobe": self.ffprobe,
+            "media_spec": self.media_spec,
+            "duration_seconds": self.duration_seconds,
+            "aspect_ratio": self.aspect_ratio,
+            "transform": self.transform.to_dict() if self.transform else None,
+            "warnings": [issue.to_dict() for issue in self.warnings],
+            "hard_blockers": [issue.to_dict() for issue in self.hard_blockers],
+            "ok": self.ok,
+        }
+
+
+@dataclass
+class PlatformPlan:
+    """Normalized plan for one requested destination platform."""
+
+    platform: str
+    effective_caption: str
+    media: tuple[MediaFilePlan, ...]
+    constraints: dict[str, Any]
+    readiness: PlatformReadiness
+    warnings: tuple[PreflightIssue, ...] = ()
+    hard_blockers: tuple[PreflightIssue, ...] = ()
+
+    @property
+    def caption(self) -> str:
+        """Compatibility alias for clients that call the caption ``caption``."""
+        return self.effective_caption
+
+    @property
+    def ready(self) -> bool:
+        return not self.hard_blockers and self.readiness.ready
+
+    @property
+    def enabled(self) -> bool:
+        return self.readiness.enabled
+
+    @property
+    def auth_ready(self) -> bool:
+        return self.readiness.auth.ready
+
+    @property
+    def quota_ready(self) -> bool:
+        return self.readiness.quota.ready
+
+    @property
+    def ok(self) -> bool:
+        return self.ready
+
+    @property
+    def transform(self) -> TransformPlan | None:
+        """Return the single-media transform for convenient client access."""
+        return self.media[0].transform if len(self.media) == 1 else None
+
+    @property
+    def transforms(self) -> tuple[TransformPlan, ...]:
+        return tuple(item.transform for item in self.media if item.transform is not None)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "platform": self.platform,
+            "effective_caption": self.effective_caption,
+            "caption": self.effective_caption,
+            "media": [item.to_dict() for item in self.media],
+            "transform": self.transform.to_dict() if self.transform else None,
+            "transforms": [transform.to_dict() for transform in self.transforms],
+            "constraints": self.constraints,
+            "readiness": self.readiness.to_dict(),
+            "enabled": self.enabled,
+            "auth_ready": self.auth_ready,
+            "quota_ready": self.quota_ready,
+            "warnings": [issue.to_dict() for issue in self.warnings],
+            "hard_blockers": [issue.to_dict() for issue in self.hard_blockers],
+            "ready": self.ready,
+            "ok": self.ok,
+        }
+
+
+@dataclass
+class PostPlanResult:
+    """Complete normalized post plan, preserving requested platform order.
+
+    ``request_blockers`` holds refusals about the *request shape* itself — the
+    zero-destination case today. They cannot live on a per-platform plan because
+    an empty target list produces no platforms at all, and an empty plan used to
+    report ``ready: true`` (``all()`` over nothing), which is how a
+    zero-destination run looked successful.
+    """
+
+    platforms: dict[str, PlatformPlan]
+    request_blockers: tuple[PreflightIssue, ...] = ()
+
+    @property
+    def plans(self) -> dict[str, PlatformPlan]:
+        """Alias used by clients that call the per-platform map ``plans``."""
+        return self.platforms
+
+    @property
+    def ready(self) -> bool:
+        return not self.request_blockers and all(plan.ready for plan in self.platforms.values())
+
+    @property
+    def ok(self) -> bool:
+        return self.ready
+
+    @property
+    def hard_blockers(self) -> tuple[PreflightIssue, ...]:
+        return tuple(self.request_blockers) + tuple(
+            issue for plan in self.platforms.values() for issue in plan.hard_blockers
+        )
+
+    @property
+    def warnings(self) -> tuple[PreflightIssue, ...]:
+        return tuple(issue for plan in self.platforms.values() for issue in plan.warnings)
+
+    @property
+    def error(self) -> dict[str, Any] | None:
+        """The first hard blocker as a stable ``{code, message}`` error object.
+
+        Every surface returns this same object for the same refusal, so a
+        script, an agent and the desktop UI all branch on one code.
+        """
+        blockers = self.hard_blockers
+        if not blockers:
+            return None
+        return {"code": blockers[0].code, "message": blockers[0].message}
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "ready": self.ready,
+            "platforms": {name: plan.to_dict() for name, plan in self.platforms.items()},
+            "hard_blockers": [issue.to_dict() for issue in self.hard_blockers],
+            "warnings": [issue.to_dict() for issue in self.warnings],
+            "request_blockers": [issue.to_dict() for issue in self.request_blockers],
+            "error": self.error,
+        }
+
+    def to_json(self) -> str:
+        """Serialize deterministically for CLI/UI/MCP snapshots and caching."""
+        return json.dumps(self.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+class AuthReadinessProvider(Protocol):
+    """Optional injected local auth readiness service."""
+
+    def check(self, platform: str, config: XPSTConfig) -> AuthReadiness:
+        ...
+
+
+class PostPreflightService:
+    """Build post plans without invoking any upload or mutation path."""
+
+    def __init__(
+        self,
+        config: XPSTConfig | None = None,
+        *,
+        video_processor: Any | None = None,
+        quota_manager: Any | None = None,
+        auth_readiness: AuthReadinessProvider | None = None,
+    ) -> None:
+        self.config = config or XPSTConfig()
+        self.video_processor = video_processor
+        self._quota_manager_injected = quota_manager is not None
+        self.quota_manager = quota_manager or self._readonly_quota_manager(self.config)
+        self.auth_readiness = auth_readiness
+        self._processor_initialized = video_processor is not None
+
+    def plan(self, request: PostPlanRequest) -> PostPlanResult:
+        """Return one complete plan per requested platform.
+
+        Unknown platforms are represented by a hard-blocked plan rather than
+        being dropped.  This is important for deterministic machine clients.
+
+        A request with no destination at all is refused here, once, so every
+        caller of this service — CLI, MCP, HTTP and the desktop UI — inherits
+        the same ``NO_DESTINATIONS`` refusal instead of each deciding for itself
+        (the empty plan used to report ``ready: true``).
+        """
+        config = request.config or self.config
+        quota_manager = self.quota_manager
+        if not self._quota_manager_injected and request.config is not None and request.config is not self.config:
+            quota_manager = self._readonly_quota_manager(config)
+        platforms: dict[str, PlatformPlan] = {}
+        for platform in request.target_platforms:
+            platforms[platform] = self._plan_platform(platform, request, config, quota_manager)
+        blocker = destinations_blocker(request.target_platforms)
+        return PostPlanResult(
+            platforms=platforms,
+            request_blockers=(blocker,) if blocker is not None else (),
+        )
+
+    def _readonly_quota_manager(self, config: XPSTConfig) -> QuotaManager:
+        return QuotaManager(config.config_dir, config=config, persist=False)
+
+    def _plan_platform(
+        self,
+        platform: str,
+        request: PostPlanRequest,
+        config: XPSTConfig,
+        quota_manager: Any,
+    ) -> PlatformPlan:
+        caption = request.per_platform_captions.get(platform, request.base_caption)
+        platform_issues: list[PreflightIssue] = []
+        if platform not in _SUPPORTED_PLATFORMS:
+            platform_issues.append(
+                PreflightIssue(
+                    "UNKNOWN_PLATFORM",
+                    f"No media preflight specification exists for {platform!r}.",
+                    "blocker",
+                )
+            )
+            readiness = self._readiness(platform, config, request.include_readiness, quota_manager)
+            return PlatformPlan(platform, caption, (), {}, readiness, (), tuple(platform_issues))
+
+        readiness = self._readiness(platform, config, request.include_readiness, quota_manager)
+        if request.include_readiness:
+            if not readiness.enabled:
+                platform_issues.append(
+                    PreflightIssue("PLATFORM_DISABLED", f"{platform} is disabled in local configuration.", "blocker")
+                )
+            if not readiness.auth.ready:
+                platform_issues.append(
+                    PreflightIssue("AUTH_NOT_READY", readiness.auth.detail, "blocker")
+                )
+            if not readiness.quota.ready:
+                platform_issues.append(
+                    PreflightIssue("QUOTA_NOT_READY", readiness.quota.detail, "blocker")
+                )
+
+        media_plans: list[MediaFilePlan] = []
+        for raw_path in request.media_paths:
+            media_plan = self._plan_media(raw_path, platform, config, request)
+            media_plans.append(media_plan)
+            platform_issues.extend(media_plan.hard_blockers)
+
+        # Upload-time visibility (xpst.visibility — the one registry): a level the
+        # route that would actually run cannot honour is a REFUSAL, because
+        # publishing anyway is a public post the caller did not ask for. A
+        # destination with no such mode on any route is an advisory: it still
+        # publishes, and the plan says it will be public.
+        platform_warnings: list[PreflightIssue] = []
+        requested_visibility = visibility_module.normalize(request.visibility)
+        if requested_visibility is not None:
+            route = visibility_module.publish_route(
+                config, platform, requested=requested_visibility
+            )
+            refused = visibility_module.refusal(platform, requested_visibility, route=route)
+            if refused is not None:
+                platform_issues.append(
+                    PreflightIssue(
+                        visibility_module.VISIBILITY_UNAVAILABLE_CODE, refused, "blocker"
+                    )
+                )
+            else:
+                note = visibility_module.advisory(platform, requested_visibility, route=route)
+                if note is not None:
+                    platform_warnings.append(
+                        PreflightIssue(
+                            visibility_module.VISIBILITY_UNSUPPORTED_CODE, note, "warning"
+                        )
+                    )
+
+        if not request.media_paths and content_needs_media(request.content_type):
+            platform_issues.append(PreflightIssue("MEDIA_REQUIRED", "At least one media path is required.", "blocker"))
+
+        # One source for the limit: xpst.content.TEXT_LIMITS (the same number the
+        # sender refuses on), so a plan and a publish cannot disagree.
+        limit = text_limit(platform)
+        if limit is not None and len(caption) > limit:
+            platform_issues.append(
+                PreflightIssue(
+                    "CAPTION_TOO_LONG",
+                    f"Caption is {len(caption)} characters; {platform} allows {limit}.",
+                    "blocker",
+                )
+            )
+
+        warnings = tuple(platform_warnings) + tuple(
+            issue for item in media_plans for issue in item.warnings
+        )
+        constraints = self._constraints(platform, media_plans, caption)
+        return PlatformPlan(
+            platform=platform,
+            effective_caption=caption,
+            media=tuple(media_plans),
+            constraints=constraints,
+            readiness=readiness,
+            warnings=warnings,
+            hard_blockers=tuple(platform_issues),
+        )
+
+    def _plan_media(
+        self,
+        raw_path: Path | str,
+        platform: str,
+        config: XPSTConfig,
+        request: PostPlanRequest,
+    ) -> MediaFilePlan:
+        display_path = str(raw_path)
+        if _is_url(display_path):
+            # A URL is only usable by a destination that fetches media itself;
+            # every other uploader needs the bytes and would be handed a string
+            # it cannot open. The answer comes from the destination's declared
+            # media transport, not from a platform name spelled out here.
+            profile = content_profile(platform)
+            if profile is None or profile.media_transport is not MediaTransport.PUBLIC_URL:
+                issue = PreflightIssue(
+                    "REMOTE_MEDIA_UNSUPPORTED",
+                    "Only a local media path is supported for this platform.",
+                    "blocker",
+                    display_path,
+                )
+                return MediaFilePlan(display_path, "remote_url", None, None, None, None, _empty_media_spec(display_path, platform), None, None, None, (), (issue,))
+            warning = PreflightIssue(
+                "MEDIA_REMOTE_NOT_PROBED",
+                "Remote media was not fetched or probed; no network call is made during planning.",
+                "warning",
+                display_path,
+            )
+            return MediaFilePlan(display_path, "remote_url", None, None, None, None, _empty_media_spec(display_path, platform), None, None, None, (warning,), ())
+
+        path = Path(raw_path).expanduser()
+        try:
+            exists = path.exists()
+            is_file = path.is_file() if exists else False
+        except OSError as exc:
+            exists = False
+            is_file = False
+            stat_error = PreflightIssue("MEDIA_STAT_FAILED", f"Could not inspect media path: {exc}", "blocker", display_path)
+            return MediaFilePlan(display_path, "unavailable", exists, is_file, None, None, _empty_media_spec(display_path, platform), None, None, None, (), (stat_error,))
+
+        if not exists:
+            issue = PreflightIssue("MEDIA_NOT_FOUND", f"Media path does not exist: {display_path}", "blocker", display_path)
+            return MediaFilePlan(display_path, "missing", False, False, None, None, _empty_media_spec(display_path, platform), None, None, None, (), (issue,))
+        if not is_file:
+            issue = PreflightIssue("MEDIA_DIRECTORY", f"Media path is not a regular file: {display_path}", "blocker", display_path)
+            return MediaFilePlan(display_path, "directory", True, False, None, None, _empty_media_spec(display_path, platform), None, None, None, (), (issue,))
+
+        size_bytes = path.stat().st_size
+        if size_bytes == 0:
+            issue = PreflightIssue("MEDIA_EMPTY", f"Media file is empty: {display_path}", "blocker", display_path)
+            return MediaFilePlan(display_path, "file", True, True, size_bytes, None, _empty_media_spec(display_path, platform), None, None, None, (), (issue,))
+
+        warnings: list[PreflightIssue] = []
+        blockers: list[PreflightIssue] = []
+        report = verify_media(path, platform, check_loudness=request.check_loudness)
+        for check in report.checks:
+            issue = self._issue_from_check(check, display_path)
+            if issue is None:
+                continue
+            if check.status == "error":
+                blockers.append(issue)
+            elif check.status == "warn":
+                warnings.append(issue)
+
+        # A destination that cannot publish this file's modality at all is
+        # already fully explained by the one modality blocker: do not stack a
+        # second, unrelated blocker on top (the user cannot act on "Threads
+        # needs a public URL" for a file Threads would refuse anyway).
+        modality_blocked = any(check.name == MODALITY_CHECK and check.status == "error" for check in report.checks)
+
+        # The media-transport verdict comes from the destination's own profile
+        # (xpst.content) — the same declaration the engine's request validation
+        # and the uploader read — so the plan can never promise a local file a
+        # destination would then refuse, and no network call is made to find out.
+        if not modality_blocked:
+            transport_issue = media_transport_blocker(platform, [display_path])
+            if transport_issue is not None:
+                blockers.append(
+                    PreflightIssue(
+                        transport_issue.code,
+                        transport_issue.message,
+                        "blocker",
+                        display_path,
+                    )
+                )
+
+        duration, aspect_ratio = _probe_dimensions(report)
+        transform = None
+        if request.include_transform and not modality_blocked:
+            transform = self._transform(path, platform, config)
+
+        return MediaFilePlan(
+            path=display_path,
+            file_type="file",
+            exists=True,
+            is_file=True,
+            size_bytes=size_bytes,
+            ffprobe=report.probe,
+            media_spec=report.to_dict(include_probe=True),
+            duration_seconds=duration,
+            aspect_ratio=aspect_ratio,
+            transform=transform,
+            warnings=tuple(warnings),
+            hard_blockers=tuple(blockers),
+        )
+
+    @staticmethod
+    def _issue_from_check(check: Check, media_path: str) -> PreflightIssue | None:
+        if check.status == "error":
+            code = f"MEDIA_SPEC_{check.name.upper()}"
+            severity = "blocker"
+        elif check.status == "warn":
+            code = "MEDIA_PROBE_FAILED" if check.name == "probe" else f"MEDIA_SPEC_{check.name.upper()}"
+            severity = "warning"
+        else:
+            return None
+        # The modality check carries its own plain-language, destination-naming
+        # message (specs.modality_unsupported_message) and is a capability
+        # verdict, not a spec comparison — give it a dedicated code so a client
+        # can branch on "this destination cannot take this file type" without
+        # parsing prose. It is the only media issue raised for such a file.
+        if check.name == MODALITY_CHECK:
+            return PreflightIssue("MEDIA_MODALITY_UNSUPPORTED", check.detail, "blocker", media_path)
+        return PreflightIssue(code, check.detail, severity, media_path)
+
+    def _transform(self, path: Path, platform: str, config: XPSTConfig) -> TransformPlan:
+        processor = self._get_processor()
+        encoding = _encoding_config(config, platform)
+        if processor is None:
+            plan = TransformPlan(platform=platform, action="transcode")
+            plan.reasons.append("ffmpeg unavailable — compliance not verified")
+            return plan
+        return plan_transform(path, platform, encoding, processor)
+
+    def _get_processor(self) -> Any | None:
+        if self._processor_initialized:
+            return self.video_processor
+        self._processor_initialized = True
+        try:
+            self.video_processor = VideoProcessor()
+        except Exception:
+            self.video_processor = None
+        return self.video_processor
+
+    def _readiness(
+        self,
+        platform: str,
+        config: XPSTConfig,
+        enabled: bool,
+        quota_manager: Any,
+    ) -> PlatformReadiness:
+        if not enabled:
+            return PlatformReadiness(True, AuthReadiness(True, "unchecked", "Readiness checks disabled."), QuotaReadiness(True, {"daily": None, "hourly": None}, "Readiness checks disabled."))
+
+        account = getattr(config, platform, None)
+        is_enabled = bool(account is not None and getattr(account, "enabled", False))
+        auth = self._auth(platform, config)
+        remaining: dict[str, int | None] = {"daily": None, "hourly": None}
+        quota_ready = True
+        quota_detail = "No quota limit is configured."
+        if quota_manager is not None and platform in _SUPPORTED_PLATFORMS:
+            try:
+                peek_can_upload = getattr(quota_manager, "peek_can_upload", None)
+                peek_remaining = getattr(quota_manager, "peek_remaining", None)
+                can_upload = bool(
+                    peek_can_upload(platform)
+                    if callable(peek_can_upload)
+                    else quota_manager.can_upload(platform)
+                )
+                raw_remaining: Any = (
+                    peek_remaining(platform)
+                    if callable(peek_remaining)
+                    else quota_manager.get_remaining(platform)
+                )
+                remaining = {
+                    "daily": raw_remaining.get("daily"),
+                    "hourly": raw_remaining.get("hourly"),
+                }
+                quota_ready = can_upload and all(value is None or value > 0 for value in remaining.values())
+                quota_detail = "Quota available." if quota_ready else f"Quota exhausted: {remaining}."
+            except Exception as exc:  # noqa: BLE001 - readiness must be reportable
+                quota_ready = False
+                quota_detail = f"Quota readiness unavailable: {exc}"
+        return PlatformReadiness(is_enabled, auth, QuotaReadiness(quota_ready, remaining, quota_detail))
+
+    def _auth(self, platform: str, config: XPSTConfig) -> AuthReadiness:
+        if self.auth_readiness is not None:
+            return self.auth_readiness.check(platform, config)
+        return _local_auth_readiness(platform, config)
+
+    @staticmethod
+    def _constraints(platform: str, media: Sequence[MediaFilePlan], caption: str) -> dict[str, Any]:
+        spec = PLATFORM_SPECS[platform]
+        observed_duration = next((item.duration_seconds for item in media if item.duration_seconds is not None), None)
+        observed_aspect = next((item.aspect_ratio for item in media if item.aspect_ratio is not None), None)
+        observed_size = next((item.size_bytes for item in media if item.size_bytes is not None), None)
+        return {
+            "duration": {
+                "observed_seconds": observed_duration,
+                "max_seconds": spec.duration_cap_s,
+            },
+            "aspect": {
+                "observed_ratio": observed_aspect,
+                "constraint": "orientation-preserving; no fixed aspect ratio",
+                "max_long_edge": spec.long_edge,
+            },
+            "size": {
+                "observed_bytes": observed_size,
+                "max_bytes": spec.file_size_cap_mb * 1024 * 1024 if spec.file_size_cap_mb is not None else None,
+            },
+            "containers": list(spec.containers),
+            "caption": {
+                "observed_characters": len(caption),
+                "max_characters": text_limit(platform),
+            },
+        }
+
+
+def build_post_plan(
+    media_paths: Sequence[Path | str],
+    target_platforms: Sequence[str],
+    *,
+    base_caption: str = "",
+    per_platform_captions: Mapping[str, str] | None = None,
+    config: XPSTConfig | None = None,
+    **options: Any,
+) -> PostPlanResult:
+    """Functional facade for CLI/UI/MCP clients that do not need a class."""
+    request = PostPlanRequest(
+        media_paths=media_paths,
+        target_platforms=target_platforms,
+        base_caption=base_caption,
+        per_platform_captions=per_platform_captions or {},
+        config=config,
+        **options,
+    )
+    return PostPreflightService(config).plan(request)
+
+
+def _is_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _empty_media_spec(path: str, platform: str) -> dict[str, Any]:
+    """Keep the media-spec shape stable when probing is not possible."""
+    return {"path": path, "platform": platform, "ok": False, "checks": [], "probe": None}
+
+
+def _probe_dimensions(report: MediaReport) -> tuple[float | None, float | None]:
+    if not report.probe:
+        return None, None
+    fmt = report.probe.get("format", {})
+    try:
+        duration = float(fmt.get("duration")) if fmt.get("duration") is not None else None
+    except (TypeError, ValueError):
+        duration = None
+    video = next((stream for stream in report.probe.get("streams", []) if stream.get("codec_type") == "video"), None)
+    if not video:
+        return duration, None
+    try:
+        width = float(video.get("width"))
+        height = float(video.get("height"))
+        aspect = width / height if width > 0 and height > 0 else None
+    except (TypeError, ValueError, ZeroDivisionError):
+        aspect = None
+    return duration, aspect
+
+
+def _encoding_config(config: XPSTConfig, platform: str) -> EncodingConfig:
+    profile = "instagram" if platform == "threads" else platform
+    encoding = getattr(config.video, f"encoding_{profile}", None)
+    if encoding is None:
+        return EncodingConfig()
+    return encoding
+
+
+def _local_auth_readiness(platform: str, config: XPSTConfig) -> AuthReadiness:
+    account = getattr(config, platform, None)
+    if account is None:
+        return AuthReadiness(False, "unsupported", f"No local auth configuration exists for {platform}.")
+
+    if platform == "youtube":
+        ready = bool(account.token_file and Path(account.token_file).expanduser().is_file())
+        return AuthReadiness(ready, "ready" if ready else "missing", "YouTube token file exists." if ready else "YouTube OAuth token file is missing.", "oauth")
+    if platform == "x":
+        if account.auth_mode == "api_v2":
+            ready = bool(account.access_token)
+            detail = "X API access token is configured." if ready else "X API access token is missing."
+            return AuthReadiness(ready, "ready" if ready else "missing", detail, "oauth")
+        ready = bool(account.cookies_file and Path(account.cookies_file).expanduser().is_file())
+        return AuthReadiness(ready, "ready" if ready else "missing", "X cookie file exists." if ready else "X cookie file is missing.", "cookies")
+    if platform == "instagram":
+        if account.auth_mode == "graph_api":
+            ready = bool(account.graph_access_token and account.graph_ig_user_id)
+            detail = "Instagram Graph credentials are configured." if ready else "Instagram Graph credentials are missing."
+            return AuthReadiness(ready, "ready" if ready else "missing", detail, "oauth")
+        ready = bool(account.session_file and Path(account.session_file).expanduser().is_file())
+        return AuthReadiness(ready, "ready" if ready else "missing", "Instagram session file exists." if ready else "Instagram session file is missing.", "session")
+    if platform == "tiktok":
+        return _tiktok_auth_readiness(account, config)
+    if platform == "threads":
+        ready = bool(account.graph_access_token and account.threads_user_id)
+        detail = "Threads credentials are configured." if ready else "Threads access token and user ID are missing."
+        return AuthReadiness(ready, "ready" if ready else "missing", detail, "oauth")
+    if platform == "facebook":
+        return _facebook_auth_readiness(account, config)
+    if platform == "bluesky":
+        return _bluesky_auth_readiness(account, config)
+    if platform == "rumble":
+        # Rumble needs no credential for the honest path: without an API key the
+        # adapter exports the rendition for a manual handoff and says so. A key
+        # only upgrades that to the partner upload API, so "no key" is ready,
+        # not missing.
+        has_key = bool(getattr(account, "api_key", ""))
+        return AuthReadiness(
+            True,
+            "ready",
+            "Rumble partner API key is configured."
+            if has_key
+            else "No Rumble API key: posting uses the manual handoff (rendition + upload link).",
+            "api_key" if has_key else "manual_handoff",
+        )
+    return AuthReadiness(False, "unsupported", f"No local auth readiness rule exists for {platform}.")
+
+
+def _tiktok_auth_readiness(account: Any, config: XPSTConfig) -> AuthReadiness:
+    """TikTok readiness for the route the config actually publishes through.
+
+    ``publish_mode: browser`` (or ``browser_only``) never touches the Content
+    Posting API: ``TikTokUploader.upload`` dispatches to the browser publisher
+    and the credential is the stored web session (an exported cookie jar and/or
+    the persisted browser profile). Demanding ``access_token`` on that route was
+    a false blocker — a post that publishes fine was planned as ``ready: false``
+    with "TikTok access token is missing." (card t_95928695 D3).
+
+    The session locations come from the uploader itself, so the check cannot
+    drift from where the publisher looks.
+    """
+    mode = str(getattr(account, "publish_mode", "auto") or "auto").lower()
+    if mode not in ("browser", "browser_only"):
+        ready = bool(account.access_token)
+        return AuthReadiness(
+            ready,
+            "ready" if ready else "missing",
+            "TikTok access token is configured." if ready else "TikTok access token is missing.",
+            "oauth",
+        )
+
+    from xpst.platforms.tiktok import TikTokUploader
+
+    uploader = TikTokUploader(config)
+    jar = uploader._tiktok_cookie_jar_path()
+    profile = uploader._browser_profile_dir()
+    profile_has_session = False
+    try:
+        profile_has_session = profile.is_dir() and any(profile.iterdir())
+    except OSError:  # an unreadable profile is "no usable session", not a crash
+        profile_has_session = False
+
+    if jar is not None:
+        return AuthReadiness(
+            True,
+            "ready",
+            f"TikTok publishes through the browser (publish_mode: {mode}); "
+            f"the web session cookie jar exists at {jar}.",
+            "session",
+        )
+    if profile_has_session:
+        return AuthReadiness(
+            True,
+            "ready",
+            f"TikTok publishes through the browser (publish_mode: {mode}); "
+            f"a persisted browser profile exists at {profile}.",
+            "session",
+        )
+    return AuthReadiness(
+        False,
+        "missing",
+        f"TikTok publishes through the browser (publish_mode: {mode}) but no stored "
+        f"web session was found (looked for {profile} and a tiktok_cookies.txt jar). "
+        f"Run `xpst auth tiktok`.",
+        "session",
+    )
+
+
+def _facebook_auth_readiness(account: Any, config: XPSTConfig) -> AuthReadiness:
+    """Facebook Page readiness: a Page id plus that Page's access token.
+
+    ``xpst auth facebook`` keeps both halves in the encrypted credential store
+    (``FACEBOOK_CRED_KEYS``), so a config field alone is not proof of *absence*:
+    read the local store too (no network, no write). This is the rule that was
+    missing entirely — the planner fell through to ``unsupported`` for a
+    destination the engine publishes to (card t_95928695 D4).
+    """
+    page_id = str(getattr(account, "page_id", "") or "")
+    token = str(getattr(account, "page_access_token", "") or "")
+    if not (page_id and token):
+        creds_dir = Path(str(config.config_dir)).expanduser() / "credentials"
+        if creds_dir.is_dir():
+            try:
+                from xpst.platforms.facebook import FACEBOOK_CRED_KEYS
+                from xpst.utils.credentials import CredentialStore
+
+                store = CredentialStore(config.config_dir)
+                page_id = page_id or str(store.retrieve(FACEBOOK_CRED_KEYS["page_id"]) or "")
+                token = token or str(store.retrieve(FACEBOOK_CRED_KEYS["page_access_token"]) or "")
+            except Exception as exc:  # noqa: BLE001 - readiness must stay reportable
+                logger.debug("Facebook credential store read failed: %s", exc)
+    ready = bool(page_id and token)
+    return AuthReadiness(
+        ready,
+        "ready" if ready else "missing",
+        (
+            f"Facebook Page {page_id} credentials are configured."
+            if ready
+            else "Facebook Page credentials are missing (Page id and Page access token) — "
+            "run `xpst auth facebook`."
+        ),
+        "oauth",
+    )
+
+
+def _bluesky_auth_readiness(account: Any, config: XPSTConfig) -> AuthReadiness:
+    """Bluesky readiness: a handle plus an app password/session in the store.
+
+    Both halves normally live encrypted in the credential store
+    (``bluesky_identifier`` / ``bluesky_app_password``), so a config field alone
+    is not proof of *absence* — read the local store too (no network, no write).
+    A handle with no stored password is reported as missing with the connect
+    command named, never as "unsupported": the planner must agree with the
+    uploader about whether this destination can publish.
+    """
+    from xpst.platforms.bluesky import CRED_APP_PASSWORD, CRED_IDENTIFIER, CRED_SESSION
+    from xpst.utils.credentials import CredentialStore
+
+    identifier = str(getattr(account, "identifier", "") or "")
+    password = ""
+    session_present = False
+    try:
+        store = CredentialStore(str(config.config_dir))
+        identifier = identifier or str(store.retrieve(CRED_IDENTIFIER) or "")
+        password = str(store.retrieve(CRED_APP_PASSWORD) or "")
+        session_present = isinstance(store.retrieve_json(CRED_SESSION), dict)
+    except Exception as exc:  # noqa: BLE001 - readiness must stay reportable
+        logger.debug("Bluesky credential store read failed: %s", exc)
+    ready = bool(identifier and (password or session_present))
+    return AuthReadiness(
+        ready,
+        "ready" if ready else "missing",
+        (
+            f"Bluesky account {identifier} has a stored app password or session."
+            if ready
+            else "Bluesky credentials are missing (handle and app password) — run "
+            "`xpst auth bluesky`."
+        ),
+        "app_password",
+    )
+
+
+def local_auth_readiness(platform: str, config: XPSTConfig) -> AuthReadiness:
+    """Public, network-free auth readiness for one platform.
+
+    The same rule the canonical planner applies, exposed so callers that only
+    need the local verdict (draft validation stamps, staleness diffs) never have
+    to re-implement it — or reach into the private helper.
+    """
+    return _local_auth_readiness(platform, config)
+
+
+__all__ = [
+    "AuthReadiness",
+    "AuthReadinessProvider",
+    "MediaFilePlan",
+    "PlatformPlan",
+    "PlatformReadiness",
+    "PostPlanRequest",
+    "PostPlanResult",
+    "PostPreflightService",
+    "PreflightIssue",
+    "QuotaReadiness",
+    "build_post_plan",
+    "local_auth_readiness",
+]

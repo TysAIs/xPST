@@ -1,0 +1,1160 @@
+[
+  {
+    "name": "xpst_run",
+    "description": "Check for new videos and cross-post them to configured platforms. A batch where nothing was published is never reported as success: `batch_status` says `published` / `partial` / `failed` / `nothing_to_do`, `exit_code` is the status the CLI would exit with, and `failed_destinations` names every destination that failed.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "type": "boolean",
+          "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set",
+          "default": false
+        },
+        "max_posts": {
+          "type": "integer",
+          "description": "Maximum number of posts per cycle",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 50
+        },
+        "source": {
+          "type": "string",
+          "description": "Source to fetch from",
+          "default": "tiktok",
+          "enum": [
+            "instagram",
+            "local",
+            "tiktok",
+            "x",
+            "youtube"
+          ]
+        },
+        "catch_up": {
+          "type": "boolean",
+          "description": "Fetch extra videos for catch-up mode",
+          "default": false
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Show what would happen without uploading",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_post",
+    "description": "Post to platforms: one local video/image file, a carousel (carousel_paths), or a text post. `content_type` states what the post is in the canonical vocabulary (video/image/carousel/text/thread); a type a chosen destination cannot publish is refused with an explicit blocker BEFORE anything is uploaded, and the refusal is never reported as a success. `overrides` writes a different caption per destination (e.g. {\"x\": {\"text\": \"short copy\"}}); destinations without one use `caption`. Call `xpst_capabilities` to see what each destination can actually publish.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "type": "boolean",
+          "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set",
+          "default": false
+        },
+        "video_path": {
+          "type": "string",
+          "description": "Path to the video/image file (or the first item for a carousel); omit for a text post"
+        },
+        "content_type": {
+          "type": "string",
+          "enum": [
+            "video",
+            "image",
+            "carousel",
+            "text",
+            "thread"
+          ],
+          "description": "What this post is (canonical vocabulary). Defaults to what the media implies: one file = video, several = carousel. A text post needs `content_type: text` and no media; destinations with no text path refuse it."
+        },
+        "caption": {
+          "type": "string",
+          "description": "Caption for the post (the default for every destination without an override; the text itself for a text post)"
+        },
+        "text": {
+          "type": "string",
+          "description": "Text of a text-only post (no media). Same body as `caption`; passing `text` with `content_type: text` (or on its own) publishes a text post. Destinations with no text path refuse it."
+        },
+        "overrides": {
+          "type": "object",
+          "description": "Per-destination caption overrides: {\"x\": \"short copy\"} or {\"x\": {\"text\": \"short copy\"}}. A destination not listed keeps caption. An override over that destination's own limit is refused in preflight, naming the destination.",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "object"
+            ]
+          }
+        },
+        "platforms": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "bluesky",
+              "facebook",
+              "instagram",
+              "rumble",
+              "threads",
+              "tiktok",
+              "x",
+              "youtube"
+            ]
+          },
+          "description": "Explicit target platforms. Omit (and omit `all`) to use the format route ∩ connected accounts — never an implied 'all'."
+        },
+        "all": {
+          "type": "boolean",
+          "description": "Explicitly post to every connected account that accepts this format. Never implied.",
+          "default": false
+        },
+        "carousel_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional image/video paths for carousel"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Show what would happen without uploading",
+          "default": false
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Post immediately even outside the anti-bot posting window (8am-11pm). Without it, a media post fired outside the window is queued to the schedule store and reported as deferred (not failed).",
+          "default": false
+        },
+        "video_mode": {
+          "type": "string",
+          "enum": [
+            "shorts",
+            "long"
+          ],
+          "description": "Publish a video as short-form or long-form. Defaults to deriving it from the media probe (shorts: <=60s and square-or-vertical; long: >=180s or landscape); an ambiguous video is refused rather than guessed. YouTube honours it (Shorts vs long-form upload)."
+        }
+      },
+      "required": [
+        "caption"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_analytics",
+    "description": "Per-post and per-platform engagement metrics (views, likes, comments, shares) with persisted snapshot history. live=false reads the local snapshot store only (fast, offline); live=true refreshes from the platform APIs first. Every platform reports collection_status (ok/partial/failed/unavailable/unknown) with its error: a failed collection is labelled, never returned as a silent zero.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "description": "Limit to one platform",
+          "enum": [
+            "bluesky",
+            "facebook",
+            "instagram",
+            "rumble",
+            "threads",
+            "tiktok",
+            "x",
+            "youtube",
+            "tiktok"
+          ]
+        },
+        "live": {
+          "type": "boolean",
+          "description": "Refresh from platform APIs before reading",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_cross_post_analytics",
+    "description": "Cross-post correlation analytics (B1): one video posted to multiple platforms shown as a single entry with aggregated totals (views, likes, comments, shares) and per-platform breakdown, plus engagement rate and tier (high/medium/low). Reads the local snapshot store only — fast and offline.",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_followers",
+    "description": "Follower counts per platform with growth history. Returns total followers across all platforms, per-platform counts, and recent growth trends from stored snapshots.",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_best_time",
+    "description": "Best time to post per platform, based on engagement history. Analyzes when your posts get the highest engagement and recommends the optimal day-of-week and hour for each platform.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "description": "Optional: filter to a specific platform"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_security_audit",
+    "description": "Run an automated security check on the xPST installation. Verifies credential file permissions, encrypted storage, dashboard localhost binding, MCP readonly mode, FFmpeg availability, and provider mode configuration.",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_suggest_caption",
+    "description": "Generate AI caption suggestions for a video file. Uses the video's transcript to generate 3 caption variants with platform-specific character limits and hashtag suggestions. Falls back to deterministic extraction when no LLM is configured.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "video_path": {
+          "type": "string",
+          "description": "Path to the video file"
+        },
+        "platform": {
+          "type": "string",
+          "description": "Target platform (x, threads, instagram, youtube, tiktok)",
+          "default": "instagram"
+        }
+      },
+      "required": [
+        "video_path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_generate_ideas",
+    "description": "Generate post ideas for a content topic (AI content studio). Uses the KB LLM when configured (XPST_KB_LLM_ENABLED), otherwise falls back to deterministic template generation — no LLM required. Returns up to `count` ideas, each with an 'idea' headline and optional 'hook'.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "topic": {
+          "type": "string",
+          "description": "Content topic to generate ideas around"
+        },
+        "count": {
+          "type": "integer",
+          "description": "Number of ideas to generate (clamped to 1-10)",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 10
+        }
+      },
+      "required": [
+        "topic"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_transcript",
+    "description": "Get the transcript for a video by its content_hash or video_id. Returns the full transcript text and segment timestamps. Transcripts are cached by content_hash so cross-posted videos share the same transcript (D2).",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "video_id": {
+          "type": "string",
+          "description": "Video ID or content_hash to look up"
+        }
+      },
+      "required": [
+        "video_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_search",
+    "description": "Search the knowledge base for nuggets, clips, and topics. Returns matching knowledge nuggets with their source video info and analytics correlation (total views across platforms).",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Max results (default 10)",
+          "default": 10
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_activity",
+    "description": "List recorded platform failures with targeted retry or review actions (read-only)",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_schedule_list",
+    "description": "List scheduled posts (pending, completed, failed) with times and targets",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_schedule_add",
+    "description": "Schedule a post for later: local video file + caption + ISO-8601 time, optional platform list, repeat rule (daily/weekly/monthly), and per-destination caption overrides (honoured when it fires). Omit video_path for a text-only post: caption IS the post, stored as content_type=text and fired through the text route.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "type": "boolean",
+          "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set",
+          "default": false
+        },
+        "video_path": {
+          "type": "string",
+          "description": "Local media file path; omit for a text-only post"
+        },
+        "caption": {
+          "type": "string",
+          "description": "Post caption"
+        },
+        "overrides": {
+          "type": "object",
+          "description": "Per-destination caption overrides, stored with the entry and sent when the schedule fires: {\"x\": \"short copy\"} or {\"x\": {\"text\": \"short copy\"}}. A destination not listed keeps caption.",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "object"
+            ]
+          }
+        },
+        "scheduled_time": {
+          "type": "string",
+          "description": "ISO-8601 local datetime, e.g. 2026-06-12T09:30:00"
+        },
+        "platforms": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "bluesky",
+              "facebook",
+              "instagram",
+              "rumble",
+              "threads",
+              "tiktok",
+              "x",
+              "youtube"
+            ]
+          },
+          "description": "Targets (default: all enabled)"
+        },
+        "repeat_rule": {
+          "type": "string",
+          "enum": [
+            "daily",
+            "weekly",
+            "monthly"
+          ],
+          "description": "Optional repeat"
+        }
+      },
+      "required": [
+        "caption",
+        "scheduled_time"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_schedule_cancel",
+    "description": "Cancel a scheduled post by entry id — the MCP equivalent of `xpst schedule remove`. Removes the entry from the LOCAL schedule store (~/.xpst/schedule.json) only; it never un-posts content that has already been published. Get entry ids from xpst_schedule_list. dry_run=true returns the same verdict without modifying the store. An unknown id is an error (POST_NOT_FOUND), never a silent success.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "type": "boolean",
+          "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set",
+          "default": false
+        },
+        "entry_id": {
+          "type": "string",
+          "description": "Schedule entry id (from xpst_schedule_list)"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Report whether the entry exists and would be cancelled, without modifying the store",
+          "default": false
+        }
+      },
+      "required": [
+        "entry_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_schedule_pause",
+    "description": "Pause the schedule queue — the MCP equivalent of `xpst schedule pause`. No scheduled entry fires (from cron, the daemon or an explicit run) until xpst_schedule_resume. Safe to call: it stops posts, never starts them.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "Why the queue is paused (shown by xpst_schedule_list)"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_schedule_resume",
+    "description": "Release a paused schedule queue — the MCP equivalent of `xpst schedule resume`. Due entries become eligible to fire again; this re-enables publishing, so it is a consent-gated mutation.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "type": "boolean",
+          "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_failures_retry",
+    "description": "Retry ONE recorded upload failure, identified by video_id + platform — the MCP equivalent of `xpst failures retry <video_id> --platform <name>`. Re-posts that video's local source file to that single destination (a REAL platform upload; scope=platform_upload). Returns ok=false with VIDEO_NOT_FOUND, NO_RECORDED_FAILURE, NO_LOCAL_FILE or RETRY_FAILED instead of pretending a retry happened; posted=true only when the destination accepted the post. Use xpst_activity to list failures and their retryable flag, and dry_run=true to plan without uploading.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "type": "boolean",
+          "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set",
+          "default": false
+        },
+        "video_id": {
+          "type": "string",
+          "description": "Video id as recorded in xpst_activity failures"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "bluesky",
+            "facebook",
+            "instagram",
+            "rumble",
+            "threads",
+            "tiktok",
+            "x",
+            "youtube"
+          ],
+          "description": "The single destination whose failure is being retried"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Resolve the retry target and report the verdict without uploading",
+          "default": false
+        }
+      },
+      "required": [
+        "video_id",
+        "platform"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_health",
+    "description": "Test connectivity to all platforms and sources (no uploads)",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_status",
+    "description": "Show cross-posting statistics and health status",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_rate_limit_status",
+    "description": "Read-only view of active rate-limit cooldowns: per platform the remaining seconds, strike count, resume time and the platform's recorded reason. A cooldown defers posts, it does not fail them. Pure local read — no uploads, no platform API calls, no sleeps, safe to call repeatedly and in dry runs.",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_backfill",
+    "description": "Retry failed or incomplete posts from history. `attempted` / `successful` are counts, not a verdict: `batch_status`, `exit_code` and `failed_destinations` report the same aggregate the CLI (`xpst backfill`) exits on, so an all-failed retry is not read as a successful one.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "type": "boolean",
+          "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set",
+          "default": false
+        },
+        "max_count": {
+          "type": "integer",
+          "description": "Maximum videos to backfill",
+          "default": 10
+        },
+        "source": {
+          "type": "string",
+          "description": "Source to fetch from",
+          "default": "tiktok"
+        },
+        "platforms": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "bluesky",
+              "facebook",
+              "instagram",
+              "rumble",
+              "threads",
+              "tiktok",
+              "x",
+              "youtube"
+            ]
+          },
+          "description": "Target platforms"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Show what would be backfilled",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_config_show",
+    "description": "Display current configuration (with sensitive values masked)",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_auth_status",
+    "description": "Show live authentication status and the truthful per-platform badge (connected / expiring / needs_reauth / source_only / disabled / unknown). The badge is derived from a live check with its timestamp — a stored credential alone is never reported as connected.",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_byo_app",
+    "description": "Bring-your-own developer app setup: report (masked) which platforms have a locally-stored app credential, or store/clear one. A stored app id/secret is what flips a platform into its official OAuth path with NO App Review needed (Meta Standard Access: the owner uses their own app). The secret is stored only in the encrypted local store and is never echoed back — responses carry at most a 4-char id tail. Omit app_id/app_secret for a status read.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "description": "Platform to act on (required for a store/clear call)",
+          "enum": [
+            "facebook",
+            "instagram",
+            "messenger",
+            "threads",
+            "tiktok"
+          ]
+        },
+        "app_id": {
+          "type": "string",
+          "description": "Provider app id / client key to store (never echoed back)"
+        },
+        "app_secret": {
+          "type": "string",
+          "description": "Provider app secret / client secret to store (never echoed back)"
+        },
+        "clear": {
+          "type": "boolean",
+          "description": "Remove the stored app credential for this platform",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_bio_get",
+    "description": "Get the link-in-bio page URL and its current configuration. Returns the public /bio URL, the page handle, and the ordered list of links (enabled social accounts + custom links) exactly as rendered by the dashboard bio page.",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_capabilities",
+    "description": "Return the canonical role-aware provider catalog AND the content contract without network calls: per destination, which content types it declares and which it can actually publish (`content`), plus the publishing route each content type takes. Read this before posting so you never attempt a modality a destination cannot publish.",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_preflight",
+    "description": "Resolve the per-destination plan BEFORE anything is published: for each destination, whether it will publish (`posted`), is not connected (`skipped_unconnected`, with the connect command), or cannot take this format (`unsupported_format`, with the envelope). Targets an explicit `platforms` list, or `all: true` for every connected account that accepts the format, or the format route ∩ connected accounts. Never uploads and never touches the network",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "media_path": {
+          "type": "string"
+        },
+        "media_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "platforms": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "all": {
+          "type": "boolean",
+          "description": "Explicitly target every connected account that accepts this format. Never implied: omitting it uses the format route ∩ connected accounts.",
+          "default": false
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "video",
+            "image",
+            "carousel",
+            "text",
+            "thread"
+          ],
+          "description": "Format to route; `auto` classifies the media.",
+          "default": "auto"
+        },
+        "caption": {
+          "type": "string",
+          "default": ""
+        },
+        "overrides": {
+          "type": "object",
+          "description": "Per-destination caption overrides: {\"threads\": \"short copy\"} or {\"threads\": {\"text\": \"short copy\"}}. Checked against each destination's own limit.",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "object"
+            ]
+          }
+        },
+        "text": {
+          "type": "string",
+          "default": "",
+          "description": "Body of a text-only post. With no media_path it implies content_type \"text\" (a text post is refused by any destination that has no text path)."
+        },
+        "content_type": {
+          "type": "string",
+          "enum": [
+            "video",
+            "image",
+            "carousel",
+            "text",
+            "thread"
+          ],
+          "description": "What the post is (canonical vocabulary). Omit to let the media decide; state `text` to ask whether a text-only post is possible."
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_readiness",
+    "description": "Return local setup readiness and actionable blockers without starting the posting engine",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_auth_start",
+    "description": "Return a human-only authentication action plan; never opens a browser or accepts secrets",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "bluesky",
+            "facebook",
+            "instagram",
+            "messenger",
+            "rumble",
+            "threads",
+            "tiktok",
+            "x",
+            "youtube"
+          ]
+        }
+      },
+      "required": [
+        "platform"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_providers",
+    "description": "List supported content sources and posting destinations with capabilities",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_disconnect",
+    "description": "Disconnect a platform: remove its stored account credentials (tokens, cookies, session files) and set accounts.<platform>.enabled=false. Never touches posted content or local state.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "type": "boolean",
+          "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set",
+          "default": false
+        },
+        "platform": {
+          "type": "string",
+          "description": "Platform to disconnect",
+          "enum": [
+            "bluesky",
+            "facebook",
+            "instagram",
+            "messenger",
+            "rumble",
+            "threads",
+            "tiktok",
+            "x",
+            "youtube"
+          ]
+        }
+      },
+      "required": [
+        "platform"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_delete",
+    "description": "Delete a post for REAL on the platform and remove its local record. Calls the platform delete API for every destination the video was posted to and reports each destination's outcome: deleted, soft_hidden (unpublished but recoverable), pending (could not confirm — remove manually via the returned share_url), or unsupported (that platform has no delete path, e.g. Messenger). The response carries platform_deleted per destination plus a boolean aggregate (true only when every destination is gone). Destination platforms (YouTube, X, Instagram, TikTok, Threads, Facebook) all support deletion today. Removing the record also makes the engine treat the video as new again, so treat the call as destructive and confirm with the user first.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "type": "boolean",
+          "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set",
+          "default": false
+        },
+        "video_id": {
+          "type": "string",
+          "description": "Video ID to delete on the platform(s) and drop from local state"
+        },
+        "platform": {
+          "type": "string",
+          "description": "Destination platform to delete from (or all)",
+          "enum": [
+            "bluesky",
+            "facebook",
+            "instagram",
+            "rumble",
+            "threads",
+            "tiktok",
+            "x",
+            "youtube",
+            "all"
+          ],
+          "default": "all"
+        }
+      },
+      "required": [
+        "video_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "messenger_send",
+    "description": "Send a text message to a Messenger recipient (page-scoped PSID) via the Meta Graph API. Requires a configured Messenger Page Access Token (run 'xpst auth messenger'). Returns the message_id.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "type": "boolean",
+          "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set",
+          "default": false
+        },
+        "recipient": {
+          "type": "string",
+          "description": "Page-scoped PSID of the recipient"
+        },
+        "text": {
+          "type": "string",
+          "description": "Message body (max 640 chars)"
+        }
+      },
+      "required": [
+        "recipient",
+        "text"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "messenger_set_rules",
+    "description": "Configure the Messenger ManyChat-lite auto-reply rules. Provide a keyword->reply map (the '*' key is the catch-all) and optionally toggle auto_reply. Persists to config.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "type": "boolean",
+          "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set",
+          "default": false
+        },
+        "rules": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Keyword -> reply map ('*' = catch-all)"
+        },
+        "auto_reply": {
+          "type": "boolean",
+          "description": "Enable/disable auto-reply",
+          "default": true
+        }
+      },
+      "required": [
+        "rules"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_messenger_check_comments",
+    "description": "Fetch recent comments on an Instagram or Facebook post and auto-reply per the configured reply_rules (Content360-style comment auto-reply, mirroring `xpst messenger check-comments`). Gated by accounts.messenger.comment_reply_enabled and comment_platforms. Posts public replies on the comment threads when a keyword matches.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "type": "boolean",
+          "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set",
+          "default": false
+        },
+        "media_id": {
+          "type": "string",
+          "description": "Post/media ID to scan for comments"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "instagram",
+            "facebook"
+          ],
+          "description": "Platform owning media_id",
+          "default": "instagram"
+        },
+        "since_ts": {
+          "type": "integer",
+          "description": "Only reply to comments created after this epoch timestamp (Facebook only)"
+        }
+      },
+      "required": [
+        "media_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "kb_add",
+    "description": "Ingest a local file or URL into the knowledge base",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "type": "boolean",
+          "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set",
+          "default": false
+        },
+        "source": {
+          "type": "string",
+          "description": "Local file path or URL to ingest"
+        },
+        "workspace": {
+          "type": "string",
+          "description": "Workspace name (isolated data dir)",
+          "default": "default"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "kb_query",
+    "description": "Return stored knowledge nuggets whose text matches the query",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "Text to match against stored nuggets"
+        },
+        "workspace": {
+          "type": "string",
+          "description": "Workspace name (isolated data dir)",
+          "default": "default"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "kb_organize",
+    "description": "Discover areas, tag difficulty, and assign nuggets",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "type": "boolean",
+          "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set",
+          "default": false
+        },
+        "workspace": {
+          "type": "string",
+          "description": "Workspace name (isolated data dir)",
+          "default": "default"
+        },
+        "threshold": {
+          "type": "number",
+          "description": "Cosine similarity threshold for clustering/routing"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "kb_areas",
+    "description": "List discovered knowledge areas in course order (beginner -> advanced)",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "description": "Workspace name (isolated data dir)",
+          "default": "default"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_setup_start",
+    "description": "Start or return the shared resumable setup transaction",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "selected_role_capabilities": {
+          "type": "array",
+          "description": "Non-secret role-capability selections such as source/tiktok and video_destination/youtube",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": [
+                  "source",
+                  "video_destination",
+                  "analytics",
+                  "messaging"
+                ]
+              },
+              "capability": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "role",
+              "capability"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_setup_status",
+    "description": "Read the shared setup transaction and pending human actions",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "transaction_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_setup_resume",
+    "description": "Resume setup with safe step state or caller-verified readiness",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "transaction_id": {
+          "type": "string"
+        },
+        "step_id": {
+          "type": "string"
+        },
+        "step_state": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "in_progress",
+            "waiting_human",
+            "verified",
+            "skipped",
+            "error"
+          ]
+        },
+        "step_updates": {
+          "type": "object"
+        },
+        "readiness": {
+          "type": "object"
+        },
+        "finish_later": {
+          "type": "boolean",
+          "default": false
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_setup_reset",
+    "description": "Reset the shared setup transaction and its recovery copies",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "transaction_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_stream",
+    "description": "Live-stream relay status: every platform's ingest path (api/manual/unsupported), whether a stream key is already stored, and whether xPST holds the credentials to fetch one itself. The same registry and key-presence verdict the CLI serves, so an agent never has to shell out. With `include_live` it also asks Twitch/Kick who is live right now — only for platforms whose credentials exist; the rest come back as `unavailable` with the registration step. Never returns a stream key. Read-only: it stores nothing, posts nothing, spends nothing.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "description": "Return only this platform's row (omit for the whole registry)"
+        },
+        "include_live": {
+          "type": "boolean",
+          "description": "Also report live status for credentialled Twitch/Kick channels",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "xpst_chat",
+    "description": "Read-only live chat from Twitch, YouTube and Kick as ONE merged timeline. Each message carries `platform`, `author`, `text`, `timestamp`, `message_id` and `channel`, ordered chronologically, so an agent never has to reconcile three feeds. With `read` it opens the platforms for `duration_s` (bounded, default 20s, max 300) and returns what arrived; without it, it reports what COULD be read and what is missing — no network. A platform that cannot be read appears under `unavailable` with a code and the next step, never as an empty list: 'not live', 'no credential' and 'no such channel' are different answers. Never sends, moderates or replies — there is no write path at all.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "read": {
+          "type": "boolean",
+          "description": "Actually read chat for duration_s (default false: readiness only)",
+          "default": false
+        },
+        "platforms": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Platforms to use (default: twitch, youtube, kick)"
+        },
+        "duration_s": {
+          "type": "number",
+          "description": "How long to read for, in seconds (1-300, default 20)"
+        },
+        "twitch_channel": {
+          "type": "string",
+          "description": "Twitch login to read; repeat by comma-separating several"
+        },
+        "kick_channel": {
+          "type": "string",
+          "description": "Kick channel slug to read; repeat by comma-separating several"
+        },
+        "youtube_video_id": {
+          "type": "string",
+          "description": "YouTube live video id (default: the channel's active broadcast)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum messages in the merged timeline (default 500)"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+]

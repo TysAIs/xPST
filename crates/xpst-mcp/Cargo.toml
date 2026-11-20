@@ -1,0 +1,39 @@
+[package]
+name = "xpst-mcp"
+description = "rmcp tool surface, same tool names and schemas (P4)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "xpst-mcp"
+path = "src/main.rs"
+
+[dependencies]
+# First-party MCP SDK (modelcontextprotocol/rust-sdk), the only MCP crate this
+# tree may depend on (docs/technical/licence-policy.md).
+#
+# Pinned to 3.11.0 rather than a caret range so an upgrade stays a reviewed
+# decision: the negotiated protocol version and tool schemas are this project's
+# primary agent surface. 3.11.0 is the newest 3.x and, critically, the first
+# line that clears both RustSec advisories this pin used to carry —
+# RUSTSEC-2026-0189 (fixed in 1.4.0, Streamable HTTP *server* transport) and
+# RUSTSEC-2026-0462 (fixed in 3.9.0, Streamable HTTP *client* transports).
+# Neither transport is enabled here (features are `server` + `transport-io`,
+# stdio only), and `crates/xpst-core/tests/advisory_policy.rs` keeps it that
+# way. The 1.85 toolchain objection is history: the workspace floor is 1.89 and
+# rmcp 3.x needs 1.88.
+rmcp = { version = "=3.11.0", features = ["server", "transport-io"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
+jiff.workspace = true
+xpst-config = { workspace = true }
+xpst-state = { workspace = true }
+
+[lints]
+workspace = true

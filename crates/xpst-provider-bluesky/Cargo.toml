@@ -1,0 +1,36 @@
+[package]
+name = "xpst-provider-bluesky"
+description = "Bluesky destination over the AT Protocol (P3)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+default = ["live-http"]
+# The reqwest-backed client used by `atrium::AtriumTransport`, supplied by the
+# shared provider vocabulary so there is exactly one place that configures it.
+live-http = ["xpst-provider/live-http"]
+
+[dependencies]
+atrium-api = { version = "0.26", default-features = false, features = ["bluesky"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = "0.1"
+jiff.workspace = true
+unicode-segmentation = "1"
+tokio = { version = "1", features = ["sync"] }
+xpst-provider = { path = "../xpst-provider" }
+# The record key is a hash, and SHA-256 is the hash the rest of this graph
+# already uses (via `ring`/`reqwest`), so this adds no new supply chain.
+sha2 = "0.10"
+
+[dev-dependencies]
+jiff.workspace = true
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

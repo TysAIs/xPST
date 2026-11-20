@@ -1,0 +1,2313 @@
+"""
+Streamlined account connection wizard for xPST.
+
+Aims to connect all 4 platforms in under 5 minutes by:
+- YouTube: Auto-opening browser for OAuth via InstalledAppFlow.run_local_server()
+- Instagram: Username/password login via instagrapi (with 2FA support)
+- X/Twitter: Official X API v2 (ban-safe, free 17 posts/day) or twikit cookies
+- TikTok: Auto-extract browser cookies via yt-dlp --cookies-from-browser
+
+Usage:
+    xpst connect              # Connect all platforms
+    xpst connect youtube      # Connect YouTube only
+    xpst connect instagram    # Connect Instagram only
+    xpst connect x            # Connect X/Twitter only
+    xpst connect tiktok       # Connect TikTok only
+    xpst connect --test       # Test all existing connections
+"""
+
+import asyncio
+import base64
+import contextlib
+import hashlib
+import json
+import secrets
+import stat
+import sys
+import time
+from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qs, urlencode, urlsplit
+
+import httpx
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
+from xpst.config import XPSTConfig
+from xpst.utils.credentials import CredentialStore
+from xpst.utils.graph_api import graph_api_base
+from xpst.utils.logger import get_logger
+from xpst.utils.platform import stdin_is_interactive
+from xpst.utils.secure_io import write_text_0600
+
+console = Console()
+logger = get_logger(__name__)
+
+# ``None`` means auto: browser launches are allowed only from a real TTY.
+# Desktop auth passes True explicitly; agent/CI/non-TTY flows remain headless.
+_OPEN_BROWSER: bool | None = None
+
+
+def _browser_enabled() -> bool:
+    if _OPEN_BROWSER is not None:
+        return _OPEN_BROWSER
+    try:
+        return bool(sys.stdin.isatty())
+    except (AttributeError, OSError):
+        return False
+
+
+def _open_browser(url: str) -> bool:
+    """Open a URL only when the connect flow explicitly permits it."""
+    if not _browser_enabled():
+        console.print(f"[dim]Browser launch suppressed (headless mode): {url}[/dim]")
+        return False
+    import webbrowser
+    return bool(webbrowser.open(url))
+
+CREDS_DIR_NAME = "credentials"
+
+
+def _get_creds_dir(config: XPSTConfig) -> Path:
+    """Get the credentials directory path, creating it if needed.
+
+    Args:
+        config: xPST configuration.
+
+    Returns:
+        Path to the ``credentials/`` subdirectory under config_dir.
+    """
+
+    creds_dir = Path(config.config_dir).expanduser() / CREDS_DIR_NAME
+    creds_dir.mkdir(parents=True, exist_ok=True)
+    return creds_dir
+
+
+def _confirm(message: str, default: bool = True) -> bool:
+    """Prompt the user for a yes/no confirmation with a default.
+
+    Args:
+        message: Question to display.
+        default: Value to use if user presses Enter.
+
+    Returns:
+        True if confirmed, False otherwise.
+    """
+
+    suffix = " [Y/n]: " if default else " [y/N]: "
+    try:
+        response = console.input(f"[cyan]{message}{suffix}[/cyan]").strip().lower()
+    except EOFError:
+        # Piped/closed stdin (agent automation): the safe default is False —
+        # treating EOF as "yes" caused side effects such as webbrowser.open()
+        # firing during scripted runs. Interactive callers see the prompt as
+        # usual; automated callers get a deterministic "no".
+        return False
+    if not response:
+        return default
+    return response in ("y", "yes")
+
+
+def _input_secret(prompt: str) -> str:
+    """Prompt for a secret value without echoing to terminal.
+
+    Args:
+        prompt: Prompt text to display.
+
+    Returns:
+        The entered secret string.
+    """
+
+    console.print(f"[cyan]{prompt}[/cyan]", end="")
+    import getpass
+    return getpass.getpass("")
+
+
+# ──────────────────────────────────────────────
+# YouTube OAuth (browser-based)
+# ──────────────────────────────────────────────
+
+def connect_youtube(config: XPSTConfig) -> bool:
+    """
+    Connect YouTube using OAuth2 browser flow.
+
+    Flow:
+    1. Check for client_secrets.json
+    2. If missing, guide user to create it
+    3. Use InstalledAppFlow.run_local_server() to open browser
+    4. User authorizes in browser
+    5. Token is saved automatically
+    """
+    console.print(Panel("[bold]YouTube Shorts Connection[/bold]", style="red"))
+    creds_dir = _get_creds_dir(config)
+    secrets_path = creds_dir / "youtube_client_secrets.json"
+    token_path = creds_dir / "youtube_token.json"
+
+    # Check for client_secrets.json
+    if not secrets_path.exists():
+        console.print(
+            "[yellow]YouTube requires OAuth2 credentials from Google Cloud Console.[/yellow]\n"
+            "You only need to do this once.\n"
+        )
+        console.print("[bold]Quick Setup (2 minutes):[/bold]")
+        console.print("  1. Open: [link=https://console.cloud.google.com/apis/credentials]https://console.cloud.google.com/apis/credentials[/link]")
+        console.print("  2. Create or select a project")
+        console.print("  3. Click 'Create Credentials' → 'OAuth 2.0 Client ID'")
+        console.print("  4. Application type: [bold]Desktop app[/bold]")
+        console.print("  5. Download the JSON file")
+        console.print(f"  6. Save it as: [bold]{secrets_path}[/bold]\n")
+
+        if _confirm("Open Google Cloud Console in browser now?", default=True):
+            _open_browser("https://console.cloud.google.com/apis/credentials")
+
+        console.print(f"\n[dim]Waiting for client_secrets.json at:{secrets_path}[/dim]")
+        console.print("[dim]Place the file there, then press Enter to continue...[/dim]")
+        input()
+
+        if not secrets_path.exists():
+            console.print("[red]❌ File not found. Run [cyan]xpst connect youtube[/cyan] again when ready.[/red]")
+            return False
+
+    # Run OAuth flow with browser
+    console.print("\n[bold]Opening browser for YouTube authorization...[/bold]")
+    console.print("[dim]A browser window will open. Sign in and authorize xPST.[/dim]\n")
+
+    try:
+        from google_auth_oauthlib.flow import InstalledAppFlow
+
+        scopes = [
+            "https://www.googleapis.com/auth/youtube.upload",
+            "https://www.googleapis.com/auth/youtube.readonly",
+            "https://www.googleapis.com/auth/youtube.force-ssl",
+        ]
+
+        flow = InstalledAppFlow.from_client_secrets_file(
+            str(secrets_path),
+            scopes=scopes,
+        )
+
+        # run_local_server opens browser, handles redirect, returns credentials
+        creds = flow.run_local_server(
+            host="localhost",
+            port=8085,
+            open_browser=_browser_enabled(),
+            authorization_prompt_message="[bold]Opening browser for authorization...[/bold]",
+            success_message="[green]✅ Authorization successful! You can close this tab.[/green]",
+        )
+
+        # Save token with owner-only perms (see SECURITY.md)
+        write_text_0600(token_path, creds.to_json())
+
+        # Store in keyring
+        cred_store = CredentialStore(config.config_dir)
+        try:
+            cred_store.store("youtube_token", creds.to_json())
+        except Exception as e:
+            logger.debug("Unexpected error: %s", e)
+            pass  # Keyring optional
+
+        console.print("[green]✅ YouTube connected and token saved![/green]")
+        return True
+
+    except FileNotFoundError:
+        console.print("[red]❌ client_secrets.json not found. Please download it first.[/red]")
+        return False
+    except Exception as e:
+        logger.error(f"YouTube OAuth failed: {e}")
+        console.print(f"[red]❌ YouTube connection failed: {e}[/red]")
+        if "access_denied" in str(e).lower():
+            console.print("[dim]Make sure your OAuth app is in 'Testing' mode or you're added as a test user.[/dim]")
+        return False
+
+
+# ──────────────────────────────────────────────
+# Instagram (Graph API preferred, instagrapi fallback)
+# ──────────────────────────────────────────────
+
+def connect_instagram(config: XPSTConfig) -> bool:
+    """
+    Connect Instagram. Defaults to the official Graph API (ban-safe).
+    Falls back to instagrapi session auth only if the user explicitly chooses it.
+
+    Graph API flow:
+    1. Ask for Meta Graph API access token + IG user ID
+    2. Verify the token works
+    3. Save to config
+
+    Session flow (instagrapi, NOT recommended):
+    1. Warn about ban risk
+    2. Prompt for username and password
+    3. Login via instagrapi.Client.login()
+    4. Save session for persistence
+    """
+    console.print(Panel("[bold]Instagram Reels Connection[/bold]", style="magenta"))
+
+    console.print(
+        "\n[bold green]Recommended:[/bold green] Use the official Meta Graph API (ban-safe, ToS-compliant).\n"
+        "[bold red]Not recommended:[/bold red] instagrapi session auth (risks account bans).\n"
+    )
+    console.print(
+        "[dim]Graph API requires an Instagram Creator/Business account + Facebook Page.\n"
+        "If you don't have those yet, see: https://developers.facebook.com/docs/instagram-api/getting-started[/dim]\n"
+    )
+
+    use_graph = _confirm("Use Graph API (recommended)?", default=True)
+
+    if use_graph:
+        return _connect_instagram_graph_api(config)
+
+    # This is the moment of choice. The text is the registry's own wording
+    # (xpst.auth_path_risk) so the warning printed here, the advisory doctor
+    # and readiness report, and the preflight warning on every Instagram
+    # destination are the same sentence — never a private opinion that drifts.
+    from xpst.auth_path_risk import UNOFFICIAL_AUTH_PATHS
+
+    path = UNOFFICIAL_AUTH_PATHS["instagram"]
+    console.print(
+        Panel(
+            f"[bold yellow]⚠️  BAN RISK: {path.display_name} private API[/bold yellow]\n\n"
+            f"[yellow]{path.consequence}[/yellow]\n\n"
+            f"[white]Ban-safe path:[/white] {path.official_label} "
+            f"([cyan]auth_mode: {path.official_mode}[/cyan]) — it needs {path.requirement}.\n"
+            f"[dim]You can cancel here, set that up, and re-run `xpst connect instagram`.[/dim]",
+            border_style="yellow",
+            title="unofficial_private_api",
+        )
+    )
+    acknowledged = _confirm(
+        f"Choose the unofficial {path.auth_mode} path anyway (account ban risk)?",
+        default=False,
+    )
+    if not acknowledged:
+        console.print("[dim]Cancelled. Set up Graph API for ban-safe posting.[/dim]")
+        return False
+    return _connect_instagram_session(config)
+
+
+GRAPH_API_BASE = graph_api_base()
+GRAPH_EXPLORER_URL = "https://developers.facebook.com/tools/explorer/"
+
+
+def _ig_account_type_gate(config: XPSTConfig, access_token: str, ig_user_id: str) -> bool:
+    """Probe + store + (when needed) print the account-type guidance.
+
+    Returns True when the account is publish-ready (business/creator), False
+    when Meta says it is personal, and also True on an inconclusive probe —
+    an unprobed account must not be reported as personal, and connect must not
+    fail just because Meta would not answer the type field. The verdict is
+    stored on ``config.instagram.account_type`` (never guessed) so every
+    surface can show it; the caller's ``config.save()`` persists it.
+    """
+    from xpst.platforms.instagram_account import (
+        detect_graph_account_type,
+        guidance_message,
+    )
+
+    finding = detect_graph_account_type(ig_user_id, access_token)
+    if finding.account_type.value != "unknown":
+        config.instagram.account_type = finding.account_type.value
+        config.instagram.account_type_source = finding.source
+    message = guidance_message(finding)
+    if message:
+        console.print(f"\n[yellow]{message}[/yellow]")
+    return finding.publish_ready or finding.account_type.value == "unknown"
+
+
+def _graph_api_verify_url(ig_user_id: str, access_token: str) -> str:
+    """Build the Graph API URL used to verify a token against an IG account.
+
+    Args:
+        ig_user_id: Numeric Instagram business/creator account ID.
+        access_token: Meta Graph API access token.
+
+    Returns:
+        Full Graph verify URL for the pinned API version (``XPST_GRAPH_API_BASE``
+        wins when set).
+    """
+    params = urlencode(
+        {
+            "fields": "username,followers_count,media_count",
+            "access_token": access_token,
+        }
+    )
+    return f"{GRAPH_API_BASE}/{ig_user_id}?{params}"
+
+
+def _verify_instagram_graph_token(ig_user_id: str, access_token: str, timeout: float = 15.0) -> dict | None:
+    """Verify a Graph API token against an IG account.
+
+    Args:
+        ig_user_id: Numeric Instagram business/creator account ID.
+        access_token: Meta Graph API access token.
+        timeout: HTTP timeout in seconds.
+
+    Returns:
+        Parsed JSON payload on HTTP 200, or None on any failure.
+    """
+    try:
+        r = httpx.get(_graph_api_verify_url(ig_user_id, access_token), timeout=timeout)
+        if r.status_code != 200:
+            return None
+        return r.json()
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+        return None
+
+
+def _fetch_ig_business_accounts(access_token: str, timeout: float = 15.0) -> list[dict]:
+    """Enumerate the IG business accounts linked to a token's Facebook Pages.
+
+    Uses ``/me/accounts`` and collects each Page's ``instagram_business_account``.
+
+    Returns:
+        List of dicts with keys ``id``, ``username``, ``followers_count``,
+        ``media_count``, ``page_name``, ``page_id``.
+    """
+    try:
+        r = httpx.get(
+            f"{GRAPH_API_BASE}/me/accounts",
+            params={
+                "fields": "id,name,instagram_business_account{id,username,followers_count,media_count}",
+                "access_token": access_token,
+            },
+            timeout=timeout,
+        )
+        if r.status_code != 200:
+            return []
+        accounts = []
+        for page in r.json().get("data", []):
+            ig = page.get("instagram_business_account") or {}
+            if ig.get("id"):
+                accounts.append(
+                    {
+                        "id": str(ig["id"]),
+                        "username": ig.get("username", ""),
+                        "followers_count": int(ig.get("followers_count") or 0),
+                        "media_count": int(ig.get("media_count") or 0),
+                        "page_name": page.get("name", ""),
+                        "page_id": page.get("id", ""),
+                    }
+                )
+        return accounts
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+        return []
+
+
+def _detect_ig_user_id(access_token: str, timeout: float = 15.0) -> tuple[str, str, int, int]:
+    """Auto-detect the IG business account bound to a token.
+
+    First tries ``/me`` — a token generated in the Graph API Explorer with the
+    IG business account selected returns the account's ``id``/``username``
+    directly. Otherwise enumerates ``/me/accounts`` for a Page-linked IG
+    business account (prompts if several are found).
+
+    Returns:
+        ``(ig_user_id, username, followers_count, media_count)`` — empty string
+        and zeros when nothing could be detected.
+    """
+    try:
+        r = httpx.get(
+            f"{GRAPH_API_BASE}/me",
+            params={"fields": "id,username,followers_count,media_count", "access_token": access_token},
+            timeout=timeout,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("id") and data.get("username"):
+                return (
+                    str(data["id"]),
+                    data.get("username", ""),
+                    int(data.get("followers_count") or 0),
+                    int(data.get("media_count") or 0),
+                )
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+
+    accounts = _fetch_ig_business_accounts(access_token, timeout=timeout)
+    if len(accounts) == 1:
+        acc = accounts[0]
+        return (acc["id"], acc["username"], acc["followers_count"], acc["media_count"])
+    if len(accounts) > 1:
+        console.print("[bold]Multiple IG business accounts found:[/bold]")
+        for i, acc in enumerate(accounts, 1):
+            console.print(
+                f"  [cyan]{i}.[/cyan] @{acc['username'] or '?'} "
+                f"({acc['followers_count'] or '?'} followers) — Page: {acc['page_name'] or '?'}"
+            )
+        choice = console.input("[cyan]Which account? (number): [/cyan]").strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(accounts):
+            acc = accounts[int(choice) - 1]
+            return (acc["id"], acc["username"], acc["followers_count"], acc["media_count"])
+
+    return ("", "", 0, 0)
+
+
+def _connect_instagram_graph_api(config: XPSTConfig) -> bool:
+    """Connect via official Meta Graph API (OEM, self-verifying).
+
+    Flow:
+    1. Offer the Graph API Explorer in the browser to generate a token.
+    2. Ask for the long-lived access token.
+    3. Auto-detect the IG user ID via /me and /me/accounts (prompt fallback).
+    4. Verify the token against the detected account.
+    5. Save token + user ID to config and the CredentialStore.
+    """
+    console.print("\n[bold]Meta Graph API Setup[/bold]")
+    console.print("[dim]You need a long-lived access token; xPST auto-detects your IG user ID.[/dim]\n")
+
+    console.print("[bold]Quick setup:[/bold]")
+    console.print("  1. Open: [link=https://developers.facebook.com/apps]https://developers.facebook.com/apps[/link]")
+    console.print("  2. Create or select a Meta app")
+    console.print("  3. Add the 'Instagram Graph API' product")
+    console.print("  4. In the Graph API Explorer, pick your IG business account and generate a token")
+    console.print("  5. Paste the token below — xPST verifies it and finds your IG user ID automatically\n")
+
+    if _confirm("Open Meta Developer console in browser?", default=True):
+        _open_browser("https://developers.facebook.com/apps")
+
+    if _confirm("Generate token in browser (Graph API Explorer)?", default=True):
+        _open_browser(GRAPH_EXPLORER_URL)
+
+    access_token = _input_secret("Long-lived access token: ")
+    if not access_token:
+        console.print("[red]❌ Access token required.[/red]")
+        return False
+
+    # Auto-detect the IG user ID (prompt fallback stays)
+    console.print("\n[bold]Auto-detecting your IG business account...[/bold]")
+    ig_user_id, username, followers, media_count = _detect_ig_user_id(access_token)
+    if not ig_user_id:
+        console.print("[yellow]⚠️  Could not auto-detect the IG business account from this token.[/yellow]")
+        console.print(
+            "[dim]Make sure the token has instagram_basic scope and the account is a "
+            "Business/Creator account linked to a Facebook Page.[/dim]"
+        )
+        ig_user_id = console.input("[cyan]Enter your IG user ID manually (numbers): [/cyan]").strip()
+        if not ig_user_id:
+            console.print("[red]❌ IG user ID required.[/red]")
+            return False
+
+    # Verify the token works against the detected/entered account
+    console.print("\n[bold]Verifying token...[/bold]")
+    data = _verify_instagram_graph_token(ig_user_id, access_token)
+    if data is None:
+        console.print("[red]❌ Token verification failed.[/red]")
+        console.print("[dim]Make sure your token has instagram_basic + instagram_content_publish scopes.[/dim]")
+        return False
+    console.print(
+        f"[green]✅ Connected as @{data.get('username') or username or '?'} "
+        f"({data.get('followers_count', followers or '?')} followers, "
+        f"{data.get('media_count', media_count or '?')} posts)[/green]"
+    )
+
+    # Meta's publishing API only serves professional accounts; say so HERE,
+    # with the exact in-app switch, instead of letting a personal account
+    # surface later as an opaque publish refusal. The credential stays stored
+    # either way — after the in-app switch, a re-check flips the verdict.
+    _ig_account_type_gate(config, access_token, ig_user_id)
+
+    # Save to config
+    config.instagram.auth_mode = "graph_api"
+    config.instagram.graph_access_token = access_token
+    config.instagram.graph_ig_user_id = ig_user_id
+    config.save()
+
+    # Also store in encrypted credential store
+    cred_store = CredentialStore(config.config_dir)
+    try:
+        cred_store.store("instagram_graph_token", access_token)
+        cred_store.store("instagram_graph_user_id", ig_user_id)
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+
+    console.print("[green]✅ Instagram Graph API configured (ban-safe)![/green]")
+    return True
+
+
+def _connect_instagram_session(config: XPSTConfig) -> bool:
+    """Connect via instagrapi session auth (NOT recommended, ban risk)."""
+    creds_dir = _get_creds_dir(config)
+    session_path = creds_dir / "instagram_session.json"
+
+    # Defence in depth: this function is the only writer of
+    # ``auth_mode: session``, so the risk is stated here too rather than only
+    # in the caller's menu. Someone reaching this path another way still sees
+    # what they are choosing.
+    from xpst.auth_path_risk import UNOFFICIAL_AUTH_PATHS
+
+    path = UNOFFICIAL_AUTH_PATHS["instagram"]
+    console.print(
+        f"[yellow]⚠️  Writing {path.platform} auth_mode='{path.auth_mode}' — "
+        f"ban_risk: {path.ban_risk}.[/yellow]"
+    )
+    console.print(f"[dim]{path.consequence} Ban-safe alternative: {path.docs_url}.[/dim]\n")
+
+    console.print("[dim]Enter your Instagram credentials. We'll save a session file so you don't need to re-enter them.[/dim]\n")
+
+    username = console.input("[cyan]Instagram username: [/cyan]").strip()
+    if not username:
+        console.print("[red]❌ Username required.[/red]")
+        return False
+
+    password = _input_secret("Instagram password: ")
+    if not password:
+        console.print("[red]❌ Password required.[/red]")
+        return False
+
+    console.print("\n[bold]Connecting to Instagram...[/bold]")
+
+    try:
+        from instagrapi import Client
+
+        client = Client()
+
+        # Try loading existing settings first for stability
+        if session_path.exists():
+            try:
+                with open(session_path, encoding="utf-8") as f:
+                    existing = json.load(f)
+                if "settings" in existing:
+                    client.set_settings(existing["settings"])
+            except Exception as e:
+                logger.debug("Unexpected error: %s", e)
+                pass
+
+        # Attempt login
+        try:
+            client.login(username, password)
+        except Exception as login_error:
+            error_str = str(login_error).lower()
+
+            # Check if 2FA is required
+            if "two_factor" in error_str or "verification" in error_str or "challenge" in error_str:
+                console.print("[yellow]⚠️  Two-factor authentication required.[/yellow]")
+                console.print("[dim]Enter the code from your authenticator app (Google Authenticator, Authy, etc.)[/dim]\n")
+                verification_code = console.input("[cyan]2FA code: [/cyan]").strip()
+
+                if not verification_code:
+                    console.print("[red]❌ Verification code required.[/red]")
+                    return False
+
+                try:
+                    client.login(username, password, verification_code=verification_code)
+                except Exception as e2:
+                    console.print(f"[red]❌ 2FA login failed: {e2}[/red]")
+                    return False
+            elif "challenge" in error_str:
+                # Instagram challenge (unusual login, SMS code, etc.)
+                console.print("[yellow]⚠️  Instagram requires additional verification.[/yellow]")
+                console.print("[dim]Check your Instagram app or email for a security code.[/dim]\n")
+                code = console.input("[cyan]Security code: [/cyan]").strip()
+                if not code:
+                    console.print("[red]❌ Code required.[/red]")
+                    return False
+                try:
+                    client.challenge_code_handler(username, code)
+                    client.login(username, password)
+                except Exception as e2:
+                    console.print(f"[red]❌ Challenge verification failed: {e2}[/red]")
+                    return False
+            elif "password" in error_str or "credentials" in error_str:
+                console.print("[red]❌ Invalid username or password.[/red]")
+                return False
+            else:
+                raise login_error
+
+        # Save session settings for persistence
+        settings = client.get_settings()
+        session_data = {
+            "authorization_data": {
+                "sessionid": settings.get("authorization_data", {}).get("sessionid", ""),
+            },
+            "settings": settings,
+            "username": username,
+            "connected_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+        # Owner-only perms on the session file (see SECURITY.md)
+        write_text_0600(session_path, json.dumps(session_data, indent=2))
+
+        # Store in keyring
+        cred_store = CredentialStore(config.config_dir)
+        try:
+            cred_store.store_json("instagram_session", session_data)
+        except Exception as e:
+            logger.debug("Unexpected error: %s", e)
+            pass
+
+        # Set auth_mode to session since user chose this path. Record that the
+        # choice was theirs: doctor/readiness/preflight keep reporting the
+        # ban risk afterwards, and "unacknowledged" must mean "nobody said
+        # yes", not "the file is missing".
+        config.instagram.auth_mode = "session"
+        from xpst.auth_path_risk import ACK_FILE_NAME, record_acknowledgement
+
+        record = record_acknowledgement(
+            config, "instagram", surface="xpst connect instagram", auth_mode="session"
+        )
+        console.print(
+            f"[dim]Recorded operator choice: auth_mode=session "
+            f"(ban_risk: unofficial_private_api) at {record['acknowledged_at']} "
+            f"in {config.config_dir}/{ACK_FILE_NAME}.[/dim]"
+        )
+
+        # Account-type truth on this mode comes from the private API's own
+        # account_info (the Graph API has no credential yet). A personal
+        # account still works here for now, but it cannot migrate to the
+        # ban-safe Graph path without switching first — say so at connect,
+        # not at the failed publish six weeks from now.
+        try:
+            from xpst.platforms.instagram_account import (
+                classify_session_account_info,
+                guidance_message,
+            )
+
+            info = client.account_info()
+            info_map = {
+                "is_business": bool(getattr(info, "is_business", False)),
+                "business_category_name": getattr(info, "business_category_name", "") or "",
+            }
+            finding = classify_session_account_info(info_map)
+            if finding.account_type.value != "unknown":
+                config.instagram.account_type = finding.account_type.value
+                config.instagram.account_type_source = finding.source
+            guidance = guidance_message(finding, auth_mode="session")
+            if guidance:
+                console.print(f"\n[yellow]{guidance}[/yellow]")
+        except Exception as e:
+            logger.debug("account-type probe failed (session mode): %s", e)
+
+        config.save()
+
+        # Verify connection
+        try:
+            account = client.account_info()
+            console.print(f"[green]✅ Connected as @{account.username} ({account.full_name})[/green]")
+        except Exception as e:
+            logger.debug("Unexpected error: %s", e)
+            console.print("[green]✅ Instagram connected and session saved![/green]")
+
+        return True
+
+    except ImportError:
+        console.print("[red]❌ instagrapi not installed. Run: pip install instagrapi[/red]")
+        return False
+    except Exception as e:
+        logger.error(f"Instagram connection failed: {e}")
+        console.print(f"[red]❌ Instagram connection failed: {e}[/red]")
+        return False
+
+
+# ──────────────────────────────────────────────
+# X/Twitter (official X API v2 or twikit cookies)
+# ──────────────────────────────────────────────
+
+def connect_x(config: XPSTConfig) -> bool:
+    """
+    Connect X/Twitter via the official X API v2 (recommended) or twikit cookies.
+
+    Flow:
+    1. Ask which auth method: official X API v2 (ban-safe) or cookies (twikit)
+    2. Option 1 (default): walk user through creating an X Developer app,
+       prompt for API Key/Secret + Access Token/Secret or Bearer Token, verify
+       via https://api.x.com/2/users/me, save config + CredentialStore
+    3. Option 2: username/email/password login via twikit.Client.login()
+    """
+    console.print(Panel("[bold]X/Twitter Connection[/bold]", style="blue"))
+
+    choice = console.input(
+        "[cyan]Which auth method? [1] Official X API v2 (ban-safe, free 17 posts/day) "
+        "[2] Cookies (twikit, unofficial) [/cyan]"
+    ).strip()
+
+    if choice == "2":
+        return _connect_x_cookies(config)
+    return _connect_x_api_v2(config)
+
+
+def _connect_x_cookies(config: XPSTConfig) -> bool:
+    """
+    Connect X/Twitter using username/email/password via twikit (unofficial).
+
+    Flow:
+    1. Prompt for username, email, and password
+    2. Login via twikit.Client.login()
+    3. Cookies are auto-saved
+    4. Test connection
+    """
+    creds_dir = _get_creds_dir(config)
+    cookies_path = creds_dir / "x_cookies.json"
+
+    # The menu entry already said "unofficial"; say what that costs before the
+    # operator types a password, and use the registry wording so this line and
+    # the doctor/preflight advisory cannot drift apart.
+    from xpst.auth_path_risk import UNOFFICIAL_AUTH_PATHS
+
+    path = UNOFFICIAL_AUTH_PATHS["x"]
+    console.print(
+        f"[yellow]⚠️  {path.display_name} auth_mode='{path.auth_mode}' — "
+        f"ban_risk: {path.ban_risk}.[/yellow]"
+    )
+    console.print(f"[dim]{path.consequence} Ban-safe alternative: {path.requirement}.[/dim]\n")
+
+    console.print("[dim]Enter your X/Twitter credentials. No cookie export needed![/dim]\n")
+
+    username = console.input("[cyan]X username (without @): [/cyan]").strip()
+    if username.startswith("@"):
+        username = username[1:]
+    if not username:
+        console.print("[red]❌ Username required.[/red]")
+        return False
+
+    email = console.input("[cyan]X email address: [/cyan]").strip()
+    if not email:
+        console.print("[red]❌ Email required (X needs it for login verification).[/red]")
+        return False
+
+    password = _input_secret("X password: ")
+    if not password:
+        console.print("[red]❌ Password required.[/red]")
+        return False
+
+    # Optional 2FA support. twikit.Client.login() accepts totp_secret;
+    # xPST should forward it so accounts with 2FA don't get dead-ended.
+    totp_secret = None
+    if _confirm("Does your X account use 2FA? (authenticator app code/secret)", default=False):
+        totp_secret = _input_secret("X 2FA secret (or code, no spaces): ")
+    elif input("2FA secret empty — skip? [y/N] ").strip().lower().startswith("y"):
+        totp_secret = ""
+
+    console.print("\n[bold]Connecting to X/Twitter...[/bold]")
+
+    try:
+        import twikit
+
+        cookies_path_str = str(cookies_path)
+
+        async def _do_connect():
+            """Login and verify X/Twitter in a single async context."""
+            client = twikit.Client("en-US")
+            await client.login(
+                auth_info_1=username,
+                auth_info_2=email,
+                password=password,
+                totp_secret=totp_secret or None,
+                cookies_file=cookies_path_str,
+            )
+
+            # Verify
+            screen_name = None
+            try:
+                user = await client.user()
+                screen_name = user.screen_name
+            except Exception as e:
+                logger.debug("Unexpected error: %s", e)
+                pass
+
+            return screen_name
+
+        screen_name = asyncio.run(_do_connect())
+
+        # twikit wrote the cookies file itself; tighten it to owner-only.
+        if cookies_path.exists():
+            with contextlib.suppress(OSError):
+                cookies_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+        # Store in keyring
+        cred_store = CredentialStore(config.config_dir)
+        try:
+            if cookies_path.exists():
+                cookies_data = json.loads(cookies_path.read_text())
+                cred_store.store_json("x_cookies", cookies_data)
+        except Exception as e:
+            logger.debug("Unexpected error: %s", e)
+            pass
+
+        if screen_name:
+            console.print(f"[green]✅ Connected as @{screen_name}[/green]")
+        else:
+            console.print("[green]✅ X/Twitter connected and cookies saved![/green]")
+
+        # Record the operator's choice of the unofficial path, so the advisory
+        # doctor/preflight keep showing reads "acknowledged" rather than
+        # implying nobody was ever told.
+        if str(getattr(config.x, "auth_mode", "") or "").strip().lower() == "cookies":
+            from xpst.auth_path_risk import record_acknowledgement
+
+            record = record_acknowledgement(
+                config, "x", surface="xpst connect x", auth_mode="cookies"
+            )
+            console.print(
+                f"[dim]Recorded operator choice: X auth_mode=cookies "
+                f"(ban_risk: unofficial_web_client) at {record['acknowledged_at']}.[/dim]"
+            )
+
+        return True
+
+    except ImportError:
+        console.print("[red]❌ twikit not installed. Run: pip install twikit[/red]")
+        return False
+    except Exception as e:
+        logger.error(f"X connection failed: {e}")
+        error_str = str(e).lower()
+        if "password" in error_str or "credentials" in error_str:
+            console.print("[red]❌ Invalid credentials. Check username, email, and password.[/red]")
+        elif "suspended" in error_str:
+            console.print("[red]❌ Account appears to be suspended.[/red]")
+        elif "rate" in error_str:
+            console.print("[red]❌ Rate limited. Try again later.[/red]")
+        else:
+            console.print(f"[red]❌ X connection failed: {e}[/red]")
+        return False
+
+
+# X API v2 (official) endpoints — ban-safe free tier (17 posts/day)
+X_API_V2_ME_URL = "https://api.x.com/2/users/me"
+X_DEV_PORTAL_URL = "https://developer.x.com/en/portal"
+
+
+def _x_api_v2_verify_headers(bearer_token: str) -> dict[str, str]:
+    """Build the Authorization header for the /2/users/me verification call.
+
+    Args:
+        bearer_token: X API v2 Bearer Token (or OAuth 1.0a user-context
+            access token used as a bearer).
+
+    Returns:
+        ``{"Authorization": "Bearer <token>"}`` header dict.
+    """
+    return {"Authorization": f"Bearer {bearer_token}"}
+
+
+def _verify_x_api_v2_creds(
+    api_key: str,
+    api_secret: str,
+    access_token: str,
+    access_token_secret: str,
+    bearer_token: str,
+    timeout: float = 15.0,
+) -> tuple[bool, str]:
+    """Verify X API v2 credentials against ``GET https://api.x.com/2/users/me``.
+
+    Prefers the Bearer Token (app-only). When only the OAuth 1.0a user-context
+    set (API Key/Secret + Access Token/Secret) is available, signs the request
+    with authlib's ``OAuth1Client`` instead.
+
+    Args:
+        api_key: X API Key (Consumer Key).
+        api_secret: X API Key Secret (Consumer Secret).
+        access_token: X Access Token (OAuth 1.0a user context).
+        access_token_secret: X Access Token Secret.
+        bearer_token: X Bearer Token (app-only).
+        timeout: HTTP timeout in seconds.
+
+    Returns:
+        ``(ok, message)`` — on success ``message`` is ``@username (id: ...)``,
+        on failure a short error description.
+    """
+    try:
+        if bearer_token:
+            r = httpx.get(
+                X_API_V2_ME_URL,
+                headers=_x_api_v2_verify_headers(bearer_token),
+                timeout=timeout,
+            )
+        else:
+            from authlib.integrations.httpx_client import OAuth1Client
+
+            client = OAuth1Client(
+                client_id=api_key,
+                client_secret=api_secret,
+                token=access_token,
+                token_secret=access_token_secret,
+            )
+            r = client.get(X_API_V2_ME_URL, timeout=timeout)
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+        return False, str(e)
+
+    if r.status_code == 200:
+        data = r.json().get("data", {})
+        return True, f"@{data.get('username', '?')} (id: {data.get('id', '?')})"
+    return False, f"{r.status_code} {getattr(r, 'text', '')[:200]}"
+
+
+def _connect_x_api_v2(config: XPSTConfig) -> bool:
+    """Connect X via the official X API v2 (ban-safe, free 17 posts/day).
+
+    Flow:
+    1. Guide the user through creating an X Developer app.
+    2. Prompt for API Key/Secret + Access Token/Secret or Bearer Token.
+    3. Verify against https://api.x.com/2/users/me.
+    4. Save ``auth_mode='api_v2'`` + credentials to config and the
+       CredentialStore (key ``x_api_v2_creds``).
+    """
+    console.print("\n[bold]X API v2 Setup[/bold]")
+    console.print(
+        "[dim]Official X API v2 uses OAuth 1.0a user context (API Key/Secret + "
+        "Access Token/Secret) or a Bearer Token. No cookies, no unofficial "
+        "clients — ban-safe posting on the free tier (17 posts/day).[/dim]\n"
+    )
+
+    console.print("[bold]Quick setup:[/bold]")
+    console.print(f"  1. Open: [link={X_DEV_PORTAL_URL}]{X_DEV_PORTAL_URL}[/link]")
+    console.print("  2. Create an app (or reuse an existing one)")
+    console.print("  3. Grant the app Read + Write permissions")
+    console.print("  4. Under 'Keys and tokens', copy the API Key, API Key Secret, Access Token, and Access Token Secret")
+    console.print("  5. (Optional) Copy the Bearer Token for app-only verification\n")
+
+    if _confirm("Open X Developer Portal in browser now?", default=True):
+        _open_browser(X_DEV_PORTAL_URL)
+
+    api_key = _input_secret("API Key (Consumer Key): ")
+    if not api_key:
+        console.print("[red]❌ API Key required.[/red]")
+        return False
+
+    api_secret = _input_secret("API Key Secret (Consumer Secret): ")
+    if not api_secret:
+        console.print("[red]❌ API Key Secret required.[/red]")
+        return False
+
+    access_token = _input_secret("Access Token (leave empty if using Bearer Token only): ")
+    access_token_secret = _input_secret("Access Token Secret (leave empty if using Bearer Token only): ")
+    bearer_token = _input_secret("Bearer Token (optional): ")
+
+    if not access_token and not bearer_token:
+        console.print("[red]❌ Need either the Access Token + Secret (for posting) or a Bearer Token (for verification).[/red]")
+        return False
+
+    # Verify the credentials against /2/users/me
+    console.print("\n[bold]Verifying credentials...[/bold]")
+    ok, message = _verify_x_api_v2_creds(
+        api_key,
+        api_secret,
+        access_token,
+        access_token_secret,
+        bearer_token,
+    )
+    if not ok:
+        console.print(f"[red]❌ Verification failed: {message}[/red]")
+        console.print("[dim]Double-check your keys/tokens in the X Developer Portal.[/dim]")
+        return False
+    console.print(f"[green]✅ Verified as {message}[/green]")
+
+    # Save to config
+    config.x.auth_mode = "api_v2"
+    config.x.api_key = api_key
+    config.x.api_secret = api_secret
+    config.x.access_token = access_token
+    config.x.access_token_secret = access_token_secret
+    config.x.bearer_token = bearer_token
+    config.save()
+
+    # Store in encrypted credential store
+    cred_store = CredentialStore(config.config_dir)
+    try:
+        cred_store.store_json(
+            "x_api_v2_creds",
+            {
+                "api_key": api_key,
+                "api_secret": api_secret,
+                "access_token": access_token,
+                "access_token_secret": access_token_secret,
+                "bearer_token": bearer_token,
+                "connected_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            },
+        )
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+
+    console.print("[green]✅ X API v2 configured (ban-safe, official) — 17 free posts/day![/green]")
+    if not access_token:
+        console.print("[yellow]⚠️  No Access Token set — verification works, but posting needs the Access Token + Secret.[/yellow]")
+    return True
+
+
+# ──────────────────────────────────────────────
+# TikTok (browser cookies via yt-dlp) — SOURCE
+# ──────────────────────────────────────────────
+
+# TikTok Content Posting API (Direct Post) — official OAuth endpoints
+TIKTOK_AUTHORIZE_URL = "https://www.tiktok.com/v2/auth/authorize"
+TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
+TIKTOK_USER_INFO_URL = "https://open.tiktokapis.com/v2/user/info/"
+TIKTOK_OAUTH_SCOPES = "user.info.basic,video.publish,video.upload"
+TIKTOK_DEFAULT_REDIRECT_URI = "http://localhost:8085/callback"
+
+
+def generate_pkce_pair() -> tuple[str, str]:
+    """Generate a PKCE code verifier + S256 code challenge pair.
+
+    Per RFC 7636: the verifier is a high-entropy random string, and the
+    challenge is ``BASE64URL-ENCODE(SHA256(ASCII(verifier)))`` with any
+    trailing ``=`` padding stripped.
+
+    Returns:
+        ``(code_verifier, code_challenge)`` — keep the verifier and send it
+        to the token endpoint; send the challenge on the authorize URL.
+    """
+    code_verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return code_verifier, code_challenge
+
+
+def build_tiktok_authorize_url(
+    client_key: str,
+    redirect_uri: str,
+    code_challenge: str | None = None,
+    state: str | None = None,
+) -> str:
+    """Build the TikTok OAuth authorization URL for a Content Posting API app.
+
+    Args:
+        client_key: TikTok app client key (developers.tiktok.com).
+        redirect_uri: The redirect URI registered on the app.
+        code_challenge: PKCE S256 code challenge (RFC 7636). TikTok requires
+            PKCE for the Content Posting API — omitting it fails with
+            ``errCode 10007`` — so callers should always pass one generated
+            with :func:`generate_pkce_pair`.
+        state: Optional CSRF ``state`` value to include in the URL.
+
+    Returns:
+        Full authorization URL with ``response_type=code``,
+        ``code_challenge``/``code_challenge_method=S256`` when PKCE is used,
+        and the ``user.info.basic,video.publish,video.upload`` scopes.
+    """
+    params: dict[str, str] = {
+        "client_key": client_key,
+        "response_type": "code",
+        "scope": TIKTOK_OAUTH_SCOPES,
+        "redirect_uri": redirect_uri,
+    }
+    if code_challenge:
+        params["code_challenge"] = code_challenge
+        params["code_challenge_method"] = "S256"
+    if state:
+        params["state"] = state
+    return f"{TIKTOK_AUTHORIZE_URL}?{urlencode(params, safe=',')}"
+
+
+def _extract_tiktok_code(pasted: str) -> str:
+    """Extract the OAuth ``code`` from a pasted redirect URL or raw code.
+
+    The user may paste the full redirect URL (``.../callback?code=xxx&...``)
+    or just the ``code`` value. Handles both.
+
+    Args:
+        pasted: The raw string pasted by the user.
+
+    Returns:
+        The extracted authorization code (possibly empty).
+    """
+    pasted = (pasted or "").strip()
+    if "code=" in pasted:
+        query = pasted.split("?", 1)[1] if "?" in pasted else pasted
+        return parse_qs(query).get("code", [""])[0]
+    return pasted
+
+
+def exchange_tiktok_code(
+    client_key: str,
+    client_secret: str,
+    code: str,
+    redirect_uri: str,
+    code_verifier: str | None = None,
+) -> dict:
+    """Exchange a TikTok authorization code for access + refresh tokens.
+
+    Args:
+        client_key: TikTok app client key.
+        client_secret: TikTok app client secret.
+        code: Authorization code from the OAuth redirect.
+        redirect_uri: Must match the one used in the authorize URL.
+        code_verifier: PKCE code verifier used to build the authorize URL
+            (from :func:`generate_pkce_pair`). Required when the authorize
+            URL carried a ``code_challenge``.
+
+    Returns:
+        The parsed token response dict (``access_token``, ``refresh_token``...).
+
+    Raises:
+        ValueError: On HTTP error or missing ``access_token`` in the response.
+    """
+    import httpx
+
+    data: dict[str, str] = {
+        "client_key": client_key,
+        "client_secret": client_secret,
+        "code": code,
+        "grant_type": "authorization_code",
+        "redirect_uri": redirect_uri,
+    }
+    if code_verifier:
+        data["code_verifier"] = code_verifier
+    resp = httpx.post(
+        TIKTOK_TOKEN_URL,
+        data=data,
+        timeout=30,
+    )
+    if resp.status_code != 200:
+        raise ValueError(
+            f"TIKTOK_TOKEN_EXCHANGE_FAILED: HTTP {resp.status_code}: {resp.text[:200]}"
+        )
+    data = resp.json()
+    if not data.get("access_token"):
+        raise ValueError(
+            f"TIKTOK_TOKEN_EXCHANGE_FAILED: no access_token in response: {resp.text[:200]}"
+        )
+    return data
+
+
+def _verify_tiktok_token(access_token: str) -> str | None:
+    """Verify a TikTok access token via the user/info endpoint.
+
+    Args:
+        access_token: The OAuth access token to verify.
+
+    Returns:
+        Display name (fallback: username) of the connected account, or None
+        if verification failed.
+    """
+    import httpx
+
+    try:
+        resp = httpx.get(
+            TIKTOK_USER_INFO_URL,
+            params={"fields": "open_id,union_id,avatar_url,display_name,username"},
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            logger.warning(
+                "TikTok user/info verification failed: HTTP %s: %s",
+                resp.status_code,
+                resp.text[:200],
+            )
+            return None
+        user = resp.json().get("data", {}).get("user", {})
+        return user.get("display_name") or user.get("username") or None
+    except Exception as e:
+        logger.debug("TikTok user/info verification error: %s", e)
+        return None
+
+
+def _connect_tiktok_upload_destination(config: XPSTConfig) -> bool:
+    """Configure the official TikTok Content Posting API upload destination.
+
+    Runs the OAuth 2.0 authorization-code flow against developers.tiktok.com:
+
+    1. Prompt for the app's client_key / client_secret
+    2. Build + open the authorize URL (scope: user.info.basic,video.publish,video.upload)
+    3. Prompt the user to paste the ``code`` from the redirect
+    4. Exchange the code for access_token + refresh_token
+    5. Persist credentials (config + CredentialStore) and verify via user/info
+
+    Args:
+        config: xPST configuration to update in place.
+
+    Returns:
+        True on success, False otherwise.
+    """
+    console.print("\n[bold]TikTok Upload Destination (Content Posting API)[/bold]")
+    console.print(
+        "[dim]This enables official, ban-safe uploads. You need a TikTok app "
+        "with the Content Posting API enabled (scopes: user.info.basic, "
+        "video.publish, video.upload).[/dim]\n"
+    )
+
+    client_key = console.input("[cyan]TikTok app client key: [/cyan]").strip()
+    if not client_key:
+        console.print("[red]❌ Client key required.[/red]")
+        return False
+
+    client_secret = _input_secret("TikTok app client secret: ")
+    if not client_secret:
+        console.print("[red]❌ Client secret required.[/red]")
+        return False
+
+    redirect_uri = TIKTOK_DEFAULT_REDIRECT_URI
+    if not _confirm(
+        f"Use default redirect URI {TIKTOK_DEFAULT_REDIRECT_URI}? "
+        "(say N if your app has a public/custom redirect)",
+        default=True,
+    ):
+        redirect_uri = console.input("[cyan]Your app's redirect URI: [/cyan]").strip()
+        if not redirect_uri:
+            console.print("[red]❌ Redirect URI required.[/red]")
+            return False
+
+    code_verifier, code_challenge = generate_pkce_pair()
+    authorize_url = build_tiktok_authorize_url(client_key, redirect_uri, code_challenge)
+    console.print("\n[bold]Authorize in your browser:[/bold]")
+    console.print(f"[link={authorize_url}]{authorize_url}[/link]\n")
+
+    code: str | None = None
+
+    # Preferred path: capture the redirect automatically on a local listener
+    # (same pattern as the YouTube flow) so the user never pastes codes.
+    from xpst.utils.oauth_local import LocalOAuthListener
+
+    listener: LocalOAuthListener | None = None
+    if redirect_uri.startswith("http://127.0.0.1") or redirect_uri.startswith("http://localhost"):
+        try:
+            listener = LocalOAuthListener(port=8085, path="/callback")
+            listener.start()
+            console.print(f"[dim]Listening for the redirect on {listener.redirect_uri} …[/dim]")
+        except OSError as e:
+            logger.debug("Local OAuth listener unavailable (%s) — falling back to paste", e)
+            listener = None
+
+    if listener is not None:
+        try:
+            _open_browser(authorize_url)
+        except Exception as e:  # noqa: BLE001 — headless boxes have no browser
+            logger.debug("Could not open browser: %s", e)
+
+        try:
+            result = listener.wait(timeout=300)
+            if result.success and result.code:
+                code = result.code
+            else:
+                console.print(f"[red]❌ Authorization failed: {result.error or 'unknown error'}[/red]")
+        except TimeoutError:
+            console.print(
+                "[yellow]⚠ Did not catch the redirect in time — you can paste the "
+                "redirect URL below instead.[/yellow]"
+            )
+        finally:
+            listener.close()
+
+    if code is None:
+        if listener is not None:
+            console.print("[dim]Paste the full redirect URL or just the ?code= value below.[/dim]")
+        else:
+            console.print(
+                "[dim]After authorizing, you'll be redirected. Paste the full redirect "
+                "URL or just the ?code= value below.[/dim]"
+            )
+        pasted = console.input("[cyan]Redirect URL or code: [/cyan]").strip()
+        code = _extract_tiktok_code(pasted)
+
+    if not code:
+        console.print("[red]❌ Authorization code required.[/red]")
+        return False
+
+    console.print("\n[bold]Exchanging code for access tokens...[/bold]")
+    try:
+        token_data = exchange_tiktok_code(client_key, client_secret, code, redirect_uri, code_verifier)
+    except Exception as e:
+        console.print(f"[red]❌ Token exchange failed: {e}[/red]")
+        return False
+
+    access_token = token_data["access_token"]
+    refresh_token = token_data.get("refresh_token", "")
+
+    # Persist in config.yaml + encrypted CredentialStore
+    config.tiktok.enabled = True
+    config.tiktok.client_key = client_key
+    config.tiktok.client_secret = client_secret
+    config.tiktok.access_token = access_token
+    config.tiktok.refresh_token = refresh_token
+    config.save()
+
+    cred_store = CredentialStore(config.config_dir)
+    try:
+        cred_store.store("tiktok_client_secret", client_secret)
+        cred_store.store("tiktok_access_token", access_token)
+        if refresh_token:
+            cred_store.store("tiktok_refresh_token", refresh_token)
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+
+    # Verify the token works
+    display_name = _verify_tiktok_token(access_token)
+    if display_name:
+        console.print(f"[green]✅ TikTok upload destination connected as {display_name}![/green]")
+    else:
+        console.print("[green]✅ TikTok upload destination configured (tokens saved)![/green]")
+        console.print(
+            "[dim]   Could not verify user info — tokens will be used on first upload.[/dim]"
+        )
+    return True
+
+
+def connect_tiktok(config: XPSTConfig) -> bool:
+    """
+    Configure TikTok source with browser cookie extraction.
+
+    Flow:
+    1. Check if yt-dlp is installed
+    2. Enable cookies_from_browser in config
+    3. Test by fetching a video
+    """
+    console.print(Panel("[bold]TikTok Source[/bold]", style="cyan"))
+    console.print("[dim]TikTok doesn't require authentication for downloads.[/dim]")
+    console.print("[dim]Using browser cookies enables higher quality (HD without watermarks).[/dim]\n")
+
+    # Check yt-dlp
+    import shutil
+    yt_dlp = shutil.which("yt-dlp")
+    if not yt_dlp:
+        console.print("[yellow]⚠️  yt-dlp not found. TikTok downloads will need it.[/yellow]")
+        console.print("Install with: [cyan]pip install yt-dlp[/cyan]\n")
+
+    # Get TikTok username
+    current_username = config.tiktok.username
+    if current_username:
+        console.print(f"[dim]Current TikTok username: @{current_username}[/dim]")
+        if not _confirm(f"Keep using @{current_username}?", default=True):
+            current_username = ""
+
+    if not current_username:
+        username = console.input("[cyan]TikTok username to watch (without @): [/cyan]").strip()
+        if username.startswith("@"):
+            username = username[1:]
+        if not username:
+            console.print("[red]❌ Username required.[/red]")
+            return False
+        current_username = username
+
+    # Enable browser cookies
+    if _confirm("Enable browser cookies for HD quality? (recommended)", default=True):
+        config.tiktok.cookies_from_browser = True
+        console.print("[dim]Will auto-extract cookies from your browser (Chrome, Safari, Firefox, etc.)[/dim]")
+
+    # Save username
+    config.tiktok.username = current_username
+    config.save()
+
+    console.print(f"[green]✅ TikTok source configured for @{current_username}[/green]")
+    if config.tiktok.cookies_from_browser:
+        console.print("[dim]   Browser cookies will be used automatically for downloads.[/dim]")
+
+    # Optional: official upload destination via the TikTok Content Posting API.
+    # The source/cookies path above is untouched; this only adds the OAuth
+    # destination flow when the user opts in.
+    if _confirm("Configure upload destination (Content Posting API)?", default=False):
+        return _connect_tiktok_upload_destination(config)
+
+    return True
+
+
+# ──────────────────────────────────────────────
+# Threads (Meta Threads API — long-lived access token)
+# ──────────────────────────────────────────────
+
+def connect_threads(config: XPSTConfig) -> bool:
+    """
+    Connect Threads via the Meta Threads API.
+
+    Flow:
+    1. Prompt for the Threads user ID and a long-lived access token
+    2. Store credentials in config + encrypted credential store
+    """
+    console.print(Panel("[bold]Threads Connection[/bold]", style="white"))
+    console.print(
+        "[dim]Threads uses the Meta Threads API. You need a long-lived access "
+        "token and your numeric Threads user ID.[/dim]\n"
+    )
+    console.print("[bold]Quick setup:[/bold]")
+    console.print("  1. Go to: [link=https://developers.facebook.com/apps]https://developers.facebook.com/apps[/link]")
+    console.print("  2. Create or select an app and add the 'Threads API' use case")
+    console.print("  3. Generate a long-lived access token")
+    console.print("  4. Get your Threads user ID from the Graph API Explorer\n")
+
+    if _confirm("Open Meta Developer console in browser?", default=True):
+        _open_browser("https://developers.facebook.com/apps")
+
+    threads_user_id = console.input("[cyan]Threads user ID (numbers): [/cyan]").strip()
+    if not threads_user_id:
+        console.print("[red]❌ Threads user ID required.[/red]")
+        return False
+
+    access_token = _input_secret("Long-lived access token: ")
+    if not access_token:
+        console.print("[red]❌ Access token required.[/red]")
+        return False
+
+    config.threads.enabled = True
+    config.threads.graph_access_token = access_token
+    config.threads.threads_user_id = threads_user_id
+    config.save()
+
+    cred_store = CredentialStore(config.config_dir)
+    try:
+        cred_store.store("threads_access_token", access_token)
+        cred_store.store("threads_user_id", threads_user_id)
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+
+    console.print("[green]✅ Threads configured![/green]")
+    return True
+
+# ──────────────────────────────────────────────
+# Bluesky (AT Protocol, app password)
+# ──────────────────────────────────────────────
+
+BLUESKY_APP_PASSWORD_URL = "https://bsky.app/settings/app-passwords"
+
+
+def _verify_bluesky_app_password(
+    identifier: str,
+    app_password: str,
+    service: str,
+    timeout: float = 20.0,
+) -> dict[str, Any] | None:
+    """Exchange the handle/app password for a session; ``None`` on failure.
+
+    This is the connect-time proof: the PDS either accepts the credential or it
+    does not, and the account is only marked enabled when it does. The session
+    it returns is what gets cached, so connecting an account costs one login
+    instead of one per post.
+    """
+    # Same normalisation the uploader uses (scheme added when the operator
+    # typed a bare host, trailing slash dropped), so a value that works at
+    # publish time also works at connect time.
+    from xpst.platforms.bluesky import _service_base
+
+    url = f"{_service_base(service)}/xrpc/com.atproto.server.createSession"
+
+    async def _call() -> dict[str, Any] | None:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(
+                url, json={"identifier": identifier, "password": app_password}
+            )
+        if response.status_code >= 400:
+            try:
+                body = response.json()
+                detail = f"{body.get('error', '')}: {body.get('message', '')}".strip(": ")
+            except ValueError:
+                detail = response.text[:200]
+            console.print(f"[red]❌ Bluesky rejected this credential (HTTP {response.status_code} {detail}).[/red]")
+            return None
+        body = response.json()
+        if not isinstance(body, dict) or not body.get("accessJwt"):
+            console.print("[red]❌ Bluesky answered without a session token.[/red]")
+            return None
+        return body
+
+    try:
+        return asyncio.run(_call())
+    except Exception as exc:  # noqa: BLE001 - a network failure is a failed connect
+        console.print(f"[red]❌ Could not reach Bluesky: {exc}[/red]")
+        return None
+
+
+def connect_bluesky(config: XPSTConfig) -> bool:
+    """Connect a Bluesky account with an app password (AT Protocol).
+
+    Bluesky has no OAuth consent screen for third-party clients without app
+    registration, so the credential is a long-lived **app password** the account
+    owner creates in Bluesky's own settings (full access can be revoked there
+    without changing the account password). The handle is not a secret and is
+    written to config; the app password and the session JWTs go to the encrypted
+    credential store only.
+    """
+    from xpst.platforms.bluesky import CRED_APP_PASSWORD, CRED_IDENTIFIER, CRED_SESSION
+
+    console.print(Panel("[bold]Bluesky Connection[/bold]", style="white"))
+    console.print(
+        "[dim]Bluesky publishes through the open AT Protocol, so there is no app review "
+        "and no fee — you just need an app password.[/dim]\n"
+    )
+    console.print("[bold]Quick setup:[/bold]")
+    console.print(f"  1. Open [link={BLUESKY_APP_PASSWORD_URL}]{BLUESKY_APP_PASSWORD_URL}[/link]")
+    console.print("  2. Create an app password (name it 'xPST')")
+    console.print("  3. Paste it below — it is stored encrypted and never written to config.yaml\n")
+
+    if _confirm("Open Bluesky app-password settings in browser?", default=True):
+        _open_browser(BLUESKY_APP_PASSWORD_URL)
+
+    identifier = console.input(
+        "[cyan]Bluesky handle (e.g. yourname.bsky.social or a custom domain): [/cyan]"
+    ).strip()
+    if not identifier:
+        console.print("[red]❌ A Bluesky handle is required.[/red]")
+        return False
+
+    app_password = _input_secret("App password: ")
+    if not app_password:
+        console.print("[red]❌ An app password is required.[/red]")
+        return False
+
+    service = str(getattr(config.bluesky, "service", "") or "https://bsky.social")
+    session = _verify_bluesky_app_password(identifier, app_password, service)
+    if session is None:
+        return False
+
+    config.bluesky.enabled = True
+    config.bluesky.identifier = str(session.get("handle") or identifier)
+    config.save()
+
+    cred_store = CredentialStore(config.config_dir)
+    cred_store.store(CRED_IDENTIFIER, str(session.get("handle") or identifier))
+    cred_store.store(CRED_APP_PASSWORD, app_password)
+    cred_store.store_json(CRED_SESSION, session)
+
+    console.print(
+        f"[green]✅ Bluesky connected as {config.bluesky.identifier}[/green] "
+        "[dim](text, image and multi-image posts)[/dim]"
+    )
+    return True
+
+
+# ──────────────────────────────────────────────
+# Messenger (static Page Access Token)
+# ──────────────────────────────────────────────
+
+def connect_messenger(config: XPSTConfig) -> bool:
+    """Connect Messenger via a static Page Access Token (no refresh flow).
+
+    Flow:
+    1. Prompt for the Page Access Token (+ optional App Secret / verify token)
+    2. Enable the account and persist credentials in the encrypted store
+    """
+    console.print(Panel("[bold]Messenger Connection[/bold]", style="blue"))
+    console.print(
+        "[dim]Messenger uses a static Page Access Token (long-lived) plus an App "
+        "Secret for webhook signature verification. Both are stored encrypted in "
+        "the CredentialStore.[/dim]\n"
+    )
+    console.print("[bold]Quick setup:[/bold]")
+    console.print("  1. Go to: [link=https://developers.facebook.com/apps]https://developers.facebook.com/apps[/link]")
+    console.print("  2. Select your app → Messenger → Settings → generate a Page Access Token")
+    console.print("  3. Copy your App ID + App Secret from App → Settings → Basic")
+    console.print("  4. Pick a webhook verify token (any string) and set it in the webhook config\n")
+
+    if _confirm("Open Meta Developer console in browser?", default=True):
+        _open_browser("https://developers.facebook.com/apps")
+
+    page_token = _input_secret("Page Access Token (starts EAAG...): ")
+    if not page_token:
+        console.print("[red]❌ Page Access Token required.[/red]")
+        return False
+
+    app_secret = _input_secret("App Secret (optional, for webhook signatures): ")
+    verify_token = console.input("[cyan]Webhook verify token (any string, optional): [/cyan]").strip()
+    page_id = console.input("[cyan]Page ID (numeric, optional): [/cyan]").strip()
+    app_id = console.input("[cyan]App ID (numeric, optional): [/cyan]").strip()
+
+    config.messenger.enabled = True
+    config.messenger.page_access_token = page_token
+    if app_secret:
+        config.messenger.app_secret = app_secret
+    if verify_token:
+        config.messenger.verify_token = verify_token
+    if page_id:
+        config.messenger.page_id = page_id
+    if app_id:
+        config.messenger.app_id = app_id
+    config.save()
+
+    cred_store = CredentialStore(config.config_dir)
+    try:
+        cred_store.store("messenger_page_token", page_token)
+        if app_secret:
+            cred_store.store("messenger_app_secret", app_secret)
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+
+    console.print("[green]✅ Messenger configured![/green]")
+    console.print(
+        "[dim]Auto-reply is OFF by default. Enable it via config: "
+        "accounts.messenger.auto_reply: true (plus reply_rules).[/dim]"
+    )
+    return True
+
+
+# ──────────────────────────────────────────────
+# Facebook Page (Page-scoped publishing, Facebook Login for Business)
+# ──────────────────────────────────────────────
+
+#: Redirect URI used for the Facebook Login for Business dialog. Facebook
+#: requires it to match a URI registered on the app *exactly*; override it with
+#: XPST_FACEBOOK_REDIRECT_URI when the app registers something else.
+FACEBOOK_DEFAULT_REDIRECT_URI = "https://localhost/"
+
+#: Environment variables that let an agent complete ``xpst auth facebook``
+#: without a TTY. Each one maps to a field in the input mapping below; none of
+#: them is ever echoed back in output.
+FACEBOOK_ENV_VARS: dict[str, str] = {
+    "app_id": "XPST_FACEBOOK_APP_ID",
+    "app_secret": "XPST_FACEBOOK_APP_SECRET",
+    "user_token": "XPST_FACEBOOK_USER_TOKEN",
+    "oauth_code": "XPST_FACEBOOK_OAUTH_CODE",
+    "page_id": "XPST_FACEBOOK_PAGE_ID",
+    "login_config_id": "XPST_FACEBOOK_LOGIN_CONFIG_ID",
+    "redirect_uri": "XPST_FACEBOOK_REDIRECT_URI",
+}
+
+
+def _facebook_prompt(prompt: str, *, secret: bool = False) -> str:
+    """Prompt for one Facebook input, returning ``""`` on closed stdin.
+
+    ``console.input``/``getpass`` raise ``EOFError`` when stdin is a pipe or
+    /dev/null (agent and CI runs). Treating that as an empty answer lets the
+    caller fail with a precise message instead of a traceback.
+    """
+    try:
+        if secret:
+            return _input_secret(prompt).strip()
+        return console.input(f"[cyan]{prompt}[/cyan]").strip()
+    except (EOFError, KeyboardInterrupt):
+        return ""
+
+
+def _facebook_inputs(interactive: bool) -> dict[str, str]:
+    """Collect Facebook auth inputs from the environment, then the terminal.
+
+    Environment variables win and are the only source in a non-interactive run
+    (an agent cannot answer a prompt), so a headless caller gets a deterministic
+    error naming the missing variable rather than an EOF traceback.
+    """
+    import os
+
+    inputs = {key: os.environ.get(var, "").strip() for key, var in FACEBOOK_ENV_VARS.items()}
+    if not interactive:
+        return inputs
+
+    console.print(Panel("[bold]Facebook Page Connection[/bold]", style="blue"))
+    console.print(
+        "[dim]Facebook publishing is Page-scoped: the Graph API posts as a Page you "
+        "administer, never as a personal profile. This needs your own Meta app "
+        "(Facebook Login for Business, Standard Access).[/dim]\n"
+    )
+    console.print("[bold]Quick setup:[/bold]")
+    console.print("  1. Go to: [link=https://developers.facebook.com/apps]https://developers.facebook.com/apps[/link]")
+    console.print("  2. Create/select an app → add the [bold]Facebook Login for Business[/bold] product")
+    console.print("  3. In the Graph API Explorer pick that app and grant "
+                  "[bold]pages_show_list, pages_read_engagement, pages_manage_posts[/bold]")
+    console.print("  4. Generate a [bold]User Access Token[/bold] and paste it below\n")
+
+    if not inputs["app_id"]:
+        inputs["app_id"] = _facebook_prompt("Meta App ID (optional, needed for the long-lived token): ")
+    if inputs["app_id"] and not inputs["app_secret"]:
+        inputs["app_secret"] = _facebook_prompt("Meta App Secret (optional, hidden): ", secret=True)
+    if not inputs["login_config_id"]:
+        inputs["login_config_id"] = _facebook_prompt(
+            "Facebook Login for Business configuration ID (optional, press Enter to skip): "
+        )
+    if not inputs["user_token"] and not inputs["oauth_code"]:
+        pasted = _facebook_prompt(
+            "User Access Token — or the full redirect URL you landed on after approving: ",
+            secret=True,
+        )
+        if pasted:
+            # A pasted redirect URL carries the authorization code; a bare value
+            # is the token itself.
+            if "code=" in pasted or pasted.startswith("http"):
+                inputs["oauth_code"] = pasted
+            else:
+                inputs["user_token"] = pasted
+    if not inputs["redirect_uri"]:
+        inputs["redirect_uri"] = FACEBOOK_DEFAULT_REDIRECT_URI
+    return inputs
+
+
+def _facebook_code_from_pasted(pasted: str) -> str:
+    """Extract the ``code`` query parameter from a pasted redirect URL."""
+    if pasted.startswith("http"):
+        with contextlib.suppress(ValueError):
+            values = parse_qs(urlsplit(pasted).query).get("code") or []
+            if values:
+                return values[0]
+    for pair in pasted.replace("?", "&").split("&"):
+        if pair.startswith("code="):
+            return pair[len("code=") :]
+    return pasted.strip()
+
+
+def _facebook_emit(report: dict[str, Any], as_json: bool) -> None:
+    """Print the auth report for humans.
+
+    JSON callers get the report as a return value (the CLI owns stdout for
+    ``--json``), so this is a no-op in JSON mode — a flow must never print two
+    representations of the same result.
+    """
+    if as_json:
+        return
+
+    if report.get("success"):
+        page = report.get("page") or {}
+        console.print(f"[green]✅ Connected to Facebook Page {page.get('name')} ({page.get('id')})[/green]")
+        if len(report.get("pages") or []) > 1:
+            console.print(
+                f"[dim]Selected Page {page.get('id')} out of {len(report['pages'])} "
+                "administered Pages. Re-run with the Page id to switch.[/dim]"
+            )
+        console.print("[dim]Publishing is Page-scoped; the Page access token is stored encrypted.[/dim]")
+    else:
+        console.print(f"[red]❌ Facebook connection failed: {report.get('error')}[/red]")
+        if report.get("hint"):
+            console.print(f"[dim]{report['hint']}[/dim]")
+
+
+def facebook_auth(
+    config: XPSTConfig,
+    *,
+    as_json: bool = False,
+    interactive: bool | None = None,
+) -> dict[str, Any]:
+    """Run the Page-scoped Facebook auth flow and return a structured report.
+
+    Flow (both paths end in a verified Page access token):
+
+    * **token** — a user access token from the Graph API Explorer (the BYO-app
+      Standard Access path); it is extended to a long-lived token when app
+      credentials are available, then ``GET /me/accounts`` discovers the Pages.
+    * **code** — the Facebook Login for Business dialog is opened (or its URL
+      printed) and the resulting authorization code is exchanged.
+
+    Then: pick the Page (explicit id, or the only Page), verify the Page token
+    against ``GET /{page_id}``, and store everything encrypted.
+
+    Args:
+        config: Loaded xPST configuration.
+        as_json: Emit the report as JSON instead of human output.
+        interactive: Force prompt/no-prompt behaviour (defaults to a real TTY).
+
+    Returns:
+        ``{"platform", "success", "page", "pages", "user", "auth_mode",
+        "redirect_uri", "error", "hint", "steps"}`` — never any token.
+    """
+    from xpst.platforms.facebook import (
+        FACEBOOK_CRED_KEYS,
+        FacebookError,
+        FacebookGraphClient,
+        FacebookPageRequiredError,
+        public_page_listing,
+        select_page,
+    )
+
+    if interactive is None:
+        interactive = stdin_is_interactive()
+
+    inputs = _facebook_inputs(interactive)
+    report: dict[str, Any] = {
+        "platform": "facebook",
+        "success": False,
+        "page": None,
+        "pages": [],
+        "user": None,
+        "auth_mode": None,
+        "redirect_uri": inputs.get("redirect_uri") or FACEBOOK_DEFAULT_REDIRECT_URI,
+        "error": None,
+        "hint": None,
+        "steps": [],
+    }
+
+    def record(step: str, ok: bool, detail: str = "") -> None:
+        report["steps"].append({"step": step, "ok": ok, "detail": detail})
+
+    def fail(message: str, *, hint: str | None = None) -> dict[str, Any]:
+        report["error"] = message
+        report["hint"] = hint
+        record("done", False, message)
+        _facebook_emit(report, as_json)
+        return report
+
+    pasted = inputs.get("oauth_code") or ""
+    user_token = inputs.get("user_token") or ""
+    app_id = inputs.get("app_id") or ""
+    app_secret = inputs.get("app_secret") or ""
+    login_config_id = inputs.get("login_config_id") or ""
+    redirect_uri = report["redirect_uri"]
+    code_mode = bool(pasted)
+    report["auth_mode"] = "oauth_code" if code_mode else "user_token"
+
+    if code_mode and not (app_id and app_secret):
+        return fail(
+            "FACEBOOK_APP_REQUIRED: exchanging an authorization code needs the Meta App ID "
+            "and App Secret.",
+            hint="Set XPST_FACEBOOK_APP_ID and XPST_FACEBOOK_APP_SECRET, or paste a user "
+            "access token from the Graph API Explorer instead.",
+        )
+    if not code_mode and not user_token:
+        return fail(
+            "FACEBOOK_CREDENTIALS_REQUIRED: a user access token (or an authorization code) "
+            "is required to discover your Pages.",
+            hint="Set XPST_FACEBOOK_USER_TOKEN for a non-interactive run, or paste the token "
+            "from the Graph API Explorer when prompted.",
+        )
+
+    client = FacebookGraphClient(proxy=getattr(config.facebook, "proxy", None))
+    try:
+        if code_mode:
+            code = _facebook_code_from_pasted(pasted)
+            try:
+                payload = client.exchange_code_for_user_token(app_id, app_secret, redirect_uri, code)
+            except FacebookError as exc:
+                return fail(f"FACEBOOK_CODE_EXCHANGE_FAILED: {exc}")
+            user_token = str(payload.get("access_token", "") or "")
+            if not user_token:
+                return fail("FACEBOOK_CODE_EXCHANGE_FAILED: Facebook returned no access token.")
+            record("code_exchange", True)
+
+        # Extend to a long-lived user token when we hold the app credentials —
+        # Page tokens inherit the user token's lifetime.
+        if app_id and app_secret:
+            try:
+                extended = client.extend_user_token(app_id, app_secret, user_token)
+            except FacebookError as exc:
+                record("token_extension", False, str(exc))
+                logger.warning("Facebook long-lived token exchange failed: %s", exc)
+            else:
+                extended_token = str(extended.get("access_token", "") or "")
+                if extended_token:
+                    user_token = extended_token
+                    record("token_extension", True)
+        else:
+            record(
+                "token_extension",
+                False,
+                "no app id/secret supplied — the token keeps its current lifetime",
+            )
+
+        try:
+            user = client.whoami(user_token)
+        except FacebookError as exc:
+            return fail(
+                f"FACEBOOK_USER_TOKEN_INVALID: {exc}",
+                hint="Regenerate the user access token in the Graph API Explorer with "
+                "pages_show_list granted.",
+            )
+        report["user"] = {"id": str(user.get("id", "")), "name": str(user.get("name", ""))}
+        record("user_token_verified", True, f"user {report['user']['id']}")
+
+        try:
+            pages = client.list_pages(user_token)
+        except FacebookPageRequiredError as exc:
+            return fail(str(exc))
+        except FacebookError as exc:
+            return fail(f"FACEBOOK_PAGE_LIST_FAILED: {exc}")
+        report["pages"] = public_page_listing(pages)
+        record("pages_listed", True, f"{len(pages)} Page(s) via GET /me/accounts")
+
+        wanted_page_id = inputs.get("page_id") or str(getattr(config.facebook, "page_id", "") or "")
+        if interactive and len(pages) > 1 and not wanted_page_id:
+            console.print("[bold]Pages you administer:[/bold]")
+            for page in pages:
+                console.print(f"  • {page.id} — {page.name} ({page.category or 'uncategorized'})")
+            wanted_page_id = _facebook_prompt("Page ID to publish as: ")
+        try:
+            page = select_page(pages, wanted_page_id or None)
+        except FacebookPageRequiredError as exc:
+            return fail(str(exc))
+
+        page_token = page.access_token
+        if not page_token:
+            try:
+                page_token = client.page_token_for(page.id, user_token)
+            except FacebookError as exc:
+                return fail(f"FACEBOOK_PAGE_TOKEN_MISSING: {exc}")
+
+        # Prove the Page token works against the Page it claims to be, before
+        # anything is stored.
+        try:
+            verified = client.fetch_page(page.id, page_token)
+        except FacebookError as exc:
+            return fail(
+                f"FACEBOOK_PAGE_TOKEN_INVALID: {exc}",
+                hint="The user token must carry pages_show_list and an admin/editor role "
+                "on this Page.",
+            )
+        if str(verified.get("id", "")) != str(page.id):
+            return fail(
+                "FACEBOOK_PAGE_MISMATCH: the Page token belongs to Page "
+                f"{verified.get('id')}, not {page.id}."
+            )
+        page_name = str(verified.get("name", "") or page.name)
+        record("page_token_verified", True, f"Page {page.id} ({page_name})")
+    finally:
+        client.close()
+
+    # Persist: encrypted store first (the real credential), config fields as a
+    # write-through convenience so a fresh process sees the selection.
+    cred_store = CredentialStore(config.config_dir)
+    try:
+        cred_store.store(FACEBOOK_CRED_KEYS["page_id"], page.id)
+        cred_store.store(FACEBOOK_CRED_KEYS["page_access_token"], page_token)
+        cred_store.store(FACEBOOK_CRED_KEYS["user_token"], user_token)
+        if app_id:
+            cred_store.store(FACEBOOK_CRED_KEYS["app_id"], app_id)
+        if app_secret:
+            cred_store.store(FACEBOOK_CRED_KEYS["app_secret"], app_secret)
+    except Exception as exc:  # noqa: BLE001 — surface, never half-succeed silently
+        return fail(f"FACEBOOK_STORE_FAILED: could not store credentials encrypted: {exc}")
+
+    config.facebook.enabled = True
+    config.facebook.page_id = page.id
+    config.facebook.page_name = page_name
+    config.facebook.page_access_token = page_token
+    config.facebook.graph_user_token = user_token
+    if app_id:
+        config.facebook.app_id = app_id
+    if app_secret:
+        config.facebook.app_secret = app_secret
+    if login_config_id:
+        config.facebook.login_config_id = login_config_id
+    config.save()
+
+    report["success"] = True
+    report["page"] = {**page.to_public_dict(), "name": page_name}
+    record("stored", True, "encrypted CredentialStore + config (enabled=True)")
+    _facebook_emit(report, as_json)
+    return report
+
+
+def connect_facebook(config: XPSTConfig) -> bool:
+    """Connect the Page-scoped Facebook destination (wizard entry point)."""
+    return bool(facebook_auth(config).get("success"))
+
+
+# ──────────────────────────────────────────────
+# Test connections
+# ──────────────────────────────────────────────
+
+class ConnectionResults(dict[str, bool]):
+    """Backward-compatible bool mapping carrying canonical probe details.
+
+    The boolean answers "is this provider usable for the role it is listed
+    as?" — for a provider that declares a POSTING role, True means its posting
+    role was verified ready. A source-only platform (TikTok before its Content
+    Posting API app is approved) is therefore False here even when the download
+    side is healthy: it is never a posting destination. ``posting_truth`` and
+    ``providers`` carry the per-role detail (including ``source_only`` and the
+    source verdict) for callers that need both facts.
+    """
+
+    def __init__(
+        self,
+        values: dict[str, bool],
+        canonical_status: dict[str, Any],
+        posting_truth: dict[str, dict[str, Any]] | None = None,
+        providers: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
+        super().__init__(values)
+        self.canonical_status = canonical_status
+        self.posting_truth = posting_truth or {}
+        self.providers = providers or {}
+
+    @property
+    def source_only(self) -> list[str]:
+        """Providers that can be read from but never posted to."""
+        return sorted(
+            name
+            for name, truth in self.posting_truth.items()
+            if truth.get("source_only")
+        )
+
+    @property
+    def ready_sources(self) -> list[str]:
+        """Providers whose source role a live probe found ready."""
+        return sorted(
+            name
+            for name, entry in self.providers.items()
+            if (entry.get("role_status") or {}).get("source", {}).get("ready")
+        )
+
+
+async def test_connections(config: XPSTConfig) -> ConnectionResults:
+    """Return backward-compatible booleans from canonical live checks.
+
+    The old implementation had independent probes and passed serialized X
+    cookies to ``twikit.load_cookies`` as a filename.  Keeping this wrapper's
+    bool return shape lets existing callers survive while doctor/auth/API all
+    share the same underlying canonical probe.
+
+    A "connected" boolean means the provider's POSTING role is ready, because
+    that is the capability every caller of this wrapper acts on. Reading the
+    platform-level ``authenticated`` flag instead reported TikTok as connected
+    on the strength of its download source — a posting destination the engine
+    cannot deliver. Source-only providers keep their source verdict available
+    through :attr:`ConnectionResults.posting_truth` / ``ready_sources``.
+    """
+    from xpst.auth_status import collect_live_auth_status_async
+    from xpst.provider_truth import canonical_status_report, posting_truth
+
+    canonical = await collect_live_auth_status_async(config)
+    providers = canonical_status_report(config, canonical)["providers"]
+    values: dict[str, bool] = {}
+    truth: dict[str, dict[str, Any]] = {}
+    for name, entry in providers.items():
+        if name == "local":
+            continue
+        verdict = posting_truth(entry)
+        truth[name] = verdict
+        values[name] = (
+            verdict["can_post"]
+            if verdict["posting_destination"]
+            else bool(entry.get("authenticated"))
+        )
+    return ConnectionResults(values, canonical, truth, providers)
+
+
+# ──────────────────────────────────────────────
+# Main connect wizard
+# ──────────────────────────────────────────────
+
+def run_connect(
+    platforms: list[str] | None = None,
+    test_only: bool = False,
+    open_browser: bool | None = None,
+    config_path: str | None = None,
+) -> bool:
+    """
+    Run the connection wizard.
+
+    Args:
+        platforms: List of platforms to connect (None = all)
+        test_only: If True, only test existing connections
+        config_path: Config file the caller asked for (``xpst --config``).
+            Without it the wizard silently wrote credentials into the default
+            ``~/.xpst`` even when the operator named another config — the
+            operator-choice record and the session it describes must land in
+            the same directory.
+
+    Returns:
+        True if all selected platforms connected successfully
+    """
+    global _OPEN_BROWSER
+    _OPEN_BROWSER = open_browser
+    config = XPSTConfig.load(config_path)
+    _get_creds_dir(config)
+    console.print(Panel.fit(
+        "[bold blue]xPST Account Connection[/bold blue]\n"
+        "Connect your social media accounts in minutes\n\n"
+        "[dim]Each platform will be connected and tested automatically.[/dim]",
+        border_style="blue",
+    ))
+    console.print()
+
+    if test_only:
+        results = asyncio.run(test_connections(config))
+        # The posting verdict travels with the results: a source-only platform
+        # is False here (it can never be a posting destination) and must be
+        # reported as such instead of as a broken account to go fix.
+        posting_truth = getattr(results, "posting_truth", {})
+        source_only = [
+            name for name, truth in posting_truth.items() if truth.get("source_only")
+        ]
+        # Filter results to requested platforms
+        if platforms:
+            results = {p: ok for p, ok in results.items() if p in platforms}
+            source_only = [name for name in source_only if name in platforms]
+        console.print()
+        for name in source_only:
+            console.print(
+                f"[cyan]ℹ️  {name.title()}: source only — xPST downloads from it and "
+                "cannot post to it until the provider approves an upload app.[/cyan]"
+            )
+        failed = [
+            p for p, ok in results.items() if not ok and p not in source_only
+        ]
+        if not failed:
+            console.print("[bold green]✅ All posting destinations healthy![/bold green]")
+        else:
+            console.print(f"[yellow]⚠️  Issues with: {', '.join(failed)}[/yellow]")
+        return not failed
+
+    # Determine which platforms to connect. Facebook is deliberately NOT in the
+    # default "connect everything" sweep: it needs a BYO Meta app, so a
+    # credential-less run would fail noisily for anyone who has not set one up.
+    # It stays reachable explicitly (`xpst auth facebook`, `xpst connect
+    # facebook`, or by picking it in `xpst wizard`).
+    all_platforms = ["tiktok", "youtube", "instagram", "x", "threads", "messenger"]
+    target_platforms = platforms or all_platforms
+
+    # Enable platforms in config
+    for p in target_platforms:
+        if p != "tiktok":
+            getattr(config, p).enabled = True
+
+    results = {}
+    platform_connectors = {
+        "tiktok": connect_tiktok,
+        "youtube": connect_youtube,
+        "instagram": connect_instagram,
+        "x": connect_x,
+        "threads": connect_threads,
+        "facebook": connect_facebook,
+        "messenger": connect_messenger,
+        "bluesky": connect_bluesky,
+    }
+
+    for platform in target_platforms:
+        connector = platform_connectors.get(platform)
+        if not connector:
+            console.print(f"[yellow]Unknown platform: {platform}[/yellow]")
+            continue
+
+        try:
+            results[platform] = connector(config)
+        except KeyboardInterrupt:
+            console.print(f"\n[yellow]Skipped {platform}[/yellow]")
+            results[platform] = False
+        except Exception as e:
+            logger.error(f"Connection failed for {platform}: {e}")
+            console.print(f"[red]❌ {platform.title()} connection error: {e}[/red]")
+            results[platform] = False
+
+        console.print()  # Spacing
+
+    # Save config
+    config.save()
+
+    # Summary
+    console.print(Panel("[bold]Connection Summary[/bold]", style="blue"))
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Platform")
+    table.add_column("Status")
+
+    for platform in target_platforms:
+        if results.get(platform):
+            table.add_row(platform.title(), "[green]✅ Connected[/green]")
+        else:
+            table.add_row(platform.title(), "[red]❌ Failed/Skipped[/red]")
+
+    console.print(table)
+    console.print()
+
+    # Show next steps
+    connected = [p for p, ok in results.items() if ok]
+    failed = [p for p, ok in results.items() if not ok]
+
+    if connected:
+        console.print("[bold]Next steps:[/bold]")
+        console.print("  • [cyan]xpst health[/cyan]        — Verify all connections")
+        console.print("  • [cyan]xpst watch[/cyan]         — Start auto-posting")
+        console.print("  • [cyan]xpst post -v VID -c 'cap'[/cyan] — Manual post")
+        console.print()
+
+    if failed:
+        console.print("[yellow]To retry failed connections:[/yellow]")
+        for p in failed:
+            console.print(f"  • [cyan]xpst connect {p}[/cyan]")
+        console.print()
+
+    return len(failed) == 0
+
+
+# ── Disconnect ────────────────────────────────────────────────────────────────
+
+# CredentialStore keys per platform (see connect_* writers above). Only the
+# ACCOUNT credentials are removed — app-level artifacts such as
+# youtube_client_secrets.json are kept so reconnecting doesn't require
+# re-downloading them.
+_PLATFORM_CRED_KEYS: dict[str, tuple[str, ...]] = {
+    "youtube": ("youtube_token",),
+    "instagram": ("instagram_graph_token", "instagram_graph_user_id"),
+    "x": ("x_cookies",),
+    "tiktok": ("tiktok_client_secret", "tiktok_access_token", "tiktok_refresh_token"),
+    "threads": ("threads_access_token", "threads_user_id"),
+    "messenger": ("messenger_page_token", "messenger_app_secret"),
+    "facebook": (
+        "facebook_page_id",
+        "facebook_page_token",
+        "facebook_user_token",
+        "facebook_app_id",
+        "facebook_app_secret",
+    ),
+    # Bluesky's credential is the app password (plus the cached session): both
+    # are removed so disconnecting really disconnects.
+    "bluesky": ("bluesky_identifier", "bluesky_app_password", "bluesky_session"),
+}
+
+# Raw credential FILES per platform (written alongside the CredentialStore).
+_PLATFORM_CRED_FILES: dict[str, tuple[str, ...]] = {
+    "youtube": ("youtube_token.json",),
+    "instagram": ("instagram_session.json",),
+    "x": ("x_cookies.json",),
+}
+
+
+def disconnect_platform(
+    platform: str,
+    config: XPSTConfig | None = None,
+) -> dict[str, Any]:
+    """Disconnect a platform: remove stored credentials and disable it.
+
+    QA-wave contract: disconnect is the inverse of connect. It removes the
+    platform's stored account credentials (CredentialStore keys + raw
+    session/token files + ``sessions/`` artifacts), flips
+    ``accounts.<platform>.enabled`` to False, and persists the config. It
+    never touches posted content or local state.
+
+    Args:
+        platform: One of tiktok, youtube, x, instagram, threads, messenger.
+        config: Optional pre-loaded config (loaded from disk when omitted).
+
+    Returns:
+        dict with ``success``, ``platform``, ``removed`` (list of removed
+        artifact names), and ``disabled`` (config flag flipped).
+    """
+    if platform not in _PLATFORM_CRED_KEYS:
+        return {
+            "success": False,
+            "platform": platform,
+            "removed": [],
+            "disabled": False,
+            "error": f"Unknown platform: {platform}",
+        }
+
+    if config is None:
+        config = XPSTConfig.load()
+    if config is None:  # pragma: no cover - defensive: load() contract
+        raise RuntimeError("XPSTConfig.load() returned None")
+
+    removed: list[str] = []
+
+    cred_store = CredentialStore(config.config_dir)
+    for key in _PLATFORM_CRED_KEYS[platform]:
+        if cred_store.retrieve(key) is not None:
+            if cred_store.delete(key):
+                removed.append(key)
+
+    creds_dir = Path(config.config_dir).expanduser() / CREDS_DIR_NAME
+    for name in _PLATFORM_CRED_FILES.get(platform, ()):
+        path = creds_dir / name
+        if path.exists():
+            try:
+                path.unlink()
+                removed.append(name)
+            except OSError as exc:
+                logger.warning("disconnect: could not remove %s: %s", path, exc)
+
+    # Session artifacts written by SessionManager (cookie jars, token
+    # refresh caches) under <config_dir>/sessions/.
+    sessions_dir = Path(config.config_dir).expanduser() / "sessions"
+    if sessions_dir.is_dir():
+        for path in sessions_dir.glob(f"*{platform}*"):
+            try:
+                path.unlink()
+                removed.append(f"sessions/{path.name}")
+            except OSError as exc:
+                logger.warning("disconnect: could not remove %s: %s", path, exc)
+
+    # Disable the platform in config and persist.
+    disabled = False
+    accounts = getattr(config, "accounts", None)
+    account = getattr(accounts, platform, None) if accounts is not None else None
+    if account is not None and getattr(account, "enabled", False):
+        account.enabled = False
+        disabled = True
+    elif account is None:
+        # Fall back to the flat attribute (config.youtube.enabled etc.).
+        section = getattr(config, platform, None)
+        if section is not None and getattr(section, "enabled", False):
+            section.enabled = False
+            disabled = True
+    try:
+        config.save()
+    except Exception as exc:  # pragma: no cover - disk-failure path
+        logger.error("disconnect: config.save() failed: %s", exc)
+
+    return {
+        "success": True,
+        "platform": platform,
+        "removed": removed,
+        "disabled": disabled,
+    }

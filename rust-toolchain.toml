@@ -1,0 +1,6 @@
+# Pinned so `cargo fmt --check` and `clippy -D warnings` mean the same thing on
+# every machine and in CI. Bump deliberately, with the CI job, in one commit.
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

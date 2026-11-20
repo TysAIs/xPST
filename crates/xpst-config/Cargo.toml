@@ -1,0 +1,25 @@
+[package]
+name = "xpst-config"
+description = "xPST config load/migrate: YAML read path, masking, read-only validation, typed account sections (P0)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+serde-saphyr.workspace = true
+thiserror.workspace = true
+
+# Tests only: proving that a config round trip cannot carry a secret requires
+# the real credential store (keychain-first, encrypted fallback), so the test
+# exercises xpst-authflow's API instead of a stand-in.
+[dev-dependencies]
+xpst-authflow = { path = "../xpst-authflow" }
+tempfile = "3"
+
+[lints]
+workspace = true

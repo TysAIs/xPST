@@ -1,0 +1,177 @@
+// Analytics page view-model.
+//
+// The rule this module exists to enforce: an analytics number is only shown
+// next to the post it came from, and it always says whether it is LIVE (just
+// fetched from the platform) or RECORDED (the last snapshot xPST persisted).
+// A platform with nothing to show says "No data" — never a zero, which reads
+// as "this post got no views".
+
+export const SOURCE_LABEL = {
+  live: "Live",
+  recorded: "Recorded",
+};
+
+/** Human relative age for a staleness_hours value: "as of 2h ago" copy. */
+export function relativeAge(stalenessHours) {
+  if (stalenessHours === null || stalenessHours === undefined) return null;
+  const hours = Number(stalenessHours);
+  if (!Number.isFinite(hours) || hours < 0) return null;
+  if (hours < 1 / 60) return "just now";
+  if (hours < 1) return `${Math.floor(hours * 60)}m ago`;
+  if (hours < 24) return `${Math.floor(hours)}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/**
+ * Provenance of a stored collection (issue #297): were the numbers captured
+ * by a collection that actually completed? "unknown" is deliberate — a row
+ * written before collection status was tracked cannot claim success.
+ */
+export function collectionBadge(entry) {
+  const status = entry?.collection_status ?? "unknown";
+  if (status === "ok") {
+    return { status, label: "Collection ok", tone: "ok", title: "The last recorded collection completed" };
+  }
+  if (status === "partial") {
+    return {
+      status,
+      label: "Collection partial",
+      tone: "warn",
+      title: "Some posts could not be collected — these totals may be incomplete",
+    };
+  }
+  if (status === "failed") {
+    const error = entry?.recorded_collection_error || entry?.collection_error?.error || null;
+    return {
+      status,
+      label: "Collection failed",
+      tone: "danger",
+      title: error
+        ? `The last collection attempt failed (${error}) — these numbers are not current measurements`
+        : "The last collection attempt failed — these numbers are not current measurements",
+    };
+  }
+  if (status === "unavailable") {
+    return { status, label: "Collection unavailable", tone: "none", title: "The platform answered that there was nothing to collect" };
+  }
+  if (status === "not_collected") {
+    return { status, label: "Not collected", tone: "none", title: "No collection has been attempted for this platform" };
+  }
+  return {
+    status: "unknown",
+    label: "Collection unknown",
+    tone: "unknown",
+    title: "Recorded without a collection status — whether the capture completed cannot be confirmed",
+  };
+}
+
+/** Title/tone for a platform row's provenance badge. */
+export function sourceBadge(entry) {
+  const source = entry?.data_source;
+  if (source === "live") {
+    return { label: SOURCE_LABEL.live, tone: "live", title: "Fetched from the platform API during this run", stalenessNote: null };
+  }
+  if (source === "recorded") {
+    // Staleness honesty (analytics-accuracy audit follow-up): a recorded
+    // row says how old it is, right next to the badge — "as of 3h ago" —
+    // so nobody reads a two-day-old snapshot as a live number.
+    const age = relativeAge(entry?.staleness_hours);
+    return {
+      label: SOURCE_LABEL.recorded,
+      tone: "recorded",
+      stale: entry?.staleness === "stale",
+      stalenessNote: age ? `as of ${age}` : null,
+      title: age
+        ? `Last snapshot captured ${age}${entry?.staleness === "stale" ? " (stale: older than 24h)" : ""}`
+        : entry?.last_captured
+          ? `Last snapshot captured ${entry.last_captured}`
+          : "Last snapshot xPST persisted",
+    };
+  }
+  return { label: "No data", tone: "none", title: entry?.note || "Nothing recorded for this platform yet", stalenessNote: null };
+}
+
+/**
+ * Cell text for a metric. `null`/`undefined` renders as a dash, and a
+ * platform that reports no data at all renders "No data" for every metric —
+ * a real zero is only ever shown when the platform actually returned one.
+ */
+export function metricCell(entry, key) {
+  // Accepts either the API shape (has_data/metrics_available) or the row shape
+  // produced by platformRows(), so the template cannot accidentally read the
+  // wrong field and print a value for an empty platform.
+  const hasData = entry?.has_data ?? entry?.hasData;
+  if (!hasData) return "No data";
+  const totals = entry.totals;
+  if (!totals || totals[key] === null || totals[key] === undefined) return "—";
+  const available = entry.metrics_available ?? entry.metricsAvailable;
+  if (Array.isArray(available) && !available.includes(key)) return "—";
+  return Number(totals[key]).toLocaleString("en-US");
+}
+
+/** Per-post rows for the detail table, newest capture first. */
+export function outcomeRows(report) {
+  const rows = [];
+  for (const [platform, entry] of Object.entries(report?.platforms ?? {})) {
+    for (const outcome of entry?.outcomes ?? []) {
+      if (!outcome.metrics) continue;
+      rows.push({
+        platform,
+        postId: outcome.post_id,
+        url: outcome.url || null,
+        status: outcome.status,
+        outcomeSource: outcome.outcome_source,
+        metricSource: outcome.metric_source,
+        sourceLabel: outcome.metric_source === "live" ? SOURCE_LABEL.live : SOURCE_LABEL.recorded,
+        collectionStatus: outcome.collection_status ?? "unknown",
+        capturedAt: outcome.captured_at || null,
+        publishedAt: outcome.published_at || null,
+        views: outcome.metrics.views ?? null,
+        likes: outcome.metrics.likes ?? null,
+        comments: outcome.metrics.comments ?? null,
+        shares: outcome.metrics.shares ?? null,
+      });
+    }
+  }
+  rows.sort((a, b) => {
+    const at = a.capturedAt || a.publishedAt || "";
+    const bt = b.capturedAt || b.publishedAt || "";
+    return bt.localeCompare(at);
+  });
+  return rows;
+}
+
+/**
+ * Platform rows for the summary table, in the engine's own order. `null`
+ * totals survive into the view model so the template can render "No data"
+ * instead of inventing a zero.
+ */
+export function platformRows(report) {
+  return Object.values(report?.platforms ?? {}).map((entry) => ({
+    platform: entry.platform,
+    hasData: Boolean(entry.has_data),
+    posts: entry.posts_with_metrics ?? 0,
+    ownershipLabel: entry.ownership_verified
+      ? "Owned posts only"
+      : entry.ownership_checked
+        ? "Ownership unverified — no numbers shown"
+        : "No posts recorded",
+    badge: sourceBadge(entry),
+    collection: collectionBadge(entry),
+    metricsAvailable: entry.metrics_available ?? [],
+    totals: entry.totals,
+  }));
+}
+
+/** Headline for the page: what the report covers and where it came from. */
+export function reportHeadline(report) {
+  if (!report) return "Loading analytics";
+  if (report.data_source === "live") return "Live figures fetched from the platform APIs just now";
+  if (report.data_source === "recorded") return "Recorded figures from xPST's last snapshot capture";
+  return "No analytics recorded yet";
+}
+
+/** True when no platform on the report has any data to show. */
+export function isEmptyReport(report) {
+  return !Object.values(report?.platforms ?? {}).some((entry) => entry?.has_data);
+}

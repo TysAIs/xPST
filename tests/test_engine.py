@@ -1,0 +1,687 @@
+"""
+Tests for CrossPostEngine and its service layer.
+
+Covers:
+- Engine initialization with valid/missing config
+- check_and_post with no new videos
+- check_and_post with new video (mock platform uploaders)
+- post_manual with single video
+- post_manual_carousel with multiple files
+- Circuit breaker blocking
+- Quota exhaustion
+- Shutdown mid-processing
+"""
+
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from xpst.engine import CrossPostEngine, CrossPostResult
+from xpst.platforms.base import PlatformHealth, PlatformUploader, UploadResult
+from xpst.sources.base import VideoMetadata
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+def _make_config(tmp_path: Path):
+    """Create a minimal XPSTConfig for testing."""
+    from xpst.config import XPSTConfig
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.video.download_dir = str(tmp_path / "downloads")
+    config.tiktok.username = "testuser"
+    # Disable all platforms by default
+    config.youtube.enabled = False
+    config.x.enabled = False
+    config.instagram.enabled = False
+    config.tiktok.enabled = False
+    config.threads.enabled = False
+    return config
+
+
+def _make_video(video_id: str = "vid123", caption: str = "Test video") -> VideoMetadata:
+    """Create a VideoMetadata for testing."""
+    return VideoMetadata(
+        video_id=video_id,
+        url=f"https://tiktok.com/@user/video/{video_id}",
+        caption=caption,
+    )
+
+
+def _make_mock_uploader(platform_name: str = "youtube", success: bool = True):
+    """Create a mock platform uploader."""
+    uploader = MagicMock(spec=PlatformUploader)
+    uploader.platform_name = platform_name
+    uploader.upload = AsyncMock(return_value=UploadResult(
+        success=success,
+        post_id="post123" if success else None,
+        post_url="https://example.com/post123" if success else None,
+        error=None if success else "Upload failed",
+        platform=platform_name,
+    ))
+    uploader.upload_carousel = AsyncMock(return_value=UploadResult(
+        success=success,
+        post_id="carousel123" if success else None,
+        post_url="https://example.com/carousel" if success else None,
+        error=None if success else "Upload failed",
+        platform=platform_name,
+    ))
+    uploader.check_health = AsyncMock(return_value=PlatformHealth(
+        platform=platform_name,
+        authenticated=True,
+        session_valid=True,
+    ))
+    uploader.delete = MagicMock(return_value=True)
+    return uploader
+
+
+# ---------------------------------------------------------------------------
+# Engine Initialization
+# ---------------------------------------------------------------------------
+
+class TestEngineInit:
+    """Test engine initialization."""
+
+    def test_init_valid_config(self, tmp_path):
+        """Engine initializes successfully with valid config."""
+        config = _make_config(tmp_path)
+        # Create required dirs
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+        assert engine.config is config
+        assert engine.state is not None
+        assert engine.circuit_breakers is not None
+        assert engine.quota_manager is not None
+        assert engine.notifier is not None
+        assert engine.shutdown_handler is not None
+        assert engine.upload_service is not None
+        assert engine.source_service is not None
+
+    def test_init_creates_services(self, tmp_path):
+        """Engine creates UploadService and SourceService."""
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+        assert hasattr(engine, "upload_service")
+        assert hasattr(engine, "source_service")
+
+    def test_init_no_platforms(self, tmp_path):
+        """Engine works with all platforms disabled."""
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+        assert len(engine._platforms) == 0
+
+
+# ---------------------------------------------------------------------------
+# CrossPostResult
+# ---------------------------------------------------------------------------
+
+class TestCrossPostResult:
+    """Test CrossPostResult dataclass."""
+
+    def test_update_status_all_success(self):
+        result = CrossPostResult(video_id="v1", caption="test")
+        result.results["youtube"] = UploadResult(success=True)
+        result.results["x"] = UploadResult(success=True)
+        result.update_status()
+        assert result.all_success is True
+        assert result.partial_success is True
+
+    def test_update_status_partial(self):
+        result = CrossPostResult(video_id="v1", caption="test")
+        result.results["youtube"] = UploadResult(success=True)
+        result.results["x"] = UploadResult(success=False)
+        result.update_status()
+        assert result.all_success is False
+        assert result.partial_success is True
+
+    def test_update_status_all_fail(self):
+        result = CrossPostResult(video_id="v1", caption="test")
+        result.results["youtube"] = UploadResult(success=False)
+        result.update_status()
+        assert result.all_success is False
+        assert result.partial_success is False
+
+    def test_update_status_empty(self):
+        result = CrossPostResult(video_id="v1", caption="test")
+        result.update_status()
+        assert result.all_success is False
+        assert result.partial_success is False
+
+
+# ---------------------------------------------------------------------------
+# check_and_post
+# ---------------------------------------------------------------------------
+
+class TestCheckAndPost:
+    """Test the check_and_post workflow."""
+
+    @pytest.mark.asyncio
+    async def test_no_new_videos(self, tmp_path):
+        """Returns empty list when source has no new videos."""
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+
+        # Mock source to return empty list
+        with patch.object(
+            engine.source_service, "fetch_new_videos", new_callable=AsyncMock, return_value=[]
+        ):
+            results = await engine.check_and_post()
+
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_no_new_videos_after_filter(self, tmp_path):
+        """Returns empty list when all videos are already posted."""
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+        video = _make_video()
+
+        with patch.object(
+            engine.source_service, "fetch_new_videos", new_callable=AsyncMock, return_value=[video]
+        ), patch.object(
+            engine.source_service, "filter_new", return_value=[]
+        ):
+            results = await engine.check_and_post()
+
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_shutdown_before_start(self, tmp_path):
+        """Returns empty list if shutdown requested before starting."""
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+        engine.shutdown_handler._shutdown_requested = True
+
+        results = await engine.check_and_post()
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_source_unavailable(self, tmp_path):
+        """Returns empty list when source fetch fails."""
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+
+        with patch.object(
+            engine.source_service, "fetch_new_videos", new_callable=AsyncMock, return_value=[]
+        ):
+            results = await engine.check_and_post()
+
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# post_manual
+# ---------------------------------------------------------------------------
+
+class TestPostManual:
+    """Test manual posting."""
+
+    @pytest.mark.asyncio
+    async def test_post_manual_no_platforms(self, tmp_path):
+        """A requested but unavailable platform is a skip row, not a silent drop."""
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+        video_path = tmp_path / "test.mp4"
+        video_path.write_bytes(b"fake video data")
+
+        result = await engine.post_manual(video_path, "Test caption", ["youtube"])
+        assert result.all_success is False
+        # R3: the caller asked for YouTube and it is not connected — the row is
+        # `skipped_unconnected` (visible, with the connect command), and it is
+        # not a failure.
+        row = result.results["youtube"]
+        assert row.success is False
+        assert row.metadata["state"] == "skipped_unconnected"
+        assert row.metadata["connect_command"] == "xpst connect youtube"
+
+    @pytest.mark.asyncio
+    async def test_post_manual_with_mock_platform(self, tmp_path):
+        """post_manual delegates to upload service for available platform."""
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+
+        # Disable anti-bot for tests
+        engine.upload_service.anti_bot = None
+
+        # Inject a mock platform
+        mock_uploader = _make_mock_uploader("youtube", success=True)
+        engine._platforms["youtube"] = mock_uploader
+
+        video_path = tmp_path / "test.mp4"
+        video_path.write_bytes(b"fake video data")
+
+        # Mock encode to just return the path
+        with patch.object(
+            engine.upload_service, "_encode_for_platform",
+            new_callable=AsyncMock, return_value=video_path
+        ):
+            result = await engine.post_manual(video_path, "Test caption", ["youtube"])
+
+        assert result.results["youtube"].success is True
+
+
+# ---------------------------------------------------------------------------
+# post_manual_carousel
+# ---------------------------------------------------------------------------
+
+class TestPostManualCarousel:
+    """Test carousel posting."""
+
+    @pytest.mark.asyncio
+    async def test_carousel_no_platforms(self, tmp_path):
+        """post_manual_carousel with no platforms returns empty result."""
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+        media1 = tmp_path / "img1.jpg"
+        media1.write_bytes(b"fake image 1")
+        media2 = tmp_path / "img2.jpg"
+        media2.write_bytes(b"fake image 2")
+
+        result = await engine.post_manual_carousel(
+            [media1, media2], "Carousel caption", ["youtube"]
+        )
+        assert result.all_success is False
+
+    @pytest.mark.asyncio
+    async def test_carousel_with_mock_platform(self, tmp_path):
+        """post_manual_carousel delegates to upload service."""
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+
+        mock_uploader = _make_mock_uploader("instagram", success=True)
+        engine._platforms["instagram"] = mock_uploader
+
+        media1 = tmp_path / "img1.jpg"
+        media1.write_bytes(b"fake image 1")
+        media2 = tmp_path / "img2.jpg"
+        media2.write_bytes(b"fake image 2")
+
+        result = await engine.post_manual_carousel(
+            [media1, media2], "Carousel caption", ["instagram"]
+        )
+
+        assert result.results["instagram"].success is True
+        mock_uploader.upload_carousel.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Circuit Breaker
+# ---------------------------------------------------------------------------
+
+class TestCircuitBreakerBlocking:
+    """Test circuit breaker blocks uploads."""
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_blocks_upload(self, tmp_path):
+        """Upload is skipped when circuit breaker is open."""
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+
+        mock_uploader = _make_mock_uploader("youtube", success=True)
+        engine._platforms["youtube"] = mock_uploader
+
+        # Create and open the circuit breaker
+        breaker = engine.circuit_breakers.get_or_create("youtube", failure_threshold=5)
+        for _ in range(5):
+            breaker.record_failure("test error")
+        assert breaker.is_open
+
+        video_path = tmp_path / "test.mp4"
+        video_path.write_bytes(b"fake video data")
+
+        # Also mock the encode step to avoid FFmpeg calls
+        with patch.object(
+            engine.upload_service, "_encode_for_platform",
+            new_callable=AsyncMock, return_value=video_path
+        ):
+            result = await engine.post_manual(video_path, "Test", ["youtube"])
+            assert result.results["youtube"].success is False
+            assert "Circuit breaker" in result.results["youtube"].error
+            mock_uploader.upload.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Quota Exhaustion
+# ---------------------------------------------------------------------------
+
+class TestQuotaExhaustion:
+    """Test quota exhaustion blocks uploads."""
+
+    @pytest.mark.asyncio
+    async def test_quota_exhausted(self, tmp_path):
+        """Upload is skipped when quota is exhausted."""
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+
+        mock_uploader = _make_mock_uploader("youtube", success=True)
+        engine._platforms["youtube"] = mock_uploader
+
+        # Exhaust quota by mocking the quota manager methods
+        engine.quota_manager.can_upload = MagicMock(return_value=False)
+        engine.quota_manager.get_remaining = MagicMock(return_value={"daily": 0})
+
+        video_path = tmp_path / "test.mp4"
+        video_path.write_bytes(b"fake video data")
+
+        result = await engine.post_manual(video_path, "Test", ["youtube"])
+        assert result.results["youtube"].success is False
+        # Pre-flight guardrail: structured QUOTA_EXHAUSTED error before upload
+        assert "QUOTA_EXHAUSTED" in result.results["youtube"].error
+        assert "quota exhausted" in result.results["youtube"].error
+
+
+# ---------------------------------------------------------------------------
+# Shutdown Mid-Processing
+# ---------------------------------------------------------------------------
+
+class TestShutdownMidProcessing:
+    """Test graceful shutdown during processing."""
+
+    @pytest.mark.asyncio
+    async def test_shutdown_during_platform_processing(self, tmp_path):
+        """Processing stops when shutdown is requested between platforms."""
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+
+        mock_uploader = _make_mock_uploader("youtube", success=True)
+        engine._platforms["youtube"] = mock_uploader
+        engine._platforms["x"] = _make_mock_uploader("x", success=True)
+
+        # Set shutdown flag before processing starts
+        engine.shutdown_handler._shutdown_requested = True
+
+        video_path = tmp_path / "test.mp4"
+        video_path.write_bytes(b"fake video data")
+
+        result = await engine.post_manual(video_path, "Test")
+        # Should have stopped before processing any platforms
+        assert len(result.results) == 0
+
+
+# ---------------------------------------------------------------------------
+# SourceService
+# ---------------------------------------------------------------------------
+
+class TestSourceService:
+    """Test SourceService independently."""
+
+    def test_filter_new_all_posted(self, tmp_path):
+        """All videos already posted returns empty."""
+        from xpst.services.source_service import SourceService
+
+        config = _make_config(tmp_path)
+        service = SourceService(config)
+
+        state = MagicMock()
+        state.is_video_posted.return_value = True
+
+        platforms = {"youtube": MagicMock()}
+        videos = [_make_video("v1"), _make_video("v2")]
+
+        result = service.filter_new(videos, state, platforms)
+        assert result == []
+
+    def test_filter_new_some_unposted(self, tmp_path):
+        """Videos not yet posted to all platforms are returned."""
+        from xpst.services.source_service import SourceService
+
+        config = _make_config(tmp_path)
+        service = SourceService(config)
+
+        state = MagicMock()
+        state.is_video_posted.side_effect = lambda vid, plat: vid == "v1"
+
+        platforms = {"youtube": MagicMock()}
+        videos = [_make_video("v1"), _make_video("v2")]
+
+        result = service.filter_new(videos, state, platforms)
+        assert len(result) == 1
+        assert result[0].video_id == "v2"
+
+    @pytest.mark.asyncio
+    async def test_fetch_no_source(self, tmp_path):
+        """fetch_new_videos returns empty when source unavailable."""
+        from xpst.services.source_service import SourceService
+
+        config = _make_config(tmp_path)
+        service = SourceService(config)
+        # Don't mock any source - it should fail gracefully
+        service._sources = {}
+
+        result = await service.fetch_new_videos("nonexistent", 5)
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# ToS Warnings
+# ---------------------------------------------------------------------------
+
+class TestToSWarnings:
+    """Test ToS warnings for unofficial APIs."""
+
+    @pytest.mark.asyncio
+    async def test_tos_warning_instagram(self, tmp_path, caplog):
+        """ToS warning logged for Instagram uploads."""
+        import logging
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+
+        mock_uploader = _make_mock_uploader("instagram", success=True)
+        engine._platforms["instagram"] = mock_uploader
+
+        video_path = tmp_path / "test.mp4"
+        video_path.write_bytes(b"fake video data")
+
+        with patch.object(
+            engine.upload_service, "_encode_for_platform",
+            new_callable=AsyncMock, return_value=video_path
+        ):
+            with caplog.at_level(logging.WARNING):
+                await engine.post_manual(video_path, "Test", ["instagram"])
+
+        assert any("unofficial API" in record.message and "instagram" in record.message
+                    for record in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_tos_warning_x(self, tmp_path, caplog):
+        """ToS warning logged for X/Twitter uploads."""
+        import logging
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+
+        mock_uploader = _make_mock_uploader("x", success=True)
+        engine._platforms["x"] = mock_uploader
+
+        video_path = tmp_path / "test.mp4"
+        video_path.write_bytes(b"fake video data")
+
+        with patch.object(
+            engine.upload_service, "_encode_for_platform",
+            new_callable=AsyncMock, return_value=video_path
+        ):
+            with caplog.at_level(logging.WARNING):
+                await engine.post_manual(video_path, "Test", ["x"])
+
+        assert any("unofficial API" in record.message and "x" in record.message
+                    for record in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_no_tos_warning_youtube(self, tmp_path, caplog):
+        """No ToS warning for YouTube (official API)."""
+        import logging
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+
+        mock_uploader = _make_mock_uploader("youtube", success=True)
+        engine._platforms["youtube"] = mock_uploader
+
+        video_path = tmp_path / "test.mp4"
+        video_path.write_bytes(b"fake video data")
+
+        with patch.object(
+            engine.upload_service, "_encode_for_platform",
+            new_callable=AsyncMock, return_value=video_path
+        ):
+            with caplog.at_level(logging.WARNING):
+                await engine.post_manual(video_path, "Test", ["youtube"])
+
+        tos_warnings = [r for r in caplog.records if "unofficial API" in r.message]
+        assert len(tos_warnings) == 0
+
+
+# ---------------------------------------------------------------------------
+# Delete post (regression: state schema stores the post id under "id")
+# ---------------------------------------------------------------------------
+
+class TestDeletePost:
+    """Delete must resolve the platform post id from state, which stores it
+    under ``id`` (see state.py mark_video_posted / state_manager.py). The
+    delete path used to read ``post_id`` and always failed. Since Phase-1.2
+    the engine routes every delete through the DeleteResult contract and
+    leaves a tombstone for hard deletes (D5 §3.6)."""
+
+    @pytest.mark.asyncio
+    async def test_delete_post_resolves_id_key(self, tmp_path):
+        """delete_post finds the post recorded under the canonical ``id`` key."""
+        from xpst.platforms.base import DeleteOutcome, DeleteResult
+
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+        mock_uploader = _make_mock_uploader("x", success=True)
+        mock_uploader.delete = AsyncMock(
+            return_value=DeleteResult(
+                outcome=DeleteOutcome.DELETED, platform="x", post_id="status-999"
+            )
+        )
+        engine._platforms["x"] = mock_uploader
+
+        engine.state.mark_video_posted(
+            "test-video-abc", "x",
+            post_id="status-999",
+            post_url="https://x.com/i/status/status-999",
+        )
+
+        result = await engine.delete_post("test-video-abc", "x")
+
+        assert result.outcome == DeleteOutcome.DELETED
+        assert result.ok is True
+        assert "Deleted from x" in result.message
+        mock_uploader.delete.assert_awaited_once_with("status-999", soft=False, visibility=None)
+        # successful hard delete leaves a tombstone — history is kept
+        data = engine.state.get_post_data("test-video-abc", "x")
+        assert data is not None
+        assert data["id"] == "status-999"
+        assert data["url"] == "https://x.com/i/status/status-999"
+        assert data["deleted"] is True
+        assert data["deleted_at"]
+        assert data["deleted_reason"] == "hard_delete"
+        # …but the video is NOT considered posted anymore (re-postable)
+        assert engine.state.is_posted("test-video-abc", "x") is False
+
+    @pytest.mark.asyncio
+    async def test_delete_post_missing_id_falls_back_to_direct_adapter_delete(self, tmp_path):
+        """D5: no local record, but a real platform id still deletes via the adapter."""
+        from xpst.platforms.base import DeleteOutcome
+
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+        uploader = _make_mock_uploader("x", success=True)
+        engine._platforms["x"] = uploader
+
+        result = await engine.delete_post("nonexistent", "x")
+        # The mock's legacy ``delete`` returns True -> normalize = DELETED.
+        assert result.outcome == DeleteOutcome.DELETED
+        assert result.ok is True
+        assert result.post_id == "nonexistent"
+        uploader.delete.assert_called_once_with("nonexistent", soft=False, visibility=None)
+
+    @pytest.mark.asyncio
+    async def test_delete_post_missing_id_without_uploader_returns_unsupported(self, tmp_path):
+        """Without a local record AND without an uploader, the refusal stands."""
+        from xpst.platforms.base import DeleteOutcome
+
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+
+        result = await engine.delete_post("nonexistent", "x")
+        assert result.outcome == DeleteOutcome.UNSUPPORTED
+        assert result.ok is False
+        assert "No post data found" in result.message
+
+    @pytest.mark.asyncio
+    async def test_delete_post_missing_platform_returns_unsupported(self, tmp_path):
+        """delete_post fails cleanly when the platform uploader is absent."""
+        from xpst.platforms.base import DeleteOutcome
+
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+        engine.state.mark_video_posted("v1", "tiktok", post_id="tk-1")
+
+        result = await engine.delete_post("v1", "tiktok")
+        assert result.outcome == DeleteOutcome.UNSUPPORTED
+        assert result.ok is False
+        assert "not available" in result.message
+
+    @pytest.mark.asyncio
+    async def test_delete_post_legacy_bool_adapter_is_normalized(self, tmp_path):
+        """A legacy adapter returning a bare bool is coerced into the contract."""
+        from xpst.platforms.base import DeleteOutcome
+
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+        mock_uploader = _make_mock_uploader("x", success=True)
+        mock_uploader.delete = AsyncMock(return_value=True)  # legacy bool
+        engine._platforms["x"] = mock_uploader
+
+        engine.state.mark_video_posted("v1", "x", post_id="t1", post_url="https://x.com/i/status/t1")
+
+        result = await engine.delete_post("v1", "x")
+        assert result.outcome == DeleteOutcome.DELETED
+        assert result.ok is True
+        # tombstone written even for legacy-true adapters
+        assert engine.state.get_post_data("v1", "x")["deleted"] is True

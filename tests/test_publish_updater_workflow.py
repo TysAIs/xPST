@@ -1,0 +1,337 @@
+"""Structural tests for the updater manifest workflow.
+
+The workflow this file guards failed instantly with zero steps because it used
+the `runner` context in a workflow-level `env:` block, which GitHub rejects as
+an invalid workflow file. These tests keep the file publishable: valid
+structure, no out-of-scope context use, no step that turns an absent signing
+secret into a failed job, and no reference to a script that does not exist.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW = ROOT / ".github/workflows/publish-updater.yml"
+SERVED_PATH = "updates/latest.json"
+
+# Contexts GitHub allows in a workflow-level or job-level `env:` block.
+JOB_SCOPE_CONTEXTS = {"github", "inputs", "matrix", "needs", "secrets", "strategy", "vars", "env"}
+EXPRESSION_RE = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
+GITHUB_CONTEXT_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_-]*)\.([A-Za-z_][A-Za-z0-9_.]*)")
+SCRIPT_RE = re.compile(r"(?:python3?\s+|bash\s+|\./)?(scripts/[A-Za-z0-9_.-]+)")
+
+
+def load_workflow() -> dict[str, Any]:
+    text = WORKFLOW.read_text(encoding="utf-8")
+    # Quote the trigger key so YAML's boolean coercion cannot turn `on` into True.
+    text = re.sub(r"^on:", "'on':", text, count=1, flags=re.MULTILINE)
+    return yaml.safe_load(text)
+
+
+def job_scope_expressions() -> list[tuple[str, str]]:
+    """Every expression outside a `steps:` list, with a label.
+
+    `runner`, `steps` and `job` are not available at workflow or job scope; using
+    one there makes the whole file invalid and GitHub runs nothing.
+    """
+    workflow = load_workflow()
+    found: list[tuple[str, str]] = []
+
+    def walk(label: str, node: Any) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                walk(f"{label}.{key}", value)
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                walk(f"{label}[{index}]", value)
+        elif isinstance(node, str):
+            expressions = EXPRESSION_RE.findall(node)
+            # A job-level `if:` is an expression without the `${{ }}` wrapper.
+            if label.endswith(".if"):
+                expressions.append(node)
+            found.extend((label, expression) for expression in expressions)
+
+    for key, value in workflow.items():
+        if key in ("on", "jobs"):
+            continue
+        walk(key, value)
+    for job_name, job in (workflow.get("jobs") or {}).items():
+        for key, value in job.items():
+            if key == "steps":
+                continue
+            walk(f"jobs.{job_name}.{key}", value)
+    return found
+
+
+def test_workflow_file_exists_and_is_valid_yaml() -> None:
+    assert WORKFLOW.is_file()
+    workflow = load_workflow()
+
+    assert isinstance(workflow, dict)
+    assert workflow["name"] == "Publish Tauri updater manifest"
+    assert set(workflow["jobs"]) == {"publish"}
+
+
+def test_triggers_cover_release_workflow_run_and_dispatch() -> None:
+    workflow = load_workflow()
+    triggers = workflow["on"]
+
+    assert set(triggers) == {"release", "workflow_run", "workflow_dispatch"}
+    assert triggers["release"]["types"] == ["published"]
+    assert triggers["workflow_run"]["workflows"] == ["Tauri Shell Release"]
+    assert triggers["workflow_run"]["types"] == ["completed"]
+    assert triggers["workflow_dispatch"]["inputs"]["release_tag"]["required"] is True
+
+
+def test_permissions_allow_the_manifest_commit_and_fallback_pr() -> None:
+    workflow = load_workflow()
+
+    assert workflow["permissions"]["contents"] == "write"
+    assert workflow["permissions"]["pull-requests"] == "write"
+
+
+def test_no_out_of_scope_context_outside_steps() -> None:
+    expressions = job_scope_expressions()
+    assert expressions, "expected at least one workflow- or job-scope expression to inspect"
+
+    for label, expression in expressions:
+        for context, _ in GITHUB_CONTEXT_RE.findall(expression):
+            assert context in JOB_SCOPE_CONTEXTS, (
+                f"{label} uses the '{context}' context, which GitHub rejects at that "
+                "scope and turns into an invalid workflow file (run 34811052542)"
+            )
+
+
+def test_the_context_that_broke_the_workflow_is_gone() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "${{ runner." not in text
+    # The documented failure is quoted in the header comment on purpose.
+    assert "Invalid workflow file" not in text
+
+
+def test_runner_paths_are_step_scoped() -> None:
+    workflow = load_workflow()
+    steps = workflow["jobs"]["publish"]["steps"]
+
+    # The runs that need a scratch directory read it from the runner's own
+    # environment instead of an expression that must survive workflow validation.
+    assert "$RUNNER_TEMP" in WORKFLOW.read_text(encoding="utf-8")
+    assert all("${{ runner." not in str(step.get("run", "")) for step in steps)
+
+
+def test_checkout_is_pinned_to_the_served_branch() -> None:
+    steps = load_workflow()["jobs"]["publish"]["steps"]
+    checkout = next(step for step in steps if str(step.get("uses", "")).startswith("actions/checkout"))
+
+    assert checkout["with"]["ref"] == "main"
+
+
+def test_absent_signing_secret_degrades_instead_of_failing() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "secrets.TAURI_SIGNING_PRIVATE_KEY" in text
+    assert "No TAURI_SIGNING_PRIVATE_KEY secret is configured" in text
+    # The job must end green when there is nothing to publish.
+    assert "exit 1" not in text
+    signing_step = next(
+        step
+        for step in load_workflow()["jobs"]["publish"]["steps"]
+        if step.get("id") == "signing"
+    )
+    assert "SIGNING_KEY" in signing_step["env"]
+
+
+def test_publishes_the_path_pages_serves() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert SERVED_PATH in text
+    assert "HEAD:refs/heads/main" in text
+    assert "scripts/publish-updater.sh" in text
+
+
+def test_every_referenced_script_exists() -> None:
+    steps = load_workflow()["jobs"]["publish"]["steps"]
+    referenced = {
+        match
+        for step in steps
+        for match in SCRIPT_RE.findall(str(step.get("run", "")))
+    }
+
+    assert referenced, "expected the workflow to call the repository scripts"
+    missing = sorted(name for name in referenced if not (ROOT / name).is_file())
+    assert missing == []
+
+
+def test_manifest_path_is_not_gitignored() -> None:
+    ignored = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    rules = [line.strip() for line in ignored if line.strip() and not line.strip().startswith("#")]
+
+    assert not any(rule.strip("/") == "updates" for rule in rules)
+
+
+def test_selector_and_generator_agree_on_the_platform_set() -> None:
+    selector = (ROOT / "scripts/select-updater-artifacts.py").read_text(encoding="utf-8")
+    generator = (ROOT / "scripts/gen-updater-manifest.py").read_text(encoding="utf-8")
+
+    for platform in ("darwin-aarch64", "darwin-x86_64", "windows-x86_64", "linux-x86_64"):
+        assert platform in selector
+        assert platform in generator
+
+
+def test_pr_fallback_keeps_the_job_green_and_states_the_checks_caveat() -> None:
+    """The pull request route is the supported one; it must not be silent.
+
+    A `GITHUB_TOKEN`-authored pull request starts no `pull_request` workflows, so
+    the 13 required checks on `main` never run and the PR is not green on its
+    own. The job still has to finish green (the run that motivated this test was
+    red only because the PR could not be created at all), and it has to say
+    plainly that a maintainer merge is the gate.
+    """
+    steps = load_workflow()["jobs"]["publish"]["steps"]
+    publish = next(step for step in steps if step.get("id") == "publish")
+    run = publish["run"]
+
+    assert "updater/latest-json" in run
+    assert "gh pr create" in run
+    # The caveat is written into the PR body and repeated in the step summary.
+    assert "does not trigger" in run
+    assert "required checks" in run
+    assert "maintainer merge is the gate" in run
+    # A closed PR from an earlier release is reopened, not silently skipped, and
+    # an existing open PR has its body refreshed.
+    assert "gh pr reopen" in run
+    assert "gh pr edit" in run
+    # The release asset must not disagree with the served file on the PR route.
+    attach = next(step for step in steps if step.get("name") == "Attach latest.json to the release")
+    assert "steps.publish.outputs.status == 'pr'" in str(attach["if"])
+
+
+def test_publish_step_declares_every_variable_its_script_reads() -> None:
+    """`set -u` turns a forgotten `env:` entry into a red run.
+
+    Run 42117287055 failed on `VERSION: unbound variable` after the manifest PR
+    push had already succeeded: the step body read a variable the step never
+    declared. GitHub only injects `GITHUB_*` / `RUNNER_*`, so every other
+    uppercase name a step's script expands has to come from its own `env:` block.
+    """
+    steps = load_workflow()["jobs"]["publish"]["steps"]
+    injected_prefixes = ("GITHUB_", "RUNNER_", "CI", "HOME", "PATH", "TMPDIR", "LANG")
+    offenders: dict[str, list[str]] = {}
+
+    for step in steps:
+        run = str(step.get("run", ""))
+        if not run:
+            continue
+        declared = set((step.get("env") or {}).keys())
+        used = {
+            name
+            for name in re.findall(r"\$\{?([A-Z][A-Z0-9_]{2,})\b", run)
+            if not name.startswith(injected_prefixes) and name != "HEAD"
+        }
+        missing = sorted(used - declared)
+        if missing:
+            offenders[str(step.get("name"))] = missing
+
+    assert offenders == {}, f"steps read undeclared variables (set -u -> red run): {offenders}"
+
+
+# --------------------------------------------------------------------------
+# The public channel's three refusals. Behaviour lives in
+# `scripts/verify-updater-channel.py` (tested in tests/test_updater_channel_guard.py);
+# these tests hold the workflow to actually calling it, at the right moment.
+# --------------------------------------------------------------------------
+GUARD_SCRIPT = "scripts/verify-updater-channel.py"
+
+
+def step_by_id(step_id: str) -> dict[str, Any]:
+    for step in load_workflow()["jobs"]["publish"]["steps"]:
+        if step.get("id") == step_id:
+            return step
+    raise AssertionError(f"the workflow has no step with id {step_id!r}")
+
+
+def test_the_version_never_comes_from_the_tag_spelling() -> None:
+    """`${tag#v}` is what advertised a version the assets did not have."""
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "${tag#v}" not in text
+    assert "steps.release.outputs.version" not in text
+    version_step = step_by_id("version")
+    assert f"{GUARD_SCRIPT} version" in version_step["run"]
+    assert "version=%s" in version_step["run"]
+    # The tag's tree is fetched explicitly: the checkout is the served branch.
+    assert 'git fetch --no-tags origin "refs/tags/${TAG}:refs/tags/${TAG}"' in version_step["run"]
+
+
+def test_the_manifest_and_the_pr_body_use_the_resolved_version() -> None:
+    manifest_step = step_by_id("manifest")
+    publish_step = step_by_id("publish")
+    summarize = next(step for step in load_workflow()["jobs"]["publish"]["steps"] if step.get("name") == "Summarize")
+
+    for step in (manifest_step, publish_step, summarize):
+        assert step["env"]["VERSION"] == "${{ steps.version.outputs.version }}"
+
+
+def test_a_mistagged_release_cannot_be_swallowed() -> None:
+    """The version step must fail the job, not warn and continue."""
+    version_step = step_by_id("version")
+    run = version_step["run"]
+
+    assert "set -euo pipefail" in run
+    assert "|| true" not in run
+    assert "continue-on-error" not in version_step
+
+
+def test_the_channel_is_guarded_between_staging_and_committing() -> None:
+    steps = load_workflow()["jobs"]["publish"]["steps"]
+    names = [step.get("id") for step in steps]
+    guard_step = step_by_id("guard")
+
+    assert names.index("manifest") < names.index("guard") < names.index("publish")
+    assert f"{GUARD_SCRIPT} verify" in guard_step["run"]
+    assert '--served-ref "HEAD:updates/latest.json"' in guard_step["run"]
+    assert '"$GITHUB_WORKSPACE/updates/latest.json"' in guard_step["run"]
+    assert '"$RUNNER_TEMP/updater-assets"' in guard_step["run"]
+    # Only the platforms that were actually selected can be verified.
+    assert guard_step["if"] == "steps.manifest.outputs.manifest != ''"
+
+
+def test_a_downgrade_needs_an_explicit_input() -> None:
+    dispatch = load_workflow()["on"]["workflow_dispatch"]["inputs"]
+    assert dispatch["allow_downgrade"]["default"] is False
+    assert dispatch["allow_downgrade"]["type"] == "boolean"
+
+    guard_step = step_by_id("guard")
+    assert guard_step["env"]["ALLOW_DOWNGRADE"] == "${{ inputs.allow_downgrade }}"
+    run = guard_step["run"]
+    # The flag is only appended when the operator asked for a rollback.
+    assert 'if [[ "${ALLOW_DOWNGRADE}" == "true" ]]' in run
+    assert "args+=(--allow-downgrade)" in run
+
+
+def test_every_published_payload_is_verified_cryptographically() -> None:
+    """A `.sig` that exists, or a matching sha512, is not proof of installability."""
+    script = (ROOT / "scripts/verify-updater-channel.py").read_text(encoding="utf-8")
+    assert "Ed25519PublicKey" in script
+    assert "blake2b" in script
+    assert "--allow-downgrade" in script
+
+    steps = load_workflow()["jobs"]["publish"]["steps"]
+    install = [step for step in steps if "cryptography" in str(step.get("run", ""))]
+    assert len(install) == 1, "the job must install the verifier's cryptography dependency exactly once"
+
+
+def test_the_guard_runs_before_anything_is_committed_or_pushed() -> None:
+    """Nothing may reach main (or the PR branch) before the gate is green."""
+    steps = load_workflow()["jobs"]["publish"]["steps"]
+    guard_index = [step.get("id") for step in steps].index("guard")
+    for index, step in enumerate(steps):
+        run = str(step.get("run", ""))
+        if "git push" in run or "git commit" in run:
+            assert index > guard_index, f"step {step.get('name')!r} writes before the channel guard runs"

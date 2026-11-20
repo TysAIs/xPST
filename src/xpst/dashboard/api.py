@@ -1,0 +1,2344 @@
+"""Thin JSON API routers for the web UI (Phase 1 foundation)."""
+
+from __future__ import annotations
+
+import logging
+import os
+import threading
+import time
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+
+logger = logging.getLogger(__name__)
+
+
+def require_api_token(request: Request) -> None:
+    """Route-level guard: mutating ``/api`` routes fail closed.
+
+    The app-wide middleware in :mod:`xpst.dashboard.server` is the primary
+    enforcement point (it also covers non-``/api`` mutations such as
+    ``/bio/edit``). This dependency is defence in depth: it keeps the
+    protection attached to the routes themselves, so a future app assembly that
+    includes this router without the middleware still cannot execute a post,
+    a connect flow or an onboarding write anonymously.
+
+    Credentials come from the app state populated by ``_create_app`` (dashboard
+    Basic auth + API tokens). On a bare router the only accepted token is the
+    one supplied through ``XPST_API_TOKEN`` / ``XPST_UI_TOKEN`` — never a
+    default.
+    """
+    from xpst.dashboard.auth import env_tokens, mutation_authorized
+
+    accepted = getattr(request.app.state, "xpst_api_tokens", None)
+    if accepted is None:
+        accepted = env_tokens()
+    username, password_hash = getattr(request.app.state, "xpst_dashboard_auth", ("", ""))
+    config_dir = getattr(request.app.state, "xpst_config_dir", None)
+    if mutation_authorized(
+        request,
+        accepted=set(accepted),
+        username=username or "",
+        password_hash=password_hash or "",
+        config_dir=config_dir,
+    ):
+        return
+    raise HTTPException(
+        status_code=401,
+        detail=(
+            "Mutating endpoints require the xPST API token. Run "
+            "`xpst auth api-token --show` (or set XPST_API_TOKEN) and send it as "
+            "`Authorization: Bearer <token>` or `X-API-Token: <token>`."
+        ),
+    )
+
+
+# Live auth probes hit the network (measured ~5.6s on a real machine), so the
+# Home screen must not pay that cost on every load. Entries are keyed by config
+# dir; the TTL is XPST_AUTH_STATUS_TTL seconds (default 60; 0 disables caching).
+# The response reports whether it was served from cache and how old it is, so a
+# stale-while-revalidate answer can never masquerade as a fresh probe.
+_AUTH_STATUS_CACHE: dict[str, tuple[float, dict[str, Any], dict[str, Any]]] = {}
+_AUTH_STATUS_LOCK = threading.Lock()
+_AUTH_STATUS_REFRESHING: set[str] = set()
+DEFAULT_AUTH_STATUS_TTL_S = 60.0
+
+
+def _auth_status_ttl() -> float:
+    raw = os.environ.get("XPST_AUTH_STATUS_TTL")
+    if raw is None:
+        return DEFAULT_AUTH_STATUS_TTL_S
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return DEFAULT_AUTH_STATUS_TTL_S
+
+
+def _refresh_due_tokens_quietly(config: Any) -> None:
+    """Renew expiring access tokens before a live probe (bounded, secret-free).
+
+    Runs only when a token is actually due; failures are recorded (and keep the
+    badge red) rather than raised — a refresh problem must not break a status
+    read.
+    """
+    try:
+        from xpst.token_refresh import (
+            FAST_BASE_DELAY_SECONDS,
+            FAST_DEADLINE_SECONDS,
+            FAST_MAX_ATTEMPTS,
+            refresh_due_tokens,
+            save_refresh_report,
+        )
+
+        report = refresh_due_tokens(
+            config,
+            max_attempts=FAST_MAX_ATTEMPTS,
+            base_delay=FAST_BASE_DELAY_SECONDS,
+            deadline=FAST_DEADLINE_SECONDS,
+        )
+        if report:
+            save_refresh_report(config, report)
+    except Exception as exc:  # noqa: BLE001 - refresh is best-effort
+        logger.debug("Background token refresh skipped: %s", exc)
+
+
+def _probe_and_store(
+    config_dir: str, config: Any, *, refresh_tokens: bool = False
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run the live probe and store the result.
+
+    ``refresh_tokens`` is only set on the background path: a cold request must
+    not wait on a token refresh (bounded, but still seconds of retry budget)
+    before the UI can paint.
+    """
+    from xpst.auth_status import collect_live_auth_status
+    from xpst.provider_truth import canonical_status_report
+
+    if refresh_tokens:
+        # Renew expiring tokens first so the badge derived below reflects a
+        # refreshed token instead of the one that was about to die.
+        _refresh_due_tokens_quietly(config)
+    auth = collect_live_auth_status(config)
+    canonical = canonical_status_report(config, auth)
+    with _AUTH_STATUS_LOCK:
+        _AUTH_STATUS_CACHE[str(config_dir)] = (time.monotonic(), auth, canonical)
+    return auth, canonical
+
+
+# The outcome report verifies post ownership, which for YouTube is a real API
+# round trip (channel uploads playlist). The Analytics page must not pay that
+# on every load, so recorded-mode reports are memoized per config dir for
+# XPST_ANALYTICS_OUTCOME_TTL seconds (default 60; 0 disables caching).
+_OUTCOME_REPORT_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_OUTCOME_REPORT_LOCK = threading.Lock()
+DEFAULT_OUTCOME_TTL_S = 60.0
+
+
+def _outcome_ttl() -> float:
+    raw = os.environ.get("XPST_ANALYTICS_OUTCOME_TTL")
+    if raw is None:
+        return DEFAULT_OUTCOME_TTL_S
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return DEFAULT_OUTCOME_TTL_S
+
+
+def _cached_outcome_report(config_dir: str) -> dict[str, Any]:
+    """Recorded-mode outcome report, memoized for a short TTL."""
+    from xpst.analytics import AnalyticsCollector
+
+    ttl = _outcome_ttl()
+    key = str(config_dir)
+    now = time.monotonic()
+    if ttl > 0:
+        with _OUTCOME_REPORT_LOCK:
+            hit = _OUTCOME_REPORT_CACHE.get(key)
+            if hit is not None and (now - hit[0]) < ttl:
+                return hit[1]
+    report = AnalyticsCollector(config_dir).outcome_report()
+    with _OUTCOME_REPORT_LOCK:
+        _OUTCOME_REPORT_CACHE[key] = (time.monotonic(), report)
+    return report
+
+
+def _refresh_in_background(config_dir: str, config: Any) -> bool:
+    """Re-probe off the request path. Returns False when one is already running."""
+    key = str(config_dir)
+    with _AUTH_STATUS_LOCK:
+        if key in _AUTH_STATUS_REFRESHING:
+            return False
+        _AUTH_STATUS_REFRESHING.add(key)
+
+    def work() -> None:
+        try:
+            _probe_and_store(config_dir, config, refresh_tokens=True)
+        except Exception as exc:  # noqa: BLE001 - a failed refresh keeps the stale value
+            logger.debug("Background auth refresh failed: %s", exc)
+        finally:
+            with _AUTH_STATUS_LOCK:
+                _AUTH_STATUS_REFRESHING.discard(key)
+
+    threading.Thread(target=work, name="xpst-auth-refresh", daemon=True).start()
+    return True
+
+
+def warm_auth_status_cache(config_dir: str, config: Any) -> None:
+    """Prime the cache at startup so the first UI load is not a cold probe."""
+    if _auth_status_ttl() <= 0:
+        return
+    _refresh_in_background(config_dir, config)
+
+
+def _has_cached_auth(config_dir: str) -> bool:
+    with _AUTH_STATUS_LOCK:
+        return str(config_dir) in _AUTH_STATUS_CACHE
+
+
+def _engine_version() -> str:
+    """The running engine's version, from the installed package metadata.
+
+    The About page used to hardcode a version string, so every build reported
+    the same stale number no matter what shipped. The package metadata is the
+    single source of truth; ``unknown`` is the honest answer when it cannot be
+    read (e.g. a raw source checkout without an install).
+    """
+    from importlib import metadata
+
+    try:
+        return metadata.version("xpst")
+    except Exception:  # noqa: BLE001 - an unreadable version must not 500 the page
+        try:
+            from xpst import __version__
+
+            return __version__
+        except Exception:  # noqa: BLE001
+            return "unknown"
+
+
+def _badge_summary(auth: Mapping[str, Any] | None) -> dict[str, str]:
+    """``{platform: badge}`` from a live-auth mapping (never invents a badge)."""
+    summary: dict[str, str] = {}
+    if not isinstance(auth, Mapping):
+        return summary
+    for name, entry in auth.items():
+        if isinstance(entry, Mapping) and entry.get("badge"):
+            summary[str(name)] = str(entry["badge"])
+    return summary
+
+
+def _auth_checked_at(auth: Mapping[str, Any] | None) -> float | None:
+    """Newest live-check timestamp in a live-auth mapping (the badge's age)."""
+    stamps: list[float] = []
+    if isinstance(auth, Mapping):
+        for entry in auth.values():
+            if isinstance(entry, Mapping) and isinstance(entry.get("checked_at"), (int, float)):
+                stamps.append(float(entry["checked_at"]))
+    return max(stamps) if stamps else None
+
+
+def _auth_checked_at_iso(auth: Mapping[str, Any] | None) -> str | None:
+    from xpst.token_state import iso_timestamp
+
+    return iso_timestamp(_auth_checked_at(auth))
+
+
+def _credential_health(canonical: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Forward-looking credential report for the UI (never raises).
+
+    A status read must not fail because the watchdog could not run, so any
+    problem degrades to an empty report — an empty report says nothing rather
+    than claiming everything is fine.
+    """
+    try:
+        from xpst.credential_health import build_credential_health
+
+        providers = canonical.get("providers") if isinstance(canonical, Mapping) else None
+        return build_credential_health(providers if isinstance(providers, Mapping) else {})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("credential health build failed: %s", str(exc)[:200])
+        return {}
+
+
+def _auth_probe_in_flight(config_dir: str) -> bool:
+    with _AUTH_STATUS_LOCK:
+        return str(config_dir) in _AUTH_STATUS_REFRESHING
+
+
+def _live_auth_and_canonical(config_dir: str, config: Any) -> tuple[dict[str, Any], dict[str, Any], bool, float, bool]:
+    """Return ``(auth, canonical, from_cache, age_seconds, stale)``.
+
+    An expired entry is served immediately and refreshed behind the request, so
+    the UI never blocks on the network; ``stale`` tells the caller the answer is
+    an older probe rather than a fresh one.
+    """
+    key = str(config_dir)
+    ttl = _auth_status_ttl()
+    now = time.monotonic()
+    with _AUTH_STATUS_LOCK:
+        entry = _AUTH_STATUS_CACHE.get(key)
+
+    if entry is not None and ttl > 0:
+        age = now - entry[0]
+        if age < ttl:
+            return entry[1], entry[2], True, age, False
+        _refresh_in_background(config_dir, config)
+        return entry[1], entry[2], True, age, True
+
+    auth, canonical = _probe_and_store(config_dir, config)
+    return auth, canonical, False, 0.0, False
+
+
+def create_api_router(
+    config_dir: str = "~/.xpst",
+    *,
+    engine_factory: Any | None = None,
+    uploaders: dict[str, Any] | None = None,
+) -> APIRouter:
+    """Build the /api router bound to a config directory.
+
+    Args:
+        config_dir: config directory the API reads from.
+        engine_factory: optional test seam — callable returning an engine-like
+            object used by ``POST /api/post``. Production passes ``None`` so the
+            real :class:`~xpst.engine.CrossPostEngine` runs.
+        uploaders: optional test seam — ``{platform: uploader}`` used by
+            ``POST /api/connect/{platform}`` instead of building real platform
+            uploaders (keeps a verification call off the network).
+    """
+    router = APIRouter(prefix="/api", tags=["ui"])
+
+    def _load_ui_config() -> Any:
+        """Load this config dir's config, falling back to defaults.
+
+        Read-only by design: a GET must never create or modify a config file.
+        A brand-new install (no config.yaml yet) is answered from defaults, and
+        the first *write* endpoint materializes the file.
+        """
+        from xpst.config import XPSTConfig
+
+        path = str(Path(config_dir).expanduser() / "config.yaml")
+        try:
+            return XPSTConfig.load(path)
+        except Exception as exc:  # noqa: BLE001 - a missing/corrupt config must not 500 the UI
+            logger.debug("Using default config for %s: %s", config_dir, exc)
+            config = XPSTConfig()
+            config.config_dir = str(Path(config_dir).expanduser())
+            return config
+
+    def _save_ui_config(config: Any) -> None:
+        """Persist a config to this router's config directory."""
+        target = Path(config_dir).expanduser()
+        target.mkdir(parents=True, exist_ok=True)
+        config.config_dir = str(target)
+        config.save(str(target / "config.yaml"))
+
+    def _destination_providers(config: Any, live_status: Any = None) -> list[dict[str, Any]]:
+        """Canonical video-destination providers, in catalog order.
+
+        Role truth comes from the live canonical probe when one answered, so a
+        destination whose stored session was rejected is never rendered as a
+        green/ready destination. With no live answer the entry says so: the
+        states are the config-only ones and ``live_checked`` is False, which
+        stops "a credential file exists" from reading as "verified".
+        """
+        from xpst.provider_truth import build_canonical_status, canonical_provider_catalog
+
+        catalog = canonical_provider_catalog(config)
+        live = build_canonical_status(config, live_status)
+        providers = [
+            provider
+            for provider in catalog.get("providers", [])
+            if "video_destination" in (provider.get("roles") or [])
+        ]
+        for provider in providers:
+            role = (live.get(provider["name"]) or {}).get("role_status", {}).get("video_destination") or {}
+            probed = bool(role.get("live_checked"))
+            provider["destination_state"] = role.get("state", "unconfigured")
+            provider["destination_ready"] = bool(role.get("ready"))
+            provider["destination_error"] = role.get("error")
+            provider["live_checked"] = probed
+        return providers
+
+    def _readiness_live_status(config: Any) -> dict[str, Any] | None:
+        """The canonical live probe output for readiness, or None (unknown).
+
+        Readiness must render the ONE probe verdict the other surfaces render
+        (:mod:`xpst.provider_truth`), never a config-only green. The answer is
+        deliberately non-blocking: when a probe is already running and nothing
+        is cached yet, the caller gets None (= "checking"), and with live
+        checking disabled (the offline test harness) only a probe some other
+        request already performed is returned.
+        """
+        key = str(config_dir)
+        if os.environ.get("XPST_DISABLE_AUTH_WARM"):
+            with _AUTH_STATUS_LOCK:
+                entry = _AUTH_STATUS_CACHE.get(key)
+            return entry[2] if entry is not None else None
+        if _auth_probe_in_flight(key) and not _has_cached_auth(key):
+            return None
+        try:
+            _, canonical, _, _, _ = _live_auth_and_canonical(key, config)
+            return canonical
+        except Exception as exc:  # noqa: BLE001 - never 500 a readiness read
+            logger.debug("Live readiness status unavailable: %s", exc)
+            return None
+
+    def _readiness_block(config: Any, live_status: Any) -> dict[str, Any]:
+        """The ONE readiness verdict block every surface serves.
+
+        Same builder for ``/api/health-status`` and ``/api/onboarding``, so the
+        Home panel, the onboarding wizard and the payload behind them cannot
+        disagree. Per-role rows come from
+        :func:`xpst.readiness.role_readiness`; ``verdict`` is the rendered
+        pill/copy pair.
+        """
+        from xpst.readiness import build_readiness_report
+
+        try:
+            report = build_readiness_report(config, live_status=live_status).to_dict()
+        except Exception as exc:  # noqa: BLE001 - report truthfully instead of 500
+            logger.warning("Readiness report failed: %s", exc)
+            report = {
+                "ready": False,
+                "summary": f"Readiness could not be computed: {str(exc)[:200]}",
+                "checks": [],
+                "blocking": [],
+                "warnings": [],
+                "roles": [],
+            }
+
+        roles = list(report.get("roles") or [])
+        # No live probe answered: keep the local checks (they are offline and
+        # deterministic) but claim nothing about roles or readiness.
+        if live_status is None:
+            report["ready"] = False
+            report["summary"] = "Live account checks are still running. Nothing is claimed until they answer."
+            roles = []
+
+        needs_attention = [row for row in roles if not row.get("ready")]
+        ready = bool(report["ready"]) and not needs_attention
+        warnings = list(report.get("warnings") or [])
+        if live_status is None:
+            verdict = {"status": "unknown", "label": "Checking…", "detail": report["summary"]}
+        elif not ready:
+            verdict = {"status": "degraded", "label": "Needs attention", "detail": report["summary"]}
+            if report["ready"] and needs_attention:
+                # Posting works (a destination is ready); the rows still need
+                # attention. Say both, so the copy never claims posting is
+                # blocked while a Create-post action is offered.
+                verdict["detail"] = "A destination is ready, so posting works. The roles below still need attention."
+        elif warnings:
+            verdict = {"status": "warning", "label": "Ready with warnings", "detail": report["summary"]}
+        else:
+            verdict = {"status": "healthy", "label": "Ready", "detail": report["summary"]}
+
+        return {
+            "ready": ready,
+            "summary": report["summary"],
+            "checks": report.get("checks", []),
+            "blocking": report.get("blocking", []),
+            "warnings": warnings,
+            "roles": roles,
+            # Rows the UI must render, each one distinct: (platform, role).
+            "blockers": needs_attention,
+            "verdict": verdict,
+            "pending": live_status is None,
+        }
+
+    def _guide_payload(platform: str) -> dict[str, Any]:
+        """Click-by-click setup steps for one platform (never a secret)."""
+        try:
+            from xpst.wizard import PLATFORM_GUIDES
+
+            guide = PLATFORM_GUIDES.get(platform)
+            if guide is None:
+                return {"platform": platform, "title": platform, "why": "", "steps": [], "docs_url": ""}
+            return {
+                "platform": platform,
+                "title": guide.title,
+                "why": guide.why,
+                "steps": [step.text for step in guide.steps],
+                "docs_url": guide.docs_url,
+            }
+        except Exception as exc:  # noqa: BLE001 - a missing guide must not break connect
+            logger.debug("No guide for %s: %s", platform, exc)
+            return {"platform": platform, "title": platform, "why": "", "steps": [], "docs_url": ""}
+
+    def _onboarding_payload(config: Any) -> dict[str, Any]:
+        """First-run state: source folder, destinations, readiness, next step."""
+        # Readiness and the destination list render the live probe's verdict,
+        # the same canonical truth the Home endpoint and `xpst doctor` render.
+        live_status = _readiness_live_status(config)
+        destinations = _destination_providers(config, live_status)
+        source_path = str(getattr(getattr(config, "local", None), "path", "") or "")
+        source_exists = bool(source_path) and Path(source_path).expanduser().is_dir()
+        ready_destinations = [item["name"] for item in destinations if item.get("destination_ready")]
+
+        readiness = _readiness_block(config, live_status)
+
+        first_run_complete = bool(getattr(config, "first_run_complete", False))
+        if ready_destinations:
+            next_step = {
+                "kind": "compose",
+                "label": "Compose a post",
+                "route": "#/compose",
+                "detail": ", ".join(ready_destinations),
+            }
+        elif destinations:
+            next_step = {
+                "kind": "connect",
+                "label": "Connect a destination",
+                "route": "#/connect",
+                "detail": "No destination is ready yet.",
+            }
+        else:
+            next_step = {
+                "kind": "configure",
+                "label": "Review configuration",
+                "route": "#/settings",
+                "detail": "No video destination is available.",
+            }
+
+        steps = [
+            {"id": "welcome", "title": "Welcome to xPST", "done": True},
+            {"id": "source", "title": "Choose a content folder", "done": source_exists},
+            {"id": "destination", "title": "Connect a platform", "done": bool(ready_destinations)},
+            {"id": "ready", "title": "Compose your first post", "done": False},
+        ]
+        return {
+            "first_run_complete": first_run_complete,
+            "show_wizard": not first_run_complete,
+            "source": {"path": source_path, "exists": source_exists},
+            "destinations": destinations,
+            "ready_destinations": ready_destinations,
+            "readiness": readiness,
+            "next_step": next_step,
+            "steps": steps,
+        }
+
+    @router.get("/onboarding")
+    def api_onboarding() -> dict[str, Any]:
+        """First-run onboarding state (read-only; never creates a config file)."""
+        return _onboarding_payload(_load_ui_config())
+
+    @router.post("/onboarding", dependencies=[Depends(require_api_token)])
+    def api_onboarding_save(payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist the first-run choices (content folder + enabled destinations).
+
+        Only non-secret local choices are written. Credentials are never
+        accepted here — connecting a real account stays in the interactive
+        connect flow (``xpst connect`` / the Tauri deep-link).
+        """
+        from xpst.readiness import repair_local_setup
+
+        config = _load_ui_config()
+        data = payload or {}
+        applied: list[str] = []
+
+        local = data.get("local")
+        if isinstance(local, dict) and "path" in local:
+            config.local.path = str(local.get("path") or "").strip()
+            applied.append("local.path")
+
+        destinations = data.get("destinations")
+        if isinstance(destinations, dict):
+            known = {item["name"] for item in _destination_providers(config)}
+            for name, enabled in destinations.items():
+                key = str(name).strip().lower()
+                if key not in known:
+                    raise HTTPException(status_code=404, detail=f"Unknown destination platform: {name}")
+                getattr(config, key).enabled = bool(enabled)
+                applied.append(f"accounts.{key}.enabled")
+
+        _save_ui_config(config)
+        reloaded = _load_ui_config()
+        try:
+            repair = repair_local_setup(reloaded)
+            actions = list(repair.get("actions", []))
+        except Exception as exc:  # noqa: BLE001 - repair is best-effort
+            logger.debug("Local setup repair skipped: %s", exc)
+            actions = []
+
+        payload_out = _onboarding_payload(reloaded)
+        payload_out["ok"] = True
+        payload_out["applied"] = applied
+        payload_out["actions"] = actions
+        return payload_out
+
+    @router.post("/onboarding/complete", dependencies=[Depends(require_api_token)])
+    def api_onboarding_complete() -> dict[str, Any]:
+        """Persist ``first_run_complete`` so the wizard is offered once."""
+        config = _load_ui_config()
+        config.first_run_complete = True
+        _save_ui_config(config)
+        reloaded = _load_ui_config()
+        payload = _onboarding_payload(reloaded)
+        return {
+            "ok": True,
+            "first_run_complete": bool(reloaded.first_run_complete),
+            "next_step": payload["next_step"],
+        }
+
+    @router.get("/media")
+    def api_media(folder: str = "", limit: int = 100) -> dict[str, Any]:
+        """List local media in a folder for the compose screen.
+
+        The folder comes from the caller or from the configured content folder.
+        No folder is guessed from the user's home directory, and nothing is
+        scanned recursively.
+
+        Only files that at least one destination can actually publish are
+        returned in ``items``. A file whose modality no destination accepts
+        (an image, today) is moved to ``skipped`` with the plain-language reason
+        from the canonical media spec, so the UI never offers something the
+        preflight would hard-reject and nothing is dropped without a trace.
+        """
+        from xpst.media.modality import (
+            IMAGE_EXTENSIONS,
+            VIDEO_EXTENSIONS,
+            detect_modality,
+        )
+        from xpst.media.specs import destinations_for_modality, modality_unsupported_message
+
+        config = _load_ui_config()
+        configured = str(getattr(getattr(config, "local", None), "path", "") or "")
+        target = (folder or configured or "").strip()
+        cap = max(1, min(int(limit or 100), 500))
+
+        if not target:
+            return {
+                "ok": True,
+                "folder": "",
+                "exists": False,
+                "items": [],
+                "count": 0,
+                "skipped": [],
+                "skipped_count": 0,
+                "hint": "No content folder is configured yet. Choose one during setup.",
+            }
+
+        path = Path(target).expanduser()
+        if not path.is_dir():
+            return {
+                "ok": False,
+                "folder": str(path),
+                "exists": False,
+                "items": [],
+                "count": 0,
+                "skipped": [],
+                "skipped_count": 0,
+                "error": f"Folder not found: {path}",
+            }
+
+        extensions = VIDEO_EXTENSIONS | IMAGE_EXTENSIONS
+        files: list[Path] = []
+        for extension in extensions:
+            files.extend(path.glob(f"*{extension}"))
+            files.extend(path.glob(f"*{extension.upper()}"))
+        unique = sorted(set(files), key=lambda item: item.name.lower())[:cap]
+
+        items: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for item in unique:
+            try:
+                stat = item.stat()
+            except OSError:
+                continue
+            suffix = item.suffix.lower()
+            modality = detect_modality(item)
+            # The same capability answer the preflight uses: a modality no
+            # destination accepts is not offered, and it is never offered "with
+            # a warning" that the post path would then turn into a hard refusal.
+            # No destination list is emitted on purpose — "where can I post
+            # this" is a readiness question the canonical preflight answers
+            # (auth, quota, destination-specific limits), and guessing it here
+            # would recreate the same offer-then-refuse defect.
+            postable = bool(destinations_for_modality(modality)) if modality else False
+            entry = {
+                "path": str(item),
+                "name": item.name,
+                "size_bytes": stat.st_size,
+                "type": modality or suffix.lstrip(".") or "unknown",
+                "modified": stat.st_mtime,
+                "postable": postable,
+            }
+            if postable:
+                items.append(entry)
+            else:
+                entry["reason"] = modality_unsupported_message(
+                    modality or "unknown",
+                    suffix=suffix,
+                )
+                skipped.append(entry)
+
+        payload: dict[str, Any] = {
+            "ok": True,
+            "folder": str(path),
+            "exists": True,
+            "items": items,
+            "count": len(items),
+            "skipped": skipped,
+            "skipped_count": len(skipped),
+        }
+        if skipped:
+            payload["hint"] = skipped[0]["reason"]
+        return payload
+
+    @router.get("/media/stream")
+    def api_media_stream(request: Request, path: str = "") -> Response:
+        """Stream one local media file to the composer's preview player.
+
+        Contract the UI depends on:
+
+        * ``Accept-Ranges: bytes`` and a real ``206 Partial Content`` answer,
+          so a video is *playable and seekable* in the webview and the client
+          pulls only the ranges it needs.
+        * The body is produced by a bounded chunk iterator (see
+          :mod:`xpst.dashboard.media_preview`), so selecting or scrubbing a 2 GB
+          video never costs the engine a full-file read.
+
+        Only real, previewable local files are served; a directory, a missing
+        path, or a non-media extension is refused before any bytes are read.
+        """
+        from xpst.dashboard.media_preview import (
+            iter_file_chunks,
+            media_content_type,
+            parse_byte_range,
+            resolve_media_path,
+        )
+
+        try:
+            resolved = resolve_media_path(path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
+        try:
+            size = resolved.stat().st_size
+        except OSError as exc:
+            raise HTTPException(status_code=404, detail=f"Media file unreadable: {exc}") from None
+
+        try:
+            span = parse_byte_range(request.headers.get("range"), size)
+        except ValueError:
+            # 416 with the true size: a player asking past EOF must not be
+            # handed the whole file as a consolation prize.
+            return JSONResponse(
+                status_code=416,
+                content={"ok": False, "error": "Range not satisfiable", "size_bytes": size},
+                headers={"Accept-Ranges": "bytes", "Content-Range": f"bytes */{size}"},
+            )
+
+        start, end = span if span else (0, max(size - 1, 0))
+        length = end - start + 1 if size else 0
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(length),
+            "Cache-Control": "private, max-age=0",
+        }
+        status_code = 200
+        if span is not None:
+            status_code = 206
+            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        return StreamingResponse(
+            iter_file_chunks(resolved, start=start, length=length),
+            status_code=status_code,
+            media_type=media_content_type(resolved),
+            headers=headers,
+        )
+
+    @router.get("/media/thumb")
+    def api_media_thumb(path: str = "", width: int = 640) -> FileResponse:
+        """Serve a generated, cached thumbnail (JPEG) for one media file.
+
+        ``ffmpeg`` extracts a single scaled frame; the result is cached under
+        ``~/.xpst/cache/previews`` keyed by path+size+mtime, so re-selecting
+        the same asset is a file read of a small JPEG, not another decode.
+
+        404 means *no thumbnail could be generated* (ffmpeg missing or the
+        decode failed) — the UI answers that by streaming the original file
+        through ``/api/media/stream``, so a preview still appears.
+        """
+        from xpst.dashboard.media_preview import resolve_media_path, thumbnail_for
+
+        try:
+            resolved = resolve_media_path(path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
+        thumb = thumbnail_for(resolved, width=max(64, min(int(width or 640), 1280)))
+        if thumb is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No thumbnail could be generated for this file; stream the original instead.",
+            )
+        return FileResponse(thumb, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+    @router.post("/connect/{platform}", dependencies=[Depends(require_api_token)])
+    def api_connect(platform: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Inspect, enable, and verify one destination platform.
+
+        Truth contract: ``connected`` is True only when the canonical live
+        probe reports the destination authenticated. A request that merely
+        succeeded returns ``connected: false`` with the state and the exact
+        blocker — the UI must never show a success badge for an unconnected
+        account.
+
+        Body:
+            dry_run: True (default) reports the plan without writing config.
+            enable: optional bool — set ``accounts.<platform>.enabled``.
+            verify: bool (default True) — run the canonical live probe.
+            acknowledge_ban_risk: optional bool — record that the operator
+                accepted an unofficial auth path (Instagram ``session``,
+                X ``cookies``). Nothing is recorded for a platform on its
+                official path, and a dry run reports ``would_record`` instead
+                of writing.
+        """
+        from xpst.auth_status import collect_live_auth_status
+        from xpst.provider_truth import canonical_status_report, posting_truth
+
+        config = _load_ui_config()
+        key = str(platform).strip().lower()
+        destinations = {item["name"]: item for item in _destination_providers(config)}
+        if key not in destinations:
+            raise HTTPException(status_code=404, detail=f"Unknown destination platform: {platform}")
+
+        data = payload or {}
+        dry_run = bool(data.get("dry_run", True))
+        verify = bool(data.get("verify", True))
+        enable = data.get("enable")
+
+        # Ban-risk advisory for this platform's configured auth path. Stated on
+        # every response — the connect card is the decision point, and a caller
+        # must not have to infer "session/cookies means the unofficial API" from
+        # the auth_mode string. ``None`` means the platform is on its official
+        # path. Recorded choices are honoured; unrecorded ones say so.
+        from xpst.auth_path_risk import auth_path_risk as _auth_path_risk
+        from xpst.auth_path_risk import record_acknowledgement as _record_ban_risk_ack
+
+        ban_risk = _auth_path_risk(config, key)
+        ban_risk_acknowledged = False
+        ack_requested = bool(data.get("acknowledge_ban_risk"))
+        if ban_risk is not None and ack_requested:
+            if dry_run:
+                ban_risk_acknowledged = False
+            else:
+                _record_ban_risk_ack(
+                    config, key, surface=f"POST /api/connect/{key}"
+                )
+                ban_risk = _auth_path_risk(config, key)
+                ban_risk_acknowledged = True
+
+        config_changed = False
+        if isinstance(enable, bool):
+            account = getattr(config, key, None)
+            if account is not None and bool(getattr(account, "enabled", False)) != enable:
+                if dry_run:
+                    config_changed = False
+                else:
+                    account.enabled = enable
+                    _save_ui_config(config)
+                    config = _load_ui_config()
+                    config_changed = True
+
+        entry: dict[str, Any] = {}
+        # ``None`` = not probed (a disabled destination is never probed, and
+        # "not probed" must not read as "checked and failed").
+        live_checked: bool | None = None
+        probe_error: str | None = None
+        if verify and getattr(getattr(config, key, None), "enabled", False):
+            try:
+                if uploaders is not None:
+                    canonical = canonical_status_report(config, collect_live_auth_status(config, uploaders))
+                else:
+                    canonical = canonical_status_report(config, collect_live_auth_status(config))
+                providers = canonical.get("providers") or {}
+                entry = dict(providers.get(key) or {})
+                live_checked = bool(entry)
+            except Exception as exc:  # noqa: BLE001 - an unverifiable account is not a 500
+                probe_error = str(exc)[:200]
+                live_checked = False
+                logger.debug("Connect probe failed for %s: %s", key, exc)
+
+        provider = destinations[key]
+        role = (entry.get("role_status") or {}).get("video_destination") or {}
+        state = str(role.get("state") or provider.get("destination_state") or "unconfigured")
+        authenticated = bool(entry.get("authenticated")) if entry else False
+        # Posting truth, not the platform-level ``authenticated`` flag: for a
+        # source-only platform that flag is the SOURCE verdict, and treating it
+        # as an upload verdict is how the app showed a green "Connected" badge
+        # for a platform it can never post to.
+        truth = posting_truth(entry or provider)
+        source_only = bool(truth["source_only"])
+        # ``live_checked`` is None for a skipped probe; None is falsy, so the
+        # connected verdict stays conservative without claiming a check ran.
+        # An account can be authenticated (e.g. TikTok source cookies) while the
+        # *destination* credential is still unconfigured — that is not connected
+        # for posting, and claiming otherwise hides the sign-in / setup step the
+        # user still has to do. ``verified_ready`` is the role state the provider
+        # truth reports; posting truth still gates the final verdict below.
+        verified_ready = state == "ready"
+        connected = bool(
+            (verified_ready or (authenticated and state != "unconfigured")) and truth["can_post"] and live_checked
+        )
+
+        enabled_now = bool(getattr(getattr(config, key, None), "enabled", False))
+        # Recompute after any enable/write above so the advisory describes the
+        # config as it is now, not as it was when the request arrived.
+        ban_risk = _auth_path_risk(config, key)
+        if source_only:
+            next_action = {
+                "kind": "review",
+                "label": (
+                    f"{provider.get('display_name', key)} is a source only — posting needs "
+                    "an approved provider upload app"
+                ),
+                "role": "video_destination",
+            }
+        elif connected:
+            next_action = {"kind": "compose", "label": "Compose a post", "route": "#/compose"}
+        elif not enabled_now:
+            next_action = {"kind": "enable", "label": f"Enable {provider['display_name']}", "route": "#/connect"}
+        else:
+            next_action = {"kind": "authenticate", "label": "Finish sign-in", "route": "#/connect"}
+
+        return {
+            "ok": True,
+            "platform": key,
+            "display_name": provider.get("display_name", key),
+            "dry_run": dry_run,
+            "enabled": enabled_now,
+            "enable_requested": enable if isinstance(enable, bool) else None,
+            "config_changed": config_changed,
+            "connected": connected,
+            "authenticated": authenticated,
+            "state": state,
+            "verified": live_checked is True,
+            "live_checked": live_checked,
+            "error": probe_error or role.get("error") or provider.get("destination_error"),
+            "auth_mode": entry.get("auth_mode") or provider.get("auth_mode"),
+            # Role-qualified truth: a platform can be readable and not postable.
+            "can_post": bool(truth["can_post"]),
+            "source_only": source_only,
+            "posting_role": truth["posting_role"],
+            "posting_state": truth["posting_state"],
+            "posting_note": truth["posting_note"],
+            "official_api": bool(provider.get("is_official_api")),
+            # The ban-risk advisory (null on an official path). ``acknowledged``
+            # says whether an operator choice is already on record; a caller
+            # that has just shown the warning passes ``acknowledge_ban_risk``.
+            "ban_risk": ban_risk.to_dict() if ban_risk is not None else None,
+            "ban_risk_acknowledged": ban_risk_acknowledged,
+            # A dry run never writes: say that the acknowledgement was asked
+            # for and left unrecorded, instead of silently dropping the request.
+            "ban_risk_would_record": bool(dry_run and ack_requested and ban_risk is not None),
+            "docs_url": provider.get("docs_url") or "",
+            "guide": _guide_payload(key),
+            "next_action": next_action,
+            "sign_in": _sign_in_support(key, config),
+        }
+
+    @router.post("/post", dependencies=[Depends(require_api_token)])
+    def api_post(payload: dict[str, Any]) -> JSONResponse:
+        """Run (or plan) a manual post through the canonical engine path.
+
+        ``dry_run: true`` returns the preflight plan and uploads nothing.
+        Otherwise the real engine runs; every requested destination appears in
+        the response and a destination that published nothing is reported as a
+        failure (never as success). A request refused by preflight returns 409
+        with the same truthful envelope.
+
+        ``draft_id`` binds the request to a durable draft: the draft is brought
+        up to date with this request, its plan is revalidated, and a plan whose
+        destination/auth/media/content state changed is refused (409, with the
+        reasons) unless the caller re-confirms with ``confirm_stale: true``.
+        """
+        from xpst.drafts import DraftService
+        from xpst.services.post_service import PostRequest, PostService, serialize_post_attempt
+
+        data = payload or {}
+        # No implied set (R3): an explicit `platforms` list wins; `all: true` is
+        # the explicit "every connected account that accepts this format";
+        # otherwise the format route ∩ connected accounts. Resolved before the
+        # request is built so the plan, the engine call and the reported
+        # destinations are the same set.
+        from xpst.services.route_plan import detect_content_type, resolve_targets
+
+        if not data.get("platforms"):
+            try:
+                route_config = _load_ui_config()
+            except Exception:  # noqa: BLE001 - defaults are the documented fallback
+                from xpst.config import XPSTConfig as _RouteConfig
+
+                route_config = _RouteConfig()
+            media_for_route = list(data.get("media_paths") or [])
+            if data.get("media_path") and not media_for_route:
+                media_for_route = [str(data["media_path"])]
+            media_for_route += list(data.get("carousel_paths") or [])
+            resolution = resolve_targets(
+                route_config,
+                None,
+                all_connected=bool(data.get("all", False)),
+                content_type=detect_content_type(
+                    [str(item) for item in media_for_route],
+                    content_type=str(data.get("format") or data.get("content_type") or "auto"),
+                ),
+            )
+            if resolution.errors:
+                envelope = {
+                    "ok": False,
+                    "ready": False,
+                    "blocked": True,
+                    "error": dict(resolution.errors[0]),
+                    "blockers": [resolution.errors[0]["message"]],
+                    "requested": [],
+                    "destinations": [],
+                    "network_calls": False,
+                }
+                return JSONResponse(envelope, status_code=409)
+            data = {**data, "platforms": list(resolution.targets)}
+        request = PostRequest.from_payload(data)
+        dry_run = bool(data.get("dry_run", False))
+        # HTTP twin of CLI --now / MCP force: publish outside the anti-bot
+        # window instead of deferring (ignored on the text route, which is
+        # never window-gated).
+        force_now = bool(data.get("force", False))
+        draft_id = str(data.get("draft_id") or "").strip()
+        confirm_stale = bool(data.get("confirm_stale", False))
+        draft_service = DraftService(_load_ui_config(), config_dir) if draft_id else None
+        gate: dict[str, Any] | None = None
+
+        def attach_request(envelope: dict[str, Any]) -> dict[str, Any]:
+            envelope["request"] = {
+                "media_paths": request.media_paths,
+                "caption": request.caption,
+                "platforms": request.platforms,
+                "dry_run": dry_run,
+            }
+            if draft_id:
+                envelope["draft_id"] = draft_id
+            return envelope
+
+        if draft_service is not None:
+            gate = draft_service.post_gate(
+                draft_id,
+                media_paths=request.media_paths,
+                caption=request.caption,
+                platforms=request.platforms,
+                confirm_stale=confirm_stale,
+            )
+            if gate["unknown_draft"] or not gate["allowed"]:
+                reasons = list(gate["reasons"])
+                blockers = [reason["message"] for reason in reasons]
+                if gate["unknown_draft"]:
+                    blockers = ["This draft no longer exists on disk; save the draft again before posting."]
+                envelope = serialize_post_attempt(
+                    requested=request.platforms,
+                    results={},
+                    caption=request.caption,
+                    dry_run=dry_run,
+                    blockers=blockers,
+                )
+                envelope.update(
+                    {
+                        "stale": bool(reasons),
+                        "stale_reasons": reasons,
+                        "unknown_draft": bool(gate["unknown_draft"]),
+                        "draft": gate.get("verdict"),
+                        "ready": False,
+                        "blocked": True,
+                    }
+                )
+                return JSONResponse(attach_request(envelope), status_code=409)
+
+        service = PostService(_load_ui_config(), config_dir, engine_factory=engine_factory)
+        envelope = service.dry_run(request) if dry_run else service.execute(request, force_now=force_now)
+        envelope["request"] = {
+            "media_paths": request.media_paths,
+            "caption": request.caption,
+            "platforms": request.platforms,
+            "overrides": {name: override.to_dict() for name, override in request.overrides.items()},
+            "captions": {platform: request.text_for(platform) for platform in request.platforms},
+            "dry_run": dry_run,
+        }
+        if draft_service is not None:
+            verdict = gate.get("verdict") if gate else None
+            envelope["stale"] = False
+            envelope["stale_reasons"] = []
+            envelope["reconfirmed"] = bool(verdict and verdict.get("reconfirmed"))
+            if dry_run:
+                # A dry run *is* a plan: record it (and what it was validated
+                # against) so resuming the draft can tell whether it still holds.
+                recorded = draft_service.record_plan(
+                    draft_id,
+                    plan=envelope.get("plan"),
+                    ready=bool(envelope.get("ready")),
+                    blockers=envelope.get("blockers") or [],
+                )
+                envelope["draft"] = draft_service.verdict_for(recorded) if recorded else None
+            else:
+                if envelope.get("ok"):
+                    draft_service.mark_posted(draft_id, video_id=str(envelope.get("video_id") or ""))
+                envelope["draft"] = draft_service.verdict_for(draft_service.get(draft_id) or {})
+        blocked = bool(envelope.get("blocked")) or (not dry_run and not envelope.get("ok") and envelope.get("blockers"))
+        return JSONResponse(attach_request(envelope), status_code=409 if blocked else 200)
+
+    # ── Phone ingest: media upload (M0) ────────────────────────────────
+    @router.post("/media", dependencies=[Depends(require_api_token)])
+    def api_media_upload(
+        # FastAPI reads these from the multipart form; B008 does not apply to
+        # its parameter-marker calls (that is the framework's idiom, not a
+        # mutable-default bug).
+        file: UploadFile = File(...),  # noqa: B008
+        idempotency_key: str = Form(""),  # noqa: B008
+        label: str = Form(""),  # noqa: B008
+    ) -> JSONResponse:
+        """Accept one media file from a device and stage it under the config dir.
+
+        This is the endpoint that makes a phone possible: every other route takes
+        ``media_paths`` on the engine host. The reply carries the staged media
+        id, the probed format (container, duration, dimensions, codec, bytes),
+        and the content digest the plan will freeze. Size cap, container sniff
+        and idempotency live in :mod:`xpst.media.ingest`; a refusal is a typed
+        code, never a 500 and never a half-staged file.
+        """
+        from xpst.media.ingest import MediaIngestError, max_upload_bytes, stage_upload
+
+        try:
+            record = stage_upload(
+                config_dir,
+                filename=file.filename or "upload",
+                stream=file.file,
+                idempotency_key=idempotency_key,
+                label=label,
+            )
+        except MediaIngestError as exc:
+            return JSONResponse(
+                {"ok": False, "media": None, "error": exc.to_dict(), "message": exc.message},
+                status_code=exc.status_code,
+            )
+        finally:
+            file.file.close()
+        replayed = bool(record.get("replayed"))
+        return JSONResponse(
+            {
+                "ok": True,
+                "media": record,
+                "replayed": replayed,
+                "limits": {"max_upload_bytes": max_upload_bytes()},
+            },
+            status_code=200 if replayed else 201,
+        )
+
+    @router.get("/media/{media_id}")
+    def api_media_get(media_id: str) -> JSONResponse:
+        """Re-read a staged media record (probe, digest, path) by id."""
+        from xpst.media.ingest import get_media
+
+        record = get_media(config_dir, media_id)
+        if record is None:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "media": None,
+                    "error": {
+                        "code": "MEDIA_UNKNOWN",
+                        "message": "That media id is not staged on this engine. Upload the file again.",
+                    },
+                },
+                status_code=404,
+            )
+        return JSONResponse({"ok": True, "media": record})
+
+    # ── Device pairing (M0) ────────────────────────────────────────────
+    @router.post("/pair")
+    def api_pair(payload: dict[str, Any] | None = None) -> JSONResponse:
+        """Exchange a one-time pairing code for a per-device token.
+
+        Public by design: the phone has no credential yet, and the single-use,
+        expiring code is the credential for this one call. The token is returned
+        **once**; the engine stores only its hash.
+        """
+        from xpst.dashboard.devices import PairingError, redeem_pairing_code
+
+        data = payload or {}
+        if not str(data.get("code") or "").strip():
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "code": "PAIR_CODE_MISSING",
+                    "error": {
+                        "code": "PAIR_CODE_MISSING",
+                        "message": 'Send the pairing code: {"code": "ABCD-2345"}.',
+                    },
+                    "message": 'Send the pairing code: {"code": "ABCD-2345"}.',
+                },
+                status_code=400,
+            )
+        try:
+            result = redeem_pairing_code(
+                config_dir,
+                str(data.get("code") or ""),
+                device_label=str(data.get("label") or data.get("device_label") or ""),
+                client=str(data.get("client") or ""),
+            )
+        except PairingError as exc:
+            return JSONResponse(
+                {"ok": False, "error": exc.to_dict(), "message": exc.message},
+                status_code=exc.status_code,
+            )
+        return JSONResponse({"ok": True, **result})
+
+    @router.get("/devices")
+    def api_devices() -> dict[str, Any]:
+        """Paired devices (labels and last-seen only — tokens are hashed at rest)."""
+        from xpst.dashboard.devices import list_devices
+
+        return {"ok": True, "devices": list_devices(config_dir)}
+
+    @router.delete("/devices/{device_id}", dependencies=[Depends(require_api_token)])
+    def api_device_revoke(device_id: str) -> JSONResponse:
+        """Revoke one device; its token stops authenticating immediately."""
+        from xpst.dashboard.devices import revoke_device
+
+        revoked = revoke_device(config_dir, device_id)
+        return JSONResponse(
+            {
+                "ok": revoked,
+                "device_id": device_id,
+                "revoked": revoked,
+                "message": ("Device revoked." if revoked else "That device was already revoked (or is unknown)."),
+            },
+            status_code=200 if revoked else 404,
+        )
+
+    # ── Frozen plans: preview → confirm → publish → readback (M0) ──────
+    def _plan_service() -> Any:
+        from xpst.services.plan_service import PlanService
+
+        return PlanService(_load_ui_config(), config_dir)
+
+    def _plan_error(exc: Any) -> JSONResponse:
+        body: dict[str, Any] = {
+            "ok": False,
+            "blocked": True,
+            "code": exc.code,
+            "error": exc.to_dict(),
+            "message": exc.message,
+        }
+        # A stale refusal carries its reasons and the new preview at the top
+        # level too, so a phone can re-render without unwrapping ``error``.
+        body.update(getattr(exc, "details", {}) or {})
+        return JSONResponse(body, status_code=exc.status_code)
+
+    @router.post("/plans", dependencies=[Depends(require_api_token)])
+    def api_plan_create(payload: dict[str, Any]) -> JSONResponse:
+        """Freeze a plan for a media set, caption and destination list.
+
+        Local computation only: no upload, no network write, no state change.
+        The returned ``plan_id`` is the idempotency key every later step uses.
+        """
+        from xpst.services.plan_service import PlanError
+
+        data = payload or {}
+        try:
+            record = _plan_service().create(
+                media_ids=[str(item) for item in data.get("media_ids") or []],
+                media_paths=[str(item) for item in data.get("media_paths") or []],
+                caption=str(data.get("caption") or data.get("text") or ""),
+                platforms=[str(item) for item in data.get("platforms") or []],
+                overrides=data.get("overrides") or None,
+                content_type=str(data.get("content_type") or data.get("format") or "auto"),
+                client_idempotency_key=str(data.get("idempotency_key") or data.get("plan_idempotency_key") or ""),
+            )
+        except PlanError as exc:
+            return _plan_error(exc)
+        return JSONResponse(record, status_code=200 if record.get("replayed") else 201)
+
+    @router.get("/plans/{plan_id}")
+    def api_plan_get(plan_id: str) -> JSONResponse:
+        """The frozen plan: preview, digest, state, and the confirmed destinations."""
+        from xpst.services.plan_service import PlanError
+
+        try:
+            record = _plan_service().get(plan_id)
+        except PlanError as exc:
+            return _plan_error(exc)
+        return JSONResponse(record)
+
+    @router.post("/plans/{plan_id}/confirm", dependencies=[Depends(require_api_token)])
+    def api_plan_confirm(plan_id: str, payload: dict[str, Any]) -> JSONResponse:
+        """Confirm a frozen plan; refuse a stale one unless the client says otherwise."""
+        from xpst.services.plan_service import PlanError
+
+        data = payload or {}
+        try:
+            record = _plan_service().confirm(
+                plan_id,
+                confirm_stale=bool(data.get("confirm_stale", False)),
+                client_digest=str(data.get("digest") or ""),
+            )
+        except PlanError as exc:
+            return _plan_error(exc)
+        return JSONResponse(record)
+
+    @router.post("/plans/{plan_id}/publish", dependencies=[Depends(require_api_token)])
+    def api_plan_publish(plan_id: str, payload: dict[str, Any]) -> JSONResponse:
+        """Publish a confirmed plan (or replay the original result).
+
+        ``dry_run: true`` runs the engine's plan path only — no network write,
+        and the plan stays confirmed so it can be published for real later.
+        """
+        from xpst.services.plan_service import PlanError
+
+        data = payload or {}
+        try:
+            record = _plan_service().publish(
+                plan_id,
+                dry_run=bool(data.get("dry_run", False)),
+                force=bool(data.get("force", False)),
+                force_now=bool(data.get("force_now", data.get("force", False))),
+            )
+        except PlanError as exc:
+            return _plan_error(exc)
+        envelope = record.get("result") or record.get("dry_run_result") or {}
+        blocked = not bool(envelope.get("ok")) and bool(envelope.get("blockers") or envelope.get("failed_count"))
+        return JSONResponse(record, status_code=409 if blocked else 200)
+
+    @router.get("/plans/{plan_id}/readback")
+    def api_plan_readback(plan_id: str, verify: bool = False) -> JSONResponse:
+        """Per-destination platform id, URL and verification state.
+
+        ``verify=1`` asks each platform to confirm the post (network). Without
+        it the rows report the recorded result honestly as
+        ``submitted_unconfirmed``.
+        """
+        from xpst.services.plan_service import PlanError
+
+        try:
+            rows = _plan_service().readback(plan_id, verify=bool(verify))
+        except PlanError as exc:
+            return _plan_error(exc)
+        return JSONResponse({"ok": True, **rows})
+
+    @router.get("/summary")
+    def api_summary() -> dict[str, Any]:
+        from xpst.dashboard.analytics import cached_summary_stats
+
+        return cached_summary_stats(config_dir)
+
+    @router.get("/analytics/outcomes")
+    def api_analytics_outcomes(live: int = 0) -> dict[str, Any]:
+        """Per-post/per-platform outcomes, labelled recorded vs live.
+
+        ``live=0`` (default) reads the persisted snapshot store plus the
+        verified ownership set — no metric network calls. ``live=1`` runs a
+        real collection first (platform APIs, seconds, API quota) and labels
+        the rows it fetched as ``live``; posts whose collection failed keep
+        their recorded snapshot and stay labelled ``recorded``.
+
+        Every number traces to a post in the verified ownership set. A
+        platform with no metric-bearing owned post returns ``totals: null``
+        so the UI renders "no data" instead of a zero.
+        """
+        from xpst.analytics import AnalyticsCollector
+
+        if live:
+            import asyncio
+
+            collector = AnalyticsCollector(config_dir)
+            return asyncio.run(collector.collect_outcome_report())
+        return _cached_outcome_report(config_dir)
+
+    @router.get("/videos")
+    def api_videos() -> dict[str, Any]:
+        from xpst.dashboard.analytics import AnalyticsCollector
+
+        collector = AnalyticsCollector(config_dir)
+        lineup = collector.get_video_lineup()
+        try:
+            store = collector._store()
+            totals = store.platform_totals()
+            # Issue #297: the per-platform collection outcome accompanies the
+            # totals, so a client never presents stored numbers from a failed
+            # (or unlabelled) collection as a live measurement.
+            collection_status = store.latest_collection_runs()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("platform_totals read failed: %s", exc)
+            totals = {}
+            collection_status = {}
+        return {
+            "videos": lineup,
+            "count": len(lineup),
+            "platform_totals": totals,
+            "collection_status": collection_status,
+        }
+
+    @router.get("/videos/{video_id}")
+    def api_video_detail(video_id: str) -> dict[str, Any]:
+        from xpst.dashboard.analytics import AnalyticsCollector
+
+        collector = AnalyticsCollector(config_dir)
+        posts = [e for e in collector.get_video_lineup() if e.get("video_id") == video_id]
+        if not posts:
+            raise HTTPException(status_code=404, detail=f"Unknown video: {video_id}")
+
+        history: dict[str, dict[str, Any]] = {}
+        for post in posts:
+            platform = str(post.get("platform") or "")
+            post_id = str(post.get("post_id") or "")
+            if not platform or not post_id:
+                continue
+            try:
+                store = collector._store()
+                latest = store.latest_for_post(platform, post_id)
+                series = store.history(platform, post_id, limit=100)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("Snapshot read failed for %s/%s: %s", platform, post_id, exc)
+                latest, series = [], []
+            history[f"{platform}:{post_id}"] = {"latest": latest, "series": series}
+        try:
+            # Issue #297: the per-platform collection outcome behind these
+            # series, so a failed capture is visible instead of looking like a
+            # genuine drop to zero.
+            collection_status = collector._store().latest_collection_runs()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("collection-status read failed: %s", exc)
+            collection_status = {}
+        return {
+            "video_id": video_id,
+            "posts": posts,
+            "metrics": history,
+            "collection_status": collection_status,
+        }
+
+    @router.get("/health-status")
+    def api_health_status() -> dict[str, Any]:
+        """Engine health from state + live auth liveness per platform.
+
+        Data: ``load_state`` health block (src/xpst/dashboard/analytics.py:70)
+        and ``collect_live_auth_status`` (src/xpst/auth_status.py:290 —
+        async core ``collect_live_auth_status_async`` :237). The live check
+        has its own internal timeout and degrades to honest all-false
+        entries instead of raising; any residual failure surfaces as
+        ``auth_error`` with HTTP 200 (the UI renders a degraded state,
+        it does not want a 5xx).
+        """
+        from xpst.dashboard.analytics import load_state
+
+        state = load_state(config_dir)
+        health = state.get("health", {})
+        platforms = health.get("platforms", {})
+        # This pill belongs to the RECORDED block below it, so it reports the
+        # recorded status only. It used to be flipped to "degraded" by the live
+        # role states, which put a Degraded pill next to its own "YouTube OK"
+        # row; the live verdict is reported by `readiness` (the Readiness card).
+        status = (
+            "healthy"
+            if platforms and all(p.get("status") == "ok" for p in platforms.values())
+            else "degraded"
+            if platforms
+            else "unknown"
+        )
+
+        auth: dict[str, Any] = {}
+        auth_error: str | None = None
+        auth_cached = False
+        auth_age_seconds: float | None = None
+        auth_stale = False
+        canonical: dict[str, Any] = {"providers": {}, "platforms": {}, "roles": []}
+        try:
+            from xpst.config import XPSTConfig
+
+            config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+            if _auth_probe_in_flight(config_dir) and not _has_cached_auth(config_dir):
+                # A probe is already running (startup warm-up) and nothing is
+                # cached yet: answer immediately and say it is still being
+                # checked, instead of blocking the first paint on the network.
+                readiness = _readiness_block(config, None)
+                return {
+                    "status": "pending",
+                    "platforms": platforms,
+                    "total_processed": health.get("total_processed", 0),
+                    "auth": {},
+                    "auth_error": None,
+                    "auth_cached": False,
+                    "auth_age_seconds": None,
+                    "auth_stale": False,
+                    "readiness_pending": True,
+                    "canonical": {"providers": {}, "platforms": {}, "roles": []},
+                    "providers": {},
+                    "readiness": readiness,
+                    "next_action": {
+                        "kind": "checking",
+                        "label": "Checking live accounts",
+                        "role": "video_destination",
+                    },
+                    "can_create_post": False,
+                }
+
+            (
+                auth,
+                canonical,
+                auth_cached,
+                auth_age_seconds,
+                auth_stale,
+            ) = _live_auth_and_canonical(config_dir, config)
+        except Exception as exc:
+            auth_error = str(exc)[:200]
+            logger.debug("Live auth status unavailable: %s", exc)
+            canonical = {"providers": {}, "platforms": {}, "roles": []}
+
+        # The readiness verdict is the shared block: the same document
+        # /api/onboarding serves, so the two screens cannot disagree. When the
+        # live probe failed there is no live answer to render, so readiness
+        # reports "checking" instead of falling back to a config-only green.
+        readiness = _readiness_block(_load_ui_config(), None if auth_error else canonical)
+        provider_values = list(canonical.get("providers", {}).values())
+        role_values = [
+            role
+            for provider in provider_values
+            for role in provider.get("role_status", {}).values()
+            if role.get("enabled")
+        ]
+        destinations = [role for role in role_values if role.get("role") == "video_destination"]
+        destination = next(
+            (role for role in destinations if role.get("state") == "ready"),
+            destinations[0] if destinations else None,
+        )
+        destination_ready = bool(destination and destination.get("state") == "ready")
+        next_action = (
+            {
+                "kind": "create_post",
+                "label": "Create a post",
+                "role": "video_destination",
+            }
+            if destination_ready
+            else {
+                "kind": "connect" if destination and destination.get("state") == "unconfigured" else "review",
+                "label": "Connect a video destination"
+                if destination and destination.get("state") == "unconfigured"
+                else "Review readiness",
+                "role": destination.get("role") if destination else "video_destination",
+            }
+        )
+        return {
+            "status": status,
+            "platforms": platforms,
+            "total_processed": health.get("total_processed", 0),
+            "auth": auth,
+            "auth_error": auth_error,
+            "auth_cached": auth_cached,
+            "auth_age_seconds": auth_age_seconds,
+            "auth_stale": auth_stale,
+            # Badge truth, straight from the probe above (xpst.token_state):
+            # the UI must render `badges[platform]` and `auth_checked_at`,
+            # never a green pill derived from credential presence.
+            "badges": _badge_summary(auth),
+            # Forward-looking watchdog (xpst.credential_health): what expires
+            # before the user would otherwise notice. Rendered as "N credentials
+            # need attention" rather than discovered via a failed post.
+            "credential_health": _credential_health(canonical),
+            "auth_checked_at": _auth_checked_at(auth),
+            "auth_checked_at_iso": _auth_checked_at_iso(auth),
+            "canonical": canonical,
+            "providers": canonical["providers"],
+            "readiness_pending": False,
+            "readiness": readiness,
+            "next_action": next_action,
+            "can_create_post": destination_ready,
+            # The real engine version, read from the installed package — the UI
+            # previously hardcoded a fallback that could never change, so every
+            # build reported the same stale number.
+            "engine_version": _engine_version(),
+        }
+
+    @router.get("/providers")
+    def api_providers() -> dict[str, Any]:
+        from xpst.provider_truth import canonical_provider_catalog
+
+        return canonical_provider_catalog(_load_ui_config())
+
+    @router.post("/refresh-tokens")
+    def api_refresh_tokens(force: bool = False) -> dict[str, Any]:
+        """Renew due/expiring tokens on demand (bounded retry, no secrets).
+
+        Mirrors ``xpst refresh-tokens``: a no-op when nothing is due, so the
+        UI's "Refresh accounts" action is cheap and safe to press. ``force=true``
+        renews every platform that has a refresh path, whatever its expiry.
+        Failures are reported honestly and the cached probe is invalidated so
+        the next read re-checks liveness instead of serving the old answer.
+        """
+        from xpst.token_refresh import (
+            FAST_BASE_DELAY_SECONDS,
+            FAST_DEADLINE_SECONDS,
+            FAST_MAX_ATTEMPTS,
+            refresh_due_tokens,
+            save_refresh_report,
+        )
+
+        config = _load_ui_config()
+        report = refresh_due_tokens(
+            config,
+            force=force,
+            max_attempts=FAST_MAX_ATTEMPTS,
+            base_delay=FAST_BASE_DELAY_SECONDS,
+            deadline=FAST_DEADLINE_SECONDS,
+        )
+        save_refresh_report(config, report)
+        with _AUTH_STATUS_LOCK:
+            _AUTH_STATUS_CACHE.pop(str(config_dir), None)
+        return {
+            "refreshed": report,
+            "attempted": sorted(report),
+            "count": len(report),
+            "failed": [name for name, item in report.items() if not item.get("ok")],
+        }
+
+    @router.get("/schedules")
+    def api_schedules() -> dict[str, Any]:
+        """Return persisted schedule entries without starting the scheduler."""
+        from xpst.schedule_manager import ScheduleManager
+
+        schedules = ScheduleManager(config_dir).list()
+        return {"schedules": schedules, "count": len(schedules)}
+
+    @router.post("/schedules/{entry_id}/cancel", dependencies=[Depends(require_api_token)])
+    def api_schedule_cancel(entry_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Cancel (remove) one persisted schedule entry.
+
+        Same verdict as ``xpst schedule remove`` and the MCP
+        ``xpst_schedule_cancel`` tool: an unknown id is a reported failure,
+        never a silent success. Local store only — published content is never
+        un-posted by this route.
+        """
+        from xpst.services.recovery_service import cancel_scheduled_post
+
+        result = cancel_scheduled_post(config_dir, entry_id, dry_run=bool((payload or {}).get("dry_run")))
+        return result
+
+    @router.post("/failures/{video_id}/{platform}/retry", dependencies=[Depends(require_api_token)])
+    async def api_failure_retry(video_id: str, platform: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Retry one recorded failure — the same one-shot the CLI and MCP use.
+
+        Delegates to ``recovery_service.retry_failed_post`` so every surface
+        answers with one verdict: distinct error codes per failure mode and
+        ``posted: true`` only when the destination actually accepted the post.
+        ``dry_run`` plans without uploading, matching the CLI flag.
+        """
+        from xpst.services.recovery_service import retry_failed_post
+
+        engine = engine_factory() if engine_factory else None
+        if engine is None:
+            from xpst.engine import CrossPostEngine
+
+            engine = CrossPostEngine(_load_ui_config())
+        result = await retry_failed_post(
+            engine,
+            video_id,
+            platform,
+            dry_run=bool((payload or {}).get("dry_run")),
+        )
+        return result
+
+    @router.get("/activity")
+    def api_activity() -> dict[str, Any]:
+        """Return recorded failures with targeted, truthful recovery metadata."""
+        from xpst.state_store import StateStore
+
+        state = StateStore(config_dir).get()
+        failures: list[dict[str, Any]] = []
+        for video_id, video in (state.get("posted_videos") or {}).items():
+            errors = video.get("errors") or {}
+            for platform, result in errors.items():
+                if not isinstance(result, dict):
+                    continue
+                retryable = result.get("retryable")
+                failures.append(
+                    {
+                        "video_id": str(video_id),
+                        "platform": str(platform),
+                        "error": str(result.get("error") or "Unknown error"),
+                        "retryable": retryable,
+                        "post_id": None,
+                        "post_url": None,
+                        "source_url": video.get("source_url"),
+                        "last_attempt": result.get("timestamp") or video.get("last_attempt"),
+                        "action": "retry" if retryable is True else "review",
+                    }
+                )
+        failures.sort(
+            key=lambda item: (item.get("last_attempt") or "", item["video_id"], item["platform"]),
+            reverse=True,
+        )
+        return {"failures": failures, "count": len(failures)}
+
+    @router.get("/library")
+    def api_library() -> dict[str, Any]:
+        """Return local library items with only verified platform results."""
+        from xpst.state_store import StateStore
+
+        state = StateStore(config_dir).get()
+        items: list[dict[str, Any]] = []
+        for video_id, video in (state.get("posted_videos") or {}).items():
+            posts = []
+            for platform, result in (video.get("posted_to") or {}).items():
+                if not isinstance(result, dict):
+                    continue
+                post_id = result.get("id") or result.get("post_id")
+                post_url = result.get("url") or result.get("post_url")
+                if post_id or post_url:
+                    posts.append({"platform": str(platform), "post_id": post_id, "post_url": post_url})
+            items.append(
+                {
+                    "video_id": str(video_id),
+                    "source_url": video.get("source_url"),
+                    "source_platform": video.get("source_platform"),
+                    "caption": video.get("caption", ""),
+                    "last_attempt": video.get("last_attempt"),
+                    "posts": posts,
+                }
+            )
+        items.sort(key=lambda item: item.get("last_attempt") or "", reverse=True)
+        return {"items": items, "count": len(items)}
+
+    @router.get("/drafts")
+    def api_drafts() -> dict[str, Any]:
+        """Stored compose drafts, newest first, each revalidated now.
+
+        Revalidation happens on the request path (local stat + credential-file
+        reads only), so a resumed draft always carries the verdict for the
+        machine's current state, never the one from when it was written.
+        """
+        from xpst.drafts import DraftService
+
+        service = DraftService(_load_ui_config(), config_dir)
+        rows = service.list()
+        return {"ok": True, "count": len(rows), "drafts": rows, "network_calls": False}
+
+    @router.post("/drafts", dependencies=[Depends(require_api_token)])
+    def api_drafts_save(payload: dict[str, Any]) -> JSONResponse:
+        """Create or update a durable draft (the compose screen's autosave).
+
+        An unknown ``draft_id`` (store wiped between calls) creates a fresh
+        draft and reports ``recreated: true`` rather than failing the save — the
+        half-written work is never thrown away because an id went stale.
+        """
+        from xpst.drafts import DraftService
+
+        data = payload or {}
+        service = DraftService(_load_ui_config(), config_dir)
+        try:
+            result = service.save(
+                draft_id=str(data.get("draft_id") or data.get("id") or ""),
+                media_paths=data.get("media_paths") or data.get("media_path"),
+                caption=str(data.get("caption") or ""),
+                platforms=data.get("platforms") or [],
+            )
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc), "saved": False}, status_code=413)
+        stored = result["draft"]
+        return JSONResponse(
+            {
+                "ok": True,
+                "saved": True,
+                "recreated": bool(result["recreated"]),
+                "draft": stored,
+                "verdict": result["verdict"],
+                "network_calls": False,
+            }
+        )
+
+    @router.get("/drafts/{draft_id}")
+    def api_draft_detail(draft_id: str) -> JSONResponse:
+        """One draft plus its fresh verdict (the resume-time revalidation)."""
+        from xpst.drafts import DraftService
+
+        service = DraftService(_load_ui_config(), config_dir)
+        try:
+            result = service.revalidate(draft_id)
+        except KeyError:
+            return JSONResponse({"ok": False, "error": "No draft with that id.", "draft": None}, status_code=404)
+        return JSONResponse(
+            {"ok": True, "draft": result["draft"], "verdict": result["verdict"], "network_calls": False}
+        )
+
+    @router.delete("/drafts/{draft_id}", dependencies=[Depends(require_api_token)])
+    def api_draft_delete(draft_id: str) -> dict[str, Any]:
+        """Discard a draft. ``deleted: false`` when there was nothing to delete."""
+        from xpst.drafts import DraftService
+
+        service = DraftService(_load_ui_config(), config_dir)
+        return {"ok": True, "deleted": bool(service.delete(draft_id)), "draft_id": draft_id}
+
+    @router.post("/posts/{video_id}/delete", dependencies=[Depends(require_api_token)])
+    async def api_post_delete(video_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Delete or unpublish a posted video — the engine's Phase-1.2 contract.
+
+        Same semantics as ``xpst delete`` / the MCP delete tool: ``video_id``
+        may be the internal id, a platform post id or a post URL (resolved via
+        stored state); every result carries an explicit outcome (deleted /
+        soft_hidden / pending / unsupported) so the UI can never fake a
+        removal the platform refused. ``soft`` + ``visibility`` unpublish
+        reversibly on platforms that support it.
+        """
+        from xpst.platforms.base import DeleteOutcome
+
+        body = payload or {}
+        platforms = [p for p in (body.get("platforms") or []) if isinstance(p, str) and p]
+        if not platforms:
+            cfg = _load_ui_config()
+            platforms = [
+                name
+                for name, enabled in (
+                    ("youtube", getattr(cfg.youtube, "enabled", False)),
+                    ("x", getattr(cfg.x, "enabled", False)),
+                    ("instagram", getattr(cfg.instagram, "enabled", False)),
+                    ("tiktok", getattr(cfg.tiktok, "enabled", False)),
+                    ("threads", getattr(cfg.threads, "enabled", False)),
+                )
+                if enabled
+            ]
+        engine = engine_factory() if engine_factory else None
+        if engine is None:
+            from xpst.engine import CrossPostEngine
+
+            engine = CrossPostEngine(_load_ui_config())
+
+        soft = bool(body.get("soft"))
+        visibility = body.get("visibility") or None
+        results = []
+        for platform in platforms:
+            result = await engine.delete_post(video_id, platform, soft=soft, visibility=visibility)
+            results.append(result.to_dict())
+        ok = any(
+            r.get("outcome")
+            in (
+                DeleteOutcome.DELETED.value,
+                DeleteOutcome.SOFT_HIDDEN.value,
+                str(DeleteOutcome.DELETED),
+                str(DeleteOutcome.SOFT_HIDDEN),
+            )
+            for r in results
+        )
+        return {"ok": ok, "video_id": video_id, "soft": soft, "results": results}
+
+    @router.post("/preflight", dependencies=[Depends(require_api_token)])
+    def api_preflight(payload: dict[str, Any]) -> dict[str, Any]:
+        """Run the canonical, side-effect-free post preflight.
+
+        Delegates to ``PostPreflightService`` — the same service the CLI and the
+        MCP tool use — so no surface can disagree about whether a post is ready.
+        Every blocker, including the zero-destination ``NO_DESTINATIONS``
+        refusal, is decided by that service and returned as the same
+        ``{code, message}`` error object here, in the MCP server and in the UI.
+        Every media, caption, destination and **content-type** verdict is
+        canonical: the request goes through the one contract parser, so `text`
+        (a text post) reads the same here as over MCP and in the CLI.
+        """
+        from xpst.config import XPSTConfig
+        from xpst.content import (
+            ContentContractError,
+            ContentRequest,
+            content_verdict,
+            parse_destination_texts,
+        )
+        from xpst.services.post_preflight import PostPlanRequest, PostPreflightService, plan_content_type
+        from xpst.services.route_plan import build_route_plan, detect_content_type, resolve_targets
+
+        raw_paths = payload.get("media_paths")
+        if raw_paths is None:
+            single = str(payload.get("media_path") or "").strip()
+            raw_paths = [single] if single else []
+        if isinstance(raw_paths, str):
+            raw_paths = [raw_paths]
+        media_paths = [str(item).strip() for item in raw_paths if str(item).strip()]
+        media_path = media_paths[0] if media_paths else ""
+        # `text` is the text-post spelling of `caption`; both name the same body.
+        caption = str(payload.get("text") or payload.get("caption") or "")
+        platforms = [str(item).lower() for item in (payload.get("platforms") or []) if str(item).strip()]
+
+        request_blockers: list[str] = []
+        resolution_error: dict[str, Any] | None = None
+        if not platforms:
+            # No implied set (R3): resolve the format route ∩ connected accounts
+            # (or the explicit "all": true). A request with nothing connected
+            # gets ONE actionable error naming the connect command.
+            try:
+                config_for_route = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+            except Exception:  # noqa: BLE001 - defaults are the documented fallback
+                config_for_route = XPSTConfig()
+            resolution = resolve_targets(
+                config_for_route,
+                None,
+                all_connected=bool(payload.get("all", False)),
+                content_type=detect_content_type(
+                    media_paths,
+                    content_type=str(payload.get("format") or payload.get("content_type") or "auto"),
+                ),
+            )
+            platforms = list(resolution.targets)
+            if resolution.errors:
+                resolution_error = dict(resolution.errors[0])
+                request_blockers.append(resolution_error["message"])
+            if not platforms and resolution_error is None:
+                # An empty target list would produce an empty plan that reports
+                # "ready", so the request-shape precondition is decided here.
+                request_blockers.append("Choose at least one destination platform.")
+
+        # Per-destination copy. Parsed before the plan runs so a malformed
+        # payload is reported instead of silently posting the shared caption.
+        overrides: dict[str, str] = {}
+        try:
+            overrides = parse_destination_texts(
+                payload.get("overrides")
+                if payload.get("overrides") is not None
+                else payload.get("per_destination_overrides")
+            )
+        except ContentContractError as exc:
+            request_blockers.append(f"Invalid per-destination caption payload: {exc}")
+
+        # One content verdict, from the contract module: the same request gets
+        # the same answer here, in the CLI, and over MCP. The payload goes through
+        # the one request parser, so `text` (a text post) is read the same way
+        # here as over MCP and in the CLI.
+        request = ContentRequest.from_payload(payload)
+        verdict = content_verdict(request)
+
+        plan: dict[str, Any] | None = None
+        canonical_blockers: list[str] = []
+        canonical_warnings: list[str] = []
+        try:
+            config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+        except Exception as exc:  # noqa: BLE001 - a missing config must not break preflight
+            logger.debug("Preflight config load failed, using defaults: %s", exc)
+            config = XPSTConfig()
+        try:
+            plan = (
+                PostPreflightService(config)
+                .plan(
+                    PostPlanRequest(
+                        media_paths=media_paths,
+                        target_platforms=platforms,
+                        base_caption=caption,
+                        per_platform_captions=overrides,
+                        # A text post carries no file, so the media requirement must
+                        # not be applied to it (it would block every text preflight);
+                        # a request with neither a file nor a body keeps that
+                        # requirement instead of being read as a refused text post.
+                        content_type=plan_content_type(request),
+                    )
+                )
+                .to_dict()
+            )
+            canonical_blockers = [issue["message"] for issue in plan["hard_blockers"]]
+            canonical_warnings = [issue["message"] for issue in plan["warnings"]]
+        except Exception as exc:  # noqa: BLE001 - report truthfully instead of 500
+            logger.warning("Preflight could not run: %s", exc)
+            canonical_blockers = [f"Preflight could not run: {str(exc)[:200]}"]
+
+        media = Path(media_path).expanduser() if media_path else None
+        # The resolved route plan (R4) — per destination state, envelope and
+        # reason — is the same object `xpst preflight` and `xpst_preflight`
+        # return.
+        route_payload = build_route_plan(
+            config,
+            media_paths=media_paths,
+            caption=caption,
+            per_platform_captions=overrides,
+            content_type=detect_content_type(
+                media_paths,
+                content_type=str(payload.get("format") or payload.get("content_type") or "auto"),
+            ),
+            requested=payload.get("platforms") or None,
+            all_connected=bool(payload.get("all", False)),
+            include_transform=False,
+        ).to_dict()
+        # What each destination would actually receive — the override when the
+        # user wrote one, else the shared caption. Reporting the shared caption
+        # for every destination here was a lie as soon as overrides existed.
+        per_platform_captions = {platform: overrides.get(platform, caption) for platform in platforms}
+        blockers = request_blockers + canonical_blockers + verdict["blockers"]
+        payload_out: dict[str, Any] = {
+            "ok": not blockers,
+            "ready": not blockers,
+            "media": {
+                "path": media_path,
+                "paths": media_paths,
+                "exists": bool(media and media.exists()),
+                "is_file": bool(media and media.is_file()),
+            },
+            "caption": {
+                "length": len(caption),
+                "per_platform": per_platform_captions,
+                "overrides": dict(overrides),
+            },
+            "platforms": platforms,
+            "content_type": verdict["content_type"] or verdict["effective_content_type"],
+            "effective_content_type": verdict["effective_content_type"],
+            "route": verdict["route"],
+            "content": verdict,
+            "blockers": blockers,
+            "warnings": canonical_warnings,
+            "error": resolution_error or (plan or {}).get("error"),
+            "plan": plan,
+            "route_plan": route_payload,
+            "network_calls": False,
+        }
+
+        # A preflight run against a stored draft *is* that draft's plan: record
+        # the verdict together with the local facts it was validated against, so
+        # resuming the draft later can prove whether the plan still holds.
+        draft_id = str(payload.get("draft_id") or "").strip()
+        if draft_id:
+            from xpst.drafts import DraftService
+
+            service = DraftService(config, config_dir)
+            if service.get(draft_id) is None:
+                payload_out["draft_id"] = draft_id
+                payload_out["draft_recorded"] = False
+                payload_out["draft"] = None
+                payload_out["draft_error"] = "No draft with that id."
+            else:
+                # Bind the plan to the content it was actually computed for: a
+                # preflight that ran on a different media/caption than the draft
+                # holds must not stamp the draft as validated.
+                service.sync_from_request(draft_id, media_paths=media_paths, caption=caption, platforms=platforms)
+                recorded = service.record_plan(
+                    draft_id,
+                    plan=plan,
+                    ready=payload_out["ready"],
+                    blockers=payload_out["blockers"],
+                )
+                payload_out["draft_id"] = draft_id
+                payload_out["draft_recorded"] = recorded is not None
+                payload_out["draft"] = service.verdict_for(recorded) if recorded else None
+        return payload_out
+
+    def _sign_in_support(platform: str, config: Any) -> dict[str, Any]:
+        """Whether the in-app Sign in control can start this platform's flow.
+
+        Config-only truth (no probe, no network): the UI needs to know whether
+        to render an enabled control, and — when it cannot — the honest reason
+        and where to read more.
+        """
+        from xpst.auth_flow import browser_name
+
+        support = _auth_flow().support(platform, config)
+        return {
+            "available": bool(support.available),
+            "transport": support.transport,
+            "browser": browser_name() if support.available else "",
+            "reason": support.reason,
+            "docs_url": support.docs_url,
+        }
+
+    def _auth_flow() -> Any:
+        """This config dir's in-app sign-in manager (one per engine process)."""
+        from xpst.auth_flow import get_auth_flow_manager
+
+        return get_auth_flow_manager(str(Path(config_dir).expanduser()))
+
+    @router.get("/auth/signin")
+    def api_signin_active(platform: str | None = None) -> dict[str, Any]:
+        """Live (non-terminal) sign-in sessions, newest first."""
+        return {"ok": True, "sessions": _auth_flow().active(platform)}
+
+    @router.post("/auth/signin/{platform}", dependencies=[Depends(require_api_token)])
+    def api_signin_start(platform: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Start the xPST-owned OAuth flow for one platform.
+
+        The consent page is opened in the configured browser (Brave by
+        default) and the returned envelope is polled with
+        ``GET /api/auth/signin/{session_id}``. Nothing here decides whether the
+        account is connected — the caller re-verifies with
+        ``POST /api/connect/{platform}`` after the phase turns ``succeeded``.
+        """
+        from xpst.auth_flow import SignInError, SignInNotAvailableError
+
+        config = _load_ui_config()
+        flow = _auth_flow()
+        key = str(platform).strip().lower()
+        if key not in flow.providers():
+            raise HTTPException(status_code=404, detail=f"Unknown platform: {platform}")
+
+        data = payload or {}
+        try:
+            timeout_s = float(data.get("timeout_s") or 300.0)
+        except (TypeError, ValueError):
+            timeout_s = 300.0
+
+        try:
+            envelope = flow.start(
+                key,
+                config,
+                timeout_s=timeout_s,
+                open_browser=bool(data.get("open_browser", True)),
+            )
+        except SignInNotAvailableError as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=str(exc) or "This platform cannot be signed in from inside the app yet.",
+            ) from None
+        except SignInError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
+        except Exception as exc:  # noqa: BLE001 - report the reason, never a bare 500
+            raise HTTPException(status_code=500, detail=f"Sign-in could not be started: {exc}") from None
+
+        envelope["sign_in"] = _sign_in_support(key, config)
+        return envelope
+
+    @router.get("/auth/signin/{session_id}")
+    def api_signin_status(session_id: str) -> dict[str, Any]:
+        """Poll one sign-in session; this call advances the state machine."""
+        from xpst.auth_flow import SignInError
+
+        try:
+            return _auth_flow().status(session_id)
+        except SignInError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
+
+    @router.post("/auth/signin/{session_id}/cancel", dependencies=[Depends(require_api_token)])
+    def api_signin_cancel(session_id: str) -> dict[str, Any]:
+        """Abandon a sign-in session — no credential is written."""
+        from xpst.auth_flow import SignInError
+
+        try:
+            return _auth_flow().cancel(session_id)
+        except SignInError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
+
+    # ── Bring-your-own developer app (BYO) ─────────────────────────
+
+    @router.get("/byo")
+    def api_byo_status() -> dict[str, Any]:
+        """Per-platform BYO app setup truth. Masked by construction: the
+        response carries booleans and at most a 4-char id tail — never a
+        secret — so a GET stays safe without a dashboard token."""
+        from xpst.byo import byo_status
+
+        return byo_status(_load_ui_config())
+
+    @router.post("/byo/{platform}", dependencies=[Depends(require_api_token)])
+    def api_byo_set(platform: str, payload: dict[str, Any] | None = None) -> Any:
+        """Store (or clear) one platform's bring-your-own app credentials.
+
+        The secret is validated, written to the encrypted store, and answered
+        ONLY masked. A bad pair returns 400 with per-field ``errors`` so the
+        setup screen can label exactly what is wrong. ``clear: true`` removes
+        the stored pair instead of storing a new one.
+        """
+        from xpst.byo import (
+            BYO_PLATFORMS,
+            ByoAppError,
+            byo_status_for_platform,
+            clear_byo_app,
+            store_byo_app,
+        )
+
+        key = str(platform).strip().lower()
+        if key not in BYO_PLATFORMS:
+            raise HTTPException(status_code=404, detail=f"Unknown platform: {platform}")
+        spec = BYO_PLATFORMS[key]
+        if not spec.configurable:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{spec.display_name} keeps its app credential in its own connect flow.",
+            )
+
+        config = _load_ui_config()
+        data = payload or {}
+        try:
+            if data.get("clear"):
+                return clear_byo_app(config, key)
+            return store_byo_app(config, key, str(data.get("app_id", "")), str(data.get("app_secret", "")))
+        except ByoAppError as exc:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "ok": False,
+                    "platform": key,
+                    "error": str(exc),
+                    "errors": exc.errors,
+                    "configured": bool(byo_status_for_platform(config, key)["configured"]),
+                },
+            )
+
+    @router.get("/stream")
+    def api_stream(platform: str = "", include_live: bool = False) -> dict[str, Any]:
+        """The relay registry + key-presence verdict, from its one builder.
+
+        Same payload as the MCP ``xpst_stream`` tool and the CLI: which platform
+        can hand an app a key, whether one is stored, whether xPST holds the
+        credentials to fetch it, and (``include_live``) who is live. Read-only;
+        no stream key is ever serialised.
+        """
+        from xpst.stream.ingest import stream_report
+
+        config = _load_ui_config()
+        return stream_report(config.config_dir, platform=platform, include_live=include_live, config=config)
+
+    @router.get("/chat")
+    def api_chat(
+        platforms: str = "",
+        read: bool = False,
+        duration_s: float = 20.0,
+        twitch_channel: str = "",
+        kick_channel: str = "",
+        youtube_video_id: str = "",
+        limit: int = 500,
+    ) -> dict[str, Any]:
+        """Read-only live chat: one merged timeline, or the readiness verdict.
+
+        Same payload as the MCP ``xpst_chat`` tool and the CLI. With ``read``
+        false (the default) this makes no network call and reports what could be
+        read and what is missing; with ``read`` true it opens the platforms for
+        a bounded window. Channel arguments are comma-separated. Nothing here
+        can send, moderate or reply.
+        """
+        from xpst.chat import chat_readiness, chat_timeline
+
+        config = _load_ui_config()
+        wanted = [part.strip() for part in platforms.split(",") if part.strip()] or None
+
+        def _channels(value: str) -> list[str] | None:
+            return [part.strip() for part in value.split(",") if part.strip()] or None
+
+        if not read:
+            return chat_readiness(config.config_dir, platforms=wanted, config=config)
+        return chat_timeline(
+            config,
+            config_dir=config.config_dir,
+            platforms=wanted,
+            duration_s=duration_s,
+            twitch_channels=_channels(twitch_channel),
+            kick_channels=_channels(kick_channel),
+            youtube_video_id=youtube_video_id,
+            limit=limit,
+        )
+
+    @router.post("/chat/channels", dependencies=[Depends(require_api_token)])
+    def api_chat_channels(payload: dict[str, Any]) -> dict[str, Any]:
+        """Choose which channels the read-only chat panel watches.
+
+        This is the only write the chat pillar has: it stores channel *names*
+        through the same config write path the onboarding screen uses, so the
+        panel and the CLI read one persisted truth (``chat.twitch_channels`` /
+        ``chat.kick_channels`` / ``chat.youtube_video_id`` in ``config.yaml``)
+        instead of the UI keeping a list of its own.
+
+        No credential is accepted here, because none is needed: Twitch chat is
+        read anonymously, Kick's public chatroom needs no auth, and YouTube
+        reuses the OAuth token that is already stored. Nothing here can send,
+        moderate or reply.
+
+        The reply is the readiness payload ``GET /api/chat`` returns, so the
+        panel's status strip is refreshed by the engine's own verdict rather
+        than by a second, client-side interpretation of what was saved.
+        """
+        from xpst.chat import chat_readiness
+        from xpst.chat.model import normalize_channel, normalize_video_id
+
+        config = _load_ui_config()
+        data = payload or {}
+        applied: list[str] = []
+
+        def _names(value: Any, field: str) -> list[str]:
+            if value is None:
+                return []
+            if isinstance(value, str):
+                raw: list[Any] = [part for part in value.replace("\n", ",").split(",")]
+            elif isinstance(value, (list, tuple)):
+                raw = list(value)
+            else:
+                raise HTTPException(status_code=400, detail=f"{field} must be a list of channel names")
+            names: list[str] = []
+            for item in raw:
+                try:
+                    name = normalize_channel(item)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=f"{field}: {exc}") from exc
+                if name and name not in names:
+                    names.append(name)
+            if len(names) > 20:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{field} accepts at most 20 channels (got {len(names)})",
+                )
+            return names
+
+        if "twitch_channels" in data:
+            config.chat.twitch_channels = _names(data.get("twitch_channels"), "twitch_channels")
+            applied.append("chat.twitch_channels")
+        if "kick_channels" in data:
+            config.chat.kick_channels = _names(data.get("kick_channels"), "kick_channels")
+            applied.append("chat.kick_channels")
+        if "youtube_video_id" in data:
+            try:
+                video_id = normalize_video_id(data.get("youtube_video_id"))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"youtube_video_id: {exc}") from exc
+            config.chat.youtube_video_id = video_id
+            applied.append("chat.youtube_video_id")
+        if not applied:
+            raise HTTPException(
+                status_code=400,
+                detail=("Nothing to save: send chat.twitch_channels, chat.kick_channels or chat.youtube_video_id"),
+            )
+
+        _save_ui_config(config)
+        reloaded = _load_ui_config()
+        payload_out = chat_readiness(reloaded.config_dir, config=reloaded)
+        payload_out["ok"] = True
+        payload_out["applied"] = applied
+        return payload_out
+
+    @router.get("/capabilities")
+    def api_capabilities() -> dict[str, Any]:
+        """The canonical capability contract, from its one source.
+
+        The CLI ``capabilities`` command and the MCP ``xpst_capabilities`` tool
+        return the same document (``xpst.content.capability_document``), so a
+        dashboard, a human and an agent cannot disagree about what xPST can
+        publish. No network calls, no secrets.
+        """
+        from xpst.content import capability_document
+
+        return capability_document()
+
+    @router.get("/settings")
+    def api_settings() -> dict[str, Any]:
+        from xpst.cli import _mask_sensitive_values
+
+        config = _load_ui_config()
+
+        def _section(obj: Any) -> dict[str, Any]:
+            return dict(obj.__dict__) if hasattr(obj, "__dict__") else {}
+
+        return _mask_sensitive_values(
+            {
+                "accounts": {
+                    platform: _section(getattr(config, platform))
+                    for platform in (
+                        "tiktok",
+                        "youtube",
+                        "x",
+                        "instagram",
+                        "threads",
+                        "bluesky",
+                        "messenger",
+                        "local",
+                    )
+                    if hasattr(config, platform)
+                },
+                "video": _section(config.video),
+                "monitoring": _section(config.monitoring),
+                "schedule": _section(config.schedule),
+                "bio": _section(config.bio),
+            }
+        )
+
+    return router

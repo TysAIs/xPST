@@ -1,0 +1,152 @@
+[
+  {
+    "id": "rfc_utc_zero",
+    "scheduled_time": "2026-11-20T09:00:00+00:00",
+    "timezone": "UTC",
+    "expected": "2026-11-20T09:00:00+00:00"
+  },
+  {
+    "id": "rfc_utc_z",
+    "scheduled_time": "2026-11-20T09:00:00Z",
+    "timezone": "UTC",
+    "expected": "2026-11-20T09:00:00+00:00"
+  },
+  {
+    "id": "rfc_ny_east",
+    "scheduled_time": "2026-11-20T09:00:00+00:00",
+    "timezone": "America/New_York",
+    "expected": "2026-11-20T04:00:00-05:00"
+  },
+  {
+    "id": "rfc_ny_winter",
+    "scheduled_time": "2026-01-15T09:00:00+00:00",
+    "timezone": "America/New_York",
+    "expected": "2026-01-15T04:00:00-05:00"
+  },
+  {
+    "id": "rfc_kolkata_half",
+    "scheduled_time": "2026-11-20T09:00:00+00:00",
+    "timezone": "Asia/Kolkata",
+    "expected": "2026-11-20T14:30:00+05:30"
+  },
+  {
+    "id": "rfc_berlin",
+    "scheduled_time": "2026-11-20T23:30:00+00:00",
+    "timezone": "Europe/Berlin",
+    "expected": "2026-11-21T00:30:00+01:00"
+  },
+  {
+    "id": "rfc_sydney_next_day",
+    "scheduled_time": "2026-11-20T20:30:00+00:00",
+    "timezone": "Australia/Sydney",
+    "expected": "2026-11-21T07:30:00+11:00"
+  },
+  {
+    "id": "rfc_offset_input_ny",
+    "scheduled_time": "2026-11-20T04:00:00-05:00",
+    "timezone": "America/New_York",
+    "expected": "2026-11-20T04:00:00-05:00"
+  },
+  {
+    "id": "rfc_offset_input_kolkata",
+    "scheduled_time": "2026-11-20T14:30:00+05:30",
+    "timezone": "Asia/Kolkata",
+    "expected": "2026-11-20T14:30:00+05:30"
+  },
+  {
+    "id": "rfc_frac_1",
+    "scheduled_time": "2026-11-20T09:00:00.5+00:00",
+    "timezone": "America/New_York",
+    "expected": "2026-11-20T04:00:00.500000-05:00"
+  },
+  {
+    "id": "rfc_frac_6",
+    "scheduled_time": "2026-11-20T09:00:00.123456+00:00",
+    "timezone": "America/New_York",
+    "expected": "2026-11-20T04:00:00.123456-05:00"
+  },
+  {
+    "id": "rfc_frac_9",
+    "scheduled_time": "2026-11-20T09:00:00.123456789+00:00",
+    "timezone": "America/New_York",
+    "expected": "2026-11-20T04:00:00.123456-05:00"
+  },
+  {
+    "id": "rfc_frac_micro_only",
+    "scheduled_time": "2026-11-20T09:00:00.000123+00:00",
+    "timezone": "America/New_York",
+    "expected": "2026-11-20T04:00:00.000123-05:00"
+  },
+  {
+    "id": "rfc_frac_nano_only",
+    "scheduled_time": "2026-11-20T09:00:00.000000123+00:00",
+    "timezone": "America/New_York",
+    "expected": "2026-11-20T04:00:00-05:00"
+  },
+  {
+    "id": "rfc_space_separator",
+    "scheduled_time": "2026-11-20 09:00:00+00:00",
+    "timezone": "America/New_York",
+    "expected": "2026-11-20T04:00:00-05:00"
+  },
+  {
+    "id": "dst_fold_ny",
+    "scheduled_time": "2026-11-01T05:30:00+00:00",
+    "timezone": "America/New_York",
+    "expected": "2026-11-01T01:30:00-04:00"
+  },
+  {
+    "id": "dst_fold_ny_other_half",
+    "scheduled_time": "2026-11-01T06:30:00+00:00",
+    "timezone": "America/New_York",
+    "expected": "2026-11-01T01:30:00-05:00"
+  },
+  {
+    "id": "dst_gap_ny",
+    "scheduled_time": "2026-03-08T07:30:00+00:00",
+    "timezone": "America/New_York",
+    "expected": "2026-03-08T03:30:00-04:00"
+  },
+  {
+    "id": "dst_gap_ny_after",
+    "scheduled_time": "2026-03-08T06:30:00+00:00",
+    "timezone": "America/New_York",
+    "expected": "2026-03-08T01:30:00-05:00"
+  },
+  {
+    "id": "midnight_rollover_berlin",
+    "scheduled_time": "2026-11-20T22:59:59+00:00",
+    "timezone": "Europe/Berlin",
+    "expected": "2026-11-20T23:59:59+01:00"
+  },
+  {
+    "id": "midnight_rollover_berlin_after",
+    "scheduled_time": "2026-11-20T23:00:00+00:00",
+    "timezone": "Europe/Berlin",
+    "expected": "2026-11-21T00:00:00+01:00"
+  },
+  {
+    "id": "half_hour_offset_dst",
+    "scheduled_time": "2026-11-20T09:00:00+00:00",
+    "timezone": "Australia/Lord_Howe",
+    "expected": "2026-11-20T20:00:00+11:00"
+  },
+  {
+    "id": "garbage",
+    "scheduled_time": "not-a-time",
+    "timezone": "UTC",
+    "expected": null
+  },
+  {
+    "id": "date_only",
+    "scheduled_time": "2026-11-20",
+    "timezone": "UTC",
+    "expected": null
+  },
+  {
+    "id": "trailing_garbage",
+    "scheduled_time": "2026-11-20T09:00:00Zx",
+    "timezone": "UTC",
+    "expected": null
+  }
+]

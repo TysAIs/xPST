@@ -1,0 +1,1395 @@
+"""TikTok uploader for xPST
+
+Uses the TikTok Content Posting API (Direct Post endpoint) for ban-safe,
+official video uploads to TikTok.
+
+Authentication:
+- OAuth 2.0 with client_key / client_secret
+- Access tokens last 24 hours; refresh tokens last 365 days
+- Delegates token management to SessionManager when available
+
+Upload specs:
+- Container model: init upload → upload to URL → fetch status
+- Rate limit: 6 requests/minute per user
+- Recommended: Vertical video (9:16), H.264, up to 1080p
+
+Docs: https://developers.tiktok.com/doc/content-posting-api
+"""
+
+import contextlib
+import time
+from pathlib import Path
+
+import httpx
+
+from xpst import visibility as visibility_module
+from xpst.config import XPSTConfig
+from xpst.content import TEXT_LIMITS
+from xpst.platforms.base import (
+    DeleteOutcome,
+    DeleteResult,
+    PlatformHealth,
+    PlatformRegistry,
+    PlatformUploader,
+    UploadOutcome,
+    UploadResult,
+    normalize_upload_result,
+)
+from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
+from xpst.utils.errors import truncate_error
+from xpst.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+# TikTok Content Posting API base URL
+TIKTOK_API_BASE = "https://open.tiktokapis.com"
+# TikTok Display API base (user info / follower counts)
+TIKTOK_DISPLAY_BASE = "https://open.tiktokapis.com"
+
+_TIKTOK_PROCESSING_STATUSES = frozenset(
+    {
+        "PROCESSING_UPLOAD",
+        "PROCESSING_DOWNLOAD",
+        "SEND_TO_CDN",
+        "SEND_TO_REVIEW",
+        "PROCESSING",
+        "PENDING",
+        "QUEUED",
+        "PUBLISHING",
+    }
+)
+_TIKTOK_PUBLISHED_STATUSES = frozenset({"SUCCESS", "PUBLISH_COMPLETE", "PUBLISHED", "COMPLETED"})
+_TIKTOK_FAILED_STATUSES = frozenset({"FAIL", "FAILED", "ERROR"})
+
+
+class TikTokUploader(PlatformUploader):
+    """TikTok uploader using the official Content Posting API (Direct Post)."""
+
+    # TikTok limits
+    #: The same number the preflight gate refuses on (``xpst.content``); this
+    #: uploader refuses at it too, so the two can never disagree.
+    MAX_CAPTION_LENGTH = TEXT_LIMITS["tiktok"]
+    # Rate limit: 6 req/min per user (enforced server-side)
+    RATE_LIMIT_PER_MIN = 6
+
+    def __init__(self, config: XPSTConfig) -> None:
+        """Initialize TikTok uploader with lazy token caching."""
+        super().__init__(config)
+        self._access_token: str | None = None
+        #: Privacy levels ``creator_info/query`` reported for this client+creator,
+        #: or None when the probe has not succeeded (fail-open: see
+        #: :meth:`_query_privacy_options`). Rate limits are 6 req/min and the
+        #: audited/unaudited state does not change mid-process, so it is cached
+        #: per uploader instance.
+        self._privacy_options: frozenset[str] | None = None
+
+    # ── publish routing (official > browser-native > inbox-draft) ─────────
+
+    def _publish_mode(self) -> str:
+        """Configured publish-route preference: 'auto'/'browser'/'browser_only'."""
+        mode = str(getattr(self.config.tiktok, "publish_mode", "auto") or "auto").lower()
+        return mode if mode in ("auto", "browser", "browser_only") else "auto"
+
+    def _browser_enabled(self) -> bool:
+        return self._publish_mode() in ("browser", "browser_only")
+
+    def _browser_profile_dir(self) -> Path:
+        return Path(self.config.config_dir).expanduser() / "browser" / "tiktok"
+
+    def _browser_publisher(self):
+        """Build the browser publisher for this config (no side effects)."""
+        from xpst.platforms.tiktok_browser import TikTokBrowserPublisher
+
+        return TikTokBrowserPublisher(
+            cookie_jar_path=self._tiktok_cookie_jar_path(),
+            profile_dir=self._browser_profile_dir(),
+            headless=bool(getattr(self.config.tiktok, "browser_headless", True)),
+        )
+
+    async def _publish_via_browser(
+        self, video_path: Path, caption: str, *, requested_visibility: str | None = None
+    ) -> UploadResult:
+        """Route one publish through the browser-native publisher (unofficial).
+
+        Receipt-or-fail: the result is PUBLISHED only with an observed
+        item_list receipt (item_id + share_url). Failures keep their typed
+        error code so the fallback chain and the user both see why.
+
+        TikTok Studio's composer decides the audience itself, so a caller who
+        asked for a visibility this route cannot set is REFUSED here — before
+        Playwright opens anything — instead of being published publicly.
+        """
+        import asyncio
+
+        from xpst.platforms.tiktok_browser import (
+            BrowserPublishError,
+            BrowserSessionExpiredError,
+        )
+
+        refused = self._visibility_refusal(
+            requested_visibility, route=visibility_module.ROUTE_TIKTOK_BROWSER
+        )
+        if refused is not None:
+            return refused
+
+        pub = self._browser_publisher()
+        try:
+            receipt = await asyncio.to_thread(pub.publish, video_path, caption)
+        except BrowserSessionExpiredError as e:
+            return UploadResult(
+                success=False,
+                error=f"TIKTOK_BROWSER_SESSION_EXPIRED: {str(e)[:250]}",
+                platform="tiktok",
+                metadata={"route": "tiktok_browser"},
+                retryable=False,
+            )
+        except BrowserPublishError as e:
+            return UploadResult(
+                success=False,
+                error=f"TIKTOK_{e.code}: {e.detail[:250]}",
+                platform="tiktok",
+                metadata={"route": "tiktok_browser"},
+                retryable=e.code in ("BROWSER_PUBLISH_UNCONFIRMED", "BROWSER_COMPOSER_TIMEOUT"),
+            )
+        except Exception as e:
+            return UploadResult(
+                success=False,
+                error=f"TIKTOK_BROWSER_PUBLISH_ERROR: {str(e)[:250]}",
+                platform="tiktok",
+                metadata={"route": "tiktok_browser"},
+                retryable=False,
+            )
+        logger.info(
+            "Posted to TikTok via browser-native publisher: item_id=%s %s",
+            receipt.item_id,
+            receipt.share_url,
+        )
+        post_url = receipt.share_url
+        if "@unknown" in post_url:
+            # The item_list row had no share_url yet (items can lack it while
+            # in review). Compose the canonical URL when the username is
+            # known; otherwise leave it unset rather than ship a fake URL —
+            # post_id remains the verified receipt.
+            username = str(getattr(self.config.tiktok, "username", "") or "").lstrip("@")
+            post_url = (
+                f"https://www.tiktok.com/@{username}/video/{receipt.item_id}"
+                if username
+                else ""
+            )
+        return UploadResult(
+            success=True,
+            post_id=receipt.item_id,
+            post_url=post_url or None,
+            platform="tiktok",
+            metadata={
+                "route": "tiktok_browser",
+                "publisher": "browser-native (unofficial)",
+                "caption_length": len(caption),
+                # The audience this route actually produced. TikTok Studio
+                # decides it; xPST cannot set it, so the receipt says public
+                # rather than echoing a request this route never applied.
+                "visibility": visibility_module.receipt_entry(
+                    "tiktok",
+                    requested=requested_visibility,
+                    level="public",
+                    route=visibility_module.ROUTE_TIKTOK_BROWSER,
+                ),
+                **receipt.to_metadata(),
+            },
+        )
+
+    def _unaudited_confirmed(self) -> bool:
+        """True when creator_info/query answered and public post is NOT allowed.
+
+        Only a SUCCESSFUL query sets the cache, so this can never be a
+        network blip — a failed query stays fail-open (direct post attempt
+        with the reactive fallback), exactly as before browser routing.
+        """
+        return bool(self._privacy_options) and "PUBLIC_TO_EVERYONE" not in self._privacy_options
+
+    @property
+    def manifest(self) -> ProviderManifest:
+        """Return TikTok destination capabilities.
+
+        The notes describe the route that will ACTUALLY run for this config:
+        official Direct Post, the opt-in browser-native publisher (labelled
+        unofficial, same convention as Instagram's instagrapi note), or
+        inbox-draft.
+        """
+        mode = self._publish_mode()
+        if mode in ("browser", "browser_only"):
+            notes = (
+                "Publishes through the logged-in TikTok Studio web flow "
+                "(browser-native publisher (unofficial); uploads ride TikTok's own "
+                "first-party web pipeline; no official API secret involved). Falls "
+                "back to inbox drafts when the browser route fails."
+            )
+        else:
+            notes = "Uploads videos through the TikTok Content Posting API (Direct Post endpoint)."
+        return ProviderManifest(
+            name="tiktok",
+            display_name="TikTok",
+            roles=(ProviderRole.VIDEO_DESTINATION, ProviderRole.DESTINATION),
+            capabilities=(
+                ProviderCapability.UPLOAD,
+                ProviderCapability.DELETE,
+                ProviderCapability.HEALTH,
+                ProviderCapability.COOKIE_AUTH
+                if mode in ("browser", "browser_only")
+                else ProviderCapability.OFFICIAL_API,
+                ProviderCapability.OAUTH,
+                ProviderCapability.RATE_LIMITS,
+            ),
+            auth_mode=AuthMode.SESSION if mode in ("browser", "browser_only") else AuthMode.OAUTH,
+            is_official_api=mode not in ("browser", "browser_only"),
+            docs_url="https://developers.tiktok.com/doc/content-posting-api",
+            notes=notes,
+            extra={
+                "content": ("video",),
+                "max_caption_length": self.MAX_CAPTION_LENGTH,
+                "rate_limit_per_min": self.RATE_LIMIT_PER_MIN,
+                "publish_mode": mode,
+                "routes": ("official-direct-post", "tiktok_browser", "inbox-draft"),
+            },
+        )
+
+    async def _get_access_token(self) -> str:
+        """Return a valid TikTok access token.
+
+        Delegates to SessionManager when available, otherwise uses the
+        access_token configured in TikTokAccountConfig.
+
+        Returns:
+            Valid access token string.
+
+        Raises:
+            ValueError: If no token is configured.
+        """
+        if self._access_token:
+            return self._access_token
+
+        # Use the access_token from config (set via xpst connect tiktok)
+        token = self.config.tiktok.access_token
+
+        if not token:
+            raise ValueError(
+                "TIKTOK_NOT_CONFIGURED: no Content Posting API credentials are configured. "
+                "TikTok remains usable as a DOWNLOAD SOURCE without them (see `xpst health` "
+                "— role: source). Posting requires an approved TikTok developer app: set "
+                "client_key/client_secret, then access_token/refresh_token, or run: "
+                "xpst auth tiktok"
+            )
+        self._access_token = token
+        return self._access_token
+
+    async def _refresh_access_token(self) -> str:
+        """Refresh the TikTok access token using the refresh_token.
+
+        Returns:
+            New access token string.
+
+        Raises:
+            ValueError: If refresh credentials are missing or refresh fails.
+        """
+        client_key = self.config.tiktok.client_key
+        client_secret = self.config.tiktok.client_secret
+        refresh_token = self.config.tiktok.refresh_token
+
+        if not all([client_key, client_secret, refresh_token]):
+            raise ValueError(
+                "TIKTOK_REFRESH_NOT_CONFIGURED: client_key, client_secret, and refresh_token "
+                "are required to refresh the access token."
+            )
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{TIKTOK_API_BASE}/oauth/refresh_token/",
+                data={
+                    "client_key": client_key,
+                    "client_secret": client_secret,
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            token = data.get("access_token")
+            if not token:
+                raise ValueError(f"TIKTOK_REFRESH_ERROR: No access_token in response: {truncate_error(resp.text)}")
+            self._access_token = token
+            return token
+
+    def _draft_mode_requested(self) -> str:
+        """Configured draft mode: 'auto' (default) / 'always' / 'never'."""
+        return str(getattr(self.config.tiktok, "draft_mode", "auto") or "auto").lower()
+
+    def _unaudited_client_refused(self, error_body: str, status_code: int) -> bool:
+        """True when TikTok refused direct post because the client is unaudited."""
+        markers = (
+            "unaudited_client_can_only_post_to_private_accounts",
+            "audience_restricted_by_client_auth",
+            "privacy_level_not_authorized",
+            "scope_not_authorized",
+        )
+        return status_code in (403, 400) and any(m in error_body for m in markers)
+
+    async def _query_privacy_options(self, token: str) -> frozenset[str] | None:
+        """The privacy levels ``creator_info/query`` offers this client, or None.
+
+        TikTok's Content Posting API forces an UNAUDITED client to private
+        privacy: a ``PUBLIC_TO_EVERYONE`` init returns
+        ``403 unaudited_client_can_only_post_to_private_accounts``. The
+        ``creator_info/query`` endpoint reports the levels this client+creator
+        may actually post with, so we consult it BEFORE init: the answer decides
+        whether a *requested* level is honourable (and is refused when it is
+        not), and — when nothing was requested — which level to use.
+
+        Fail-open by design: any error (missing ``video.publish`` scope,
+        timeout, malformed body) returns ``None``, meaning "unknown", because
+        the reactive draft/browser fallback in ``upload()`` already handles the
+        403 refusal — a broken pre-check must not block posting outright. A
+        successful answer is cached per uploader instance (TikTok rate-limits
+        to 6 req/min and the audit state does not flip mid-process).
+        """
+        if self._privacy_options is not None:
+            return self._privacy_options
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    f"{TIKTOK_API_BASE}/v2/post/publish/creator_info/query/",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if resp.status_code >= 400:
+                    logger.debug("TikTok creator_info/query returned %s — assuming unknown", resp.status_code)
+                    return None
+                options = ((resp.json().get("data") or {}).get("privacy_level_options")) or []
+                values = set()
+                for opt in options:
+                    if isinstance(opt, dict) and opt.get("privacy_level"):
+                        values.add(str(opt["privacy_level"]))
+                    elif isinstance(opt, str):
+                        values.add(opt)
+                if not values:
+                    return None
+                self._privacy_options = frozenset(values)
+                return self._privacy_options
+        except Exception as e:  # fail-open: the reactive fallback still covers 403s
+            logger.debug("TikTok creator_info/query failed (%s) — assuming unknown", e)
+            return None
+
+    def _default_privacy_level(self, offered: frozenset[str] | None) -> str:
+        """The level for a post that requested nothing — today's behaviour.
+
+        Public whenever the client may use it. Only a CONFIRMED unaudited
+        answer downgrades (that 403 exists because an unaudited client cannot
+        publish publicly), and it is logged as a downgrade, never silent.
+        """
+        default = "PUBLIC_TO_EVERYONE"
+        if not offered or default in offered:
+            return default
+        level = "SELF_ONLY" if "SELF_ONLY" in offered else sorted(offered)[0]
+        logger.warning(
+            "TikTok: creator_info/query does not offer %s (client is likely unaudited) — "
+            "downgrading Direct Post to %s",
+            default,
+            level,
+        )
+        return level
+
+    def _visibility_refusal(
+        self,
+        requested: str | None,
+        *,
+        route: str,
+    ) -> UploadResult | None:
+        """Refuse a visibility request this route cannot honour (or None).
+
+        Every publish path funnels through this before it touches the network:
+        a request that cannot be honoured is a typed refusal, never a public
+        post the caller did not ask for.
+        """
+        refused = visibility_module.refusal("tiktok", requested, route=route)
+        if refused is None:
+            return None
+        logger.warning("TikTok: refusing requested visibility on route %s: %s", route, refused)
+        return UploadResult(
+            success=False,
+            error=f"TIKTOK_VISIBILITY_REFUSED: {refused}",
+            platform="tiktok",
+            retryable=False,
+            metadata={
+                "state": visibility_module.REFUSED_VISIBILITY_STATE,
+                "refused_visibility": True,
+                "visibility": visibility_module.plan_entry(
+                    "tiktok", requested, route=route
+                ),
+                "route": route,
+            },
+        )
+
+    async def _publish_browser_with_draft_fallback(
+        self,
+        video_path: Path,
+        caption: str,
+        token: str,
+        *,
+        requested_visibility: str | None = None,
+    ) -> UploadResult:
+        """Browser-native publish, demoting to an inbox draft on failure.
+
+        Used when creator_info/query has CONFIRMED the client is unaudited
+        (Direct Post would 403 on a public account anyway): the browser route
+        gets first shot; a draft beats a dead end, but only when the user has
+        draft_mode 'auto' on. 'browser_only' never demotes.
+
+        A requested visibility is carried into both routes: a refusal from the
+        browser route is final (the draft route cannot honour it either), so it
+        is never demoted into a second refusal.
+        """
+        mode = self._publish_mode()
+        result = await self._publish_via_browser(
+            video_path, caption, requested_visibility=requested_visibility
+        )
+        if (
+            result.success
+            or (result.metadata or {}).get("refused_visibility")
+            or mode == "browser_only"
+            or self._draft_mode_requested() != "auto"
+        ):
+            return result
+        logger.warning(
+            "TikTok browser publish failed (%s) — demoting to inbox-draft",
+            (result.error or "")[:120],
+        )
+        return await self._upload_as_draft(
+            video_path, caption, token, requested_visibility=requested_visibility
+        )
+
+    async def _upload_as_draft(
+        self,
+        video_path: Path,
+        caption: str,
+        token: str,
+        *,
+        requested_visibility: str | None = None,
+    ) -> UploadResult:
+        """Upload the video as an inbox DRAFT (video.upload scope).
+
+        The unaudited-client fallback: no audit needed, but the user must open
+        the TikTok app and finish the post (≤5 pending drafts per 24h). The
+        result is honestly marked PENDING with the draft's publish_id — it is
+        NOT a published post and never reports success.
+
+        A draft publishes nothing, so xPST cannot honour a requested visibility
+        for it: the request is refused rather than handed off as a draft that
+        silently ignores it.
+        """
+        refused = self._visibility_refusal(
+            requested_visibility, route=visibility_module.ROUTE_TIKTOK_DRAFT
+        )
+        if refused is not None:
+            return refused
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=UTF-8"}
+        file_size = video_path.stat().st_size
+        async with httpx.AsyncClient(timeout=300) as client:
+            init_resp = await client.post(
+                f"{TIKTOK_API_BASE}/v2/post/publish/video/upload/",
+                headers=headers,
+                params={"draft": "true", "upload_mode": "FILE_UPLOAD"},
+                json={
+                    "source_info": {
+                        "source": "FILE_UPLOAD",
+                        "video_size": file_size,
+                        "chunk_size": file_size,
+                        "total_chunk_count": 1,
+                    },
+                },
+            )
+            if init_resp.status_code >= 400:
+                return UploadResult(
+                    success=False,
+                    error=f"TIKTOK_DRAFT_INIT_ERROR: {truncate_error(init_resp.text)}",
+                    platform="tiktok",
+                )
+            init_data = init_resp.json()
+            publish_id = (init_data.get("data") or {}).get("publish_id")
+            upload_url = (init_data.get("data") or {}).get("upload_url")
+            if not publish_id or not upload_url:
+                return UploadResult(
+                    success=False,
+                    error=f"TIKTOK_DRAFT_INIT_ERROR: no publish_id/upload_url: {truncate_error(init_resp.text)}",
+                    platform="tiktok",
+                )
+            upload_resp = await client.put(
+                upload_url,
+                headers={
+                    "Content-Range": f"bytes 0-{file_size - 1}/{file_size}",
+                    "Content-Length": str(file_size),
+                },
+                content=open(video_path, "rb"),  # noqa: SIM115 — httpx manages the file lifecycle
+            )
+            if upload_resp.status_code >= 400:
+                return UploadResult(
+                    success=False,
+                    error=f"TIKTOK_DRAFT_UPLOAD_ERROR: {truncate_error(upload_resp.text)}",
+                    platform="tiktok",
+                )
+        logger.info("TikTok: draft uploaded (publish_id=%s) — user finishes in the TikTok app", publish_id)
+        return UploadResult(
+            success=False,
+            outcome=UploadOutcome.PENDING,
+            error=(
+                "TIKTOK_DRAFT_PENDING: video uploaded as an inbox draft — "
+                "finish the post in the TikTok app to publish it"
+            ),
+            platform="tiktok",
+            metadata={
+                "publish_id": publish_id,
+                "status": "DRAFT_UPLOADED",
+                "draft_mode": True,
+                "caption_length": len(caption),
+                "sandbox": self._is_sandbox(),
+                # Nothing is published by xPST here: the human finishing the
+                # draft chooses the audience, so the receipt says so instead of
+                # claiming a level this path never applied.
+                "visibility": visibility_module.receipt_entry(
+                    "tiktok",
+                    requested=requested_visibility,
+                    level=None,
+                    route=visibility_module.ROUTE_TIKTOK_DRAFT,
+                ),
+            },
+            retryable=False,
+        )
+
+    async def upload(
+        self, video_path: Path, caption: str, *, visibility: str | None = None
+    ) -> UploadResult:
+        """Upload a video to TikTok via the Content Posting API (Direct Post).
+
+        Uses the container model:
+        1. POST /v2/post/publish/video/init/ — initialize upload, get upload URL
+        2. PUT to the upload URL — upload the video bytes
+        3. POST /v2/post/publish/status/fetch/ — poll until publish completes
+
+        ``visibility`` is the caller's explicit request (``public`` → TikTok's
+        ``PUBLIC_TO_EVERYONE``, ``private`` → ``SELF_ONLY``); anything else is
+        refused by name. A request that the client is not allowed to use —
+        according to ``creator_info/query`` — is a REFUSAL, never a silent
+        public post. Omitting it keeps the historical behaviour: public when
+        the client may, downgraded (and logged) only when TikTok will not allow
+        public.
+
+        Draft fallback (``tiktok.draft_mode``): 'always' uses the inbox-draft
+        path without attempting direct post; 'auto' retries the upload as a
+        draft when TikTok refuses direct post for an unaudited client; 'never'
+        keeps direct post only. Neither fallback can honour a requested
+        visibility, so a request that would have to fall back is refused.
+
+        Args:
+            video_path: Path to video file
+            caption: Caption for the video (max 2200 chars)
+            visibility: Optional requested level (``public``/``private``).
+
+        Returns:
+            UploadResult with post ID and URL
+        """
+        self._validate_video(video_path)
+
+        requested = visibility_module.normalize(visibility)
+        invalid = visibility_module.validate(requested)
+        if invalid is not None:
+            return UploadResult(
+                success=False,
+                error=f"TIKTOK_VISIBILITY_REFUSED: {invalid}",
+                platform="tiktok",
+                retryable=False,
+                metadata={
+                    "state": visibility_module.REFUSED_VISIBILITY_STATE,
+                    "refused_visibility": True,
+                },
+            )
+
+        # 'always' skips direct post entirely — and a draft cannot honour a
+        # requested visibility, so refuse it BEFORE touching credentials.
+        if self._draft_mode_requested() == "always":
+            refused = self._visibility_refusal(
+                requested, route=visibility_module.ROUTE_TIKTOK_DRAFT
+            )
+            if refused is not None:
+                return refused
+            token = await self._get_access_token()
+            return await self._upload_as_draft(
+                video_path, caption, token, requested_visibility=requested
+            )
+
+        # Refused, never truncated — same rule and the same number the content
+        # gate enforces (``xpst.content.TEXT_LIMITS``). A shortened caption is a
+        # caption the user never wrote.
+        if len(caption) > self.MAX_CAPTION_LENGTH:
+            return UploadResult(
+                success=False,
+                error=(
+                    f"TIKTOK_CAPTION_TOO_LONG: {len(caption)} characters exceeds the "
+                    f"{self.MAX_CAPTION_LENGTH}-character limit for tiktok; xPST will not "
+                    f"truncate it. Shorten the caption, or give tiktok its own with "
+                    f"--caption-for tiktok='…' (MCP: overrides)."
+                ),
+                platform="tiktok",
+                retryable=False,
+                metadata={"caption_length": len(caption), "limit": self.MAX_CAPTION_LENGTH},
+            )
+
+        mode = self._publish_mode()
+
+        # 'browser_only': the browser-native route or an honest failure —
+        # no Content Posting API call at all (works with no OAuth credentials,
+        # no client_secret custody).
+        if mode == "browser_only":
+            return await self._publish_via_browser(
+                video_path, caption, requested_visibility=requested
+            )
+
+        try:
+            token = await self._get_access_token()
+        except ValueError as e:
+            # 'browser' with no API credentials configured: the browser route
+            # needs none (its secret is the logged-in cookie session).
+            if mode == "browser":
+                return await self._publish_via_browser(
+                    video_path, caption, requested_visibility=requested
+                )
+            return UploadResult(
+                success=False,
+                error=truncate_error(str(e)),
+                platform="tiktok",
+            )
+
+        # Unaudited-client pre-check: ask creator_info/query which privacy
+        # levels this client may actually Direct Post with. An audited client
+        # keeps official Direct Post (route preference #1). A CONFIRMED
+        # unaudited client with the browser route opted in publishes through
+        # the browser instead of taking a guaranteed 403 / draft downgrade —
+        # UNLESS a visibility was requested: Direct Post is the only route that
+        # can set privacy, and an unaudited client is exactly the one TikTok
+        # allows to post privately, so a request keeps the official route.
+        offered = await self._query_privacy_options(token)
+        if mode == "browser" and self._unaudited_confirmed() and requested is None:
+            return await self._publish_browser_with_draft_fallback(
+                video_path, caption, token, requested_visibility=requested
+            )
+
+        # The level this publish will ask for: the caller's request when there
+        # is one (refused if the client may not use it), otherwise today's
+        # discovery-and-downgrade default.
+        if requested is not None:
+            api_row = visibility_module.support(
+                "tiktok", route=visibility_module.ROUTE_API
+            ) or visibility_module.unknown_destination_policy(
+                "tiktok", route=visibility_module.ROUTE_API
+            )
+            privacy_level = api_row.level_for(requested)
+            if privacy_level is None:
+                refused = self._visibility_refusal(
+                    requested, route=visibility_module.ROUTE_API
+                )
+                if refused is not None:
+                    return refused
+                return UploadResult(
+                    success=False,
+                    error=f"TIKTOK_VISIBILITY_REFUSED: {requested} has no TikTok level.",
+                    platform="tiktok",
+                    retryable=False,
+                    metadata={
+                        "state": visibility_module.REFUSED_VISIBILITY_STATE,
+                        "refused_visibility": True,
+                    },
+                )
+            if offered is not None and privacy_level not in offered:
+                # Requested-but-unavailable is a REFUSAL: posting at another
+                # level would be the silent public post this request exists to
+                # prevent. Zero publish attempts — this is decided before init.
+                logger.warning(
+                    "TikTok: requested privacy_level=%s (%s) is not offered by "
+                    "creator_info/query (%s) — refusing instead of downgrading",
+                    requested,
+                    privacy_level,
+                    ", ".join(sorted(offered)),
+                )
+                return UploadResult(
+                    success=False,
+                    error=(
+                        f"TIKTOK_VISIBILITY_REFUSED: requested visibility {requested} "
+                        f"needs privacy_level {privacy_level}, which "
+                        f"creator_info/query does not offer this client "
+                        f"(offered: {', '.join(sorted(offered)) or 'none'}). "
+                        f"Nothing was uploaded — xPST refuses rather than publishing "
+                        f"at a different level. Drop --visibility {requested} to let "
+                        f"xPST pick a permitted level, or get the TikTok client audited "
+                        f"for this level."
+                    ),
+                    platform="tiktok",
+                    retryable=False,
+                    metadata={
+                        "state": visibility_module.REFUSED_VISIBILITY_STATE,
+                        "refused_visibility": True,
+                        "privacy_level": privacy_level,
+                        "offered_privacy_levels": sorted(offered),
+                        "visibility": visibility_module.plan_entry(
+                            "tiktok",
+                            requested,
+                            route=visibility_module.ROUTE_API,
+                            level=privacy_level,
+                            honoured=False,
+                        ),
+                    },
+                )
+        else:
+            privacy_level = self._default_privacy_level(offered)
+        visibility_record = visibility_module.receipt_entry(
+            "tiktok",
+            requested=requested,
+            level=privacy_level,
+            route=visibility_module.ROUTE_API,
+        )
+
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=UTF-8"}
+        file_size = video_path.stat().st_size
+
+        # P2 fix: retry once with refreshed token on 401
+        for _attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=300) as client:
+                    # Step 1: Initialize upload (chunked upload via FILE_UPLOAD)
+                    logger.info(f"TikTok: initializing upload ({file_size} bytes)")
+                    init_resp = await client.post(
+                        f"{TIKTOK_API_BASE}/v2/post/publish/video/init/",
+                        headers=headers,
+                        json={
+                            "post_info": {
+                                "title": caption[:150],
+                                "privacy_level": privacy_level,
+                                "disable_duet": False,
+                                "disable_comment": False,
+                                "disable_stitch": False,
+                            },
+                            "source_info": {
+                                "source": "FILE_UPLOAD",
+                                "video_size": file_size,
+                                "chunk_size": file_size,
+                                "total_chunk_count": 1,
+                            },
+                        },
+                    )
+                    init_resp.raise_for_status()
+                    init_data = init_resp.json()
+
+                    if init_data.get("error", {}).get("code") and init_data["error"]["code"] != "ok":
+                        return UploadResult(
+                            success=False,
+                            error=f"TIKTOK_INIT_ERROR: {truncate_error(init_data.get('error', {}).get('message', ''))}",
+                            platform="tiktok",
+                        )
+
+                    publish_id = init_data.get("data", {}).get("publish_id")
+                    upload_url = init_data.get("data", {}).get("upload_url")
+
+                    if not publish_id or not upload_url:
+                        return UploadResult(
+                            success=False,
+                            error=f"TIKTOK_INIT_ERROR: No publish_id/upload_url in response: {truncate_error(init_resp.text)}",
+                            platform="tiktok",
+                        )
+
+                    # Step 2: Upload video bytes to the upload_url (stream file, not load into RAM)
+                    logger.info(f"TikTok: uploading video to upload URL (publish_id={publish_id})")
+
+                    upload_resp = await client.put(
+                        upload_url,
+                        headers={
+                            "Content-Range": f"bytes 0-{file_size - 1}/{file_size}",
+                            "Content-Length": str(file_size),
+                        },
+                        content=open(video_path, "rb"),  # noqa: SIM115 — httpx manages the file lifecycle
+                    )
+                    upload_resp.raise_for_status()
+
+                    # Step 3: Fetch publish status
+                    logger.info(f"TikTok: fetching publish status (publish_id={publish_id})")
+                    status_resp = await client.post(
+                        f"{TIKTOK_API_BASE}/v2/post/publish/status/fetch/",
+                        headers=headers,
+                        json={"publish_id": publish_id},
+                    )
+                    status_resp.raise_for_status()
+                    status_data = status_resp.json()
+
+                    data = status_data.get("data", {})
+                    status = str(data.get("status") or "").strip().upper()
+                    # Possible statuses include PROCESSING_UPLOAD,
+                    # PROCESSING_DOWNLOAD, SEND_TO_CDN, SUCCESS, and FAIL.
+                    # ``publish_id`` identifies the TikTok upload container, not
+                    # a publicly shareable post, so it is never sufficient for
+                    # published success on its own.
+                    result_metadata = {
+                        "publish_id": publish_id,
+                        "status": status,
+                        "caption_length": len(caption),
+                        "sandbox": self._is_sandbox(),
+                        "privacy_level": privacy_level,
+                        # The level actually used, from the one registry — the
+                        # receipt a caller can check instead of inferring
+                        # "private" from the request it sent.
+                        "visibility": dict(visibility_record),
+                    }
+                    processing_statuses = _TIKTOK_PROCESSING_STATUSES
+                    published_statuses = _TIKTOK_PUBLISHED_STATUSES
+                    failed_statuses = _TIKTOK_FAILED_STATUSES
+
+                    if status in failed_statuses:
+                        fail_reason = data.get("fail_reason", "unknown")
+                        return UploadResult(
+                            success=False,
+                            error=f"TIKTOK_PUBLISH_FAILED: {truncate_error(str(fail_reason))}",
+                            platform="tiktok",
+                            metadata=result_metadata,
+                            retryable=False,
+                        )
+
+                    if status in processing_statuses or status not in published_statuses:
+                        logger.info("TikTok publication pending: publish_id=%s status=%s", publish_id, status)
+                        return UploadResult(
+                            success=False,
+                            outcome=UploadOutcome.PENDING,
+                            error=f"TIKTOK_PUBLISH_PENDING: status={status or 'unknown'}",
+                            platform="tiktok",
+                            metadata=result_metadata,
+                            retryable=True,
+                        )
+
+                    public_id = (
+                        data.get("publicaly_available_post_id")
+                        or data.get("publicly_available_post_id")
+                        or data.get("share_id")
+                        or data.get("post_id")
+                    )
+                    if isinstance(public_id, (list, tuple)):
+                        public_id = public_id[0] if public_id else None
+                    public_url = (
+                        data.get("publicaly_available_post_url")
+                        or data.get("publicly_available_post_url")
+                        or data.get("share_url")
+                        or data.get("post_url")
+                    )
+                    if not public_id and not public_url:
+                        return UploadResult(
+                            success=False,
+                            error=(
+                                "TIKTOK_PUBLISH_UNVERIFIED: SUCCESS response did not contain "
+                                "a published post ID or public URL"
+                            ),
+                            platform="tiktok",
+                            metadata=result_metadata,
+                            retryable=False,
+                        )
+
+                    logger.info(
+                        "Posted to TikTok: publish_id=%s public_id=%s status=%s",
+                        publish_id,
+                        public_id,
+                        status,
+                    )
+                    return normalize_upload_result(
+                        UploadResult(
+                            success=True,
+                            # Preserve the old publish_id fallback when a valid
+                            # public URL proves publication; a URL-only response
+                            # remains useful to compatibility consumers.
+                            post_id=str(public_id or publish_id),
+                            post_url=public_url,
+                            platform="tiktok",
+                            metadata=result_metadata,
+                        ),
+                        "tiktok",
+                    )
+
+            except httpx.HTTPStatusError as e:
+                error_body = truncate_error(e.response.text) if e.response else str(e)
+                status_code = e.response.status_code if e.response else 0
+                # P2 fix: on 401, refresh token and retry once
+                if status_code == 401 and _attempt == 0:
+                    logger.warning("TikTok: 401 during upload, attempting token refresh...")
+                    try:
+                        token = await self._refresh_access_token()
+                        self._access_token = token
+                        headers["Authorization"] = f"Bearer {token}"
+                        continue  # retry
+                    except Exception as refresh_err:
+                        logger.error(f"TikTok: token refresh failed: {refresh_err}")
+                logger.error(f"TikTok HTTP error: {e}")
+                # 'auto': unaudited clients cannot direct-post publicly — fall
+                # back to the inbox-draft upload so the user finishes in-app.
+                if self._unaudited_client_refused(error_body, status_code) and (
+                    self._draft_mode_requested() == "auto" or self._browser_enabled()
+                ):
+                    logger.warning(
+                        "TikTok refused direct post for an unaudited client (%s) — "
+                        "falling back to %s",
+                        error_body[:120],
+                        "browser-native publish" if self._browser_enabled() else "inbox-draft upload",
+                    )
+                    # Route preference: official > browser > inbox-draft. The
+                    # pre-check may have failed open (no cache), so a real 403
+                    # is also a confirmed-unaudited signal; try the browser
+                    # before demoting to a draft the user must finish by hand.
+                    if self._browser_enabled():
+                        br_result = await self._publish_via_browser(
+                            video_path, caption, requested_visibility=requested
+                        )
+                        if br_result.metadata.get("refused_visibility"):
+                            # TikTok just refused the requested level; the
+                            # browser route would publish publicly instead, so
+                            # the refusal stands rather than degrading silently.
+                            return br_result
+                        if br_result.success or mode == "browser_only":
+                            return br_result
+                        logger.warning(
+                            "TikTok browser publish failed (%s) — falling back to inbox-draft",
+                            (br_result.error or "")[:120],
+                        )
+                    if self._draft_mode_requested() == "auto":
+                        try:
+                            token = await self._get_access_token()
+                        except Exception:
+                            token = self._access_token or ""
+                        if token:
+                            return await self._upload_as_draft(
+                                video_path, caption, token, requested_visibility=requested
+                            )
+                return self._handle_http_error(e, error_body)
+            except httpx.HTTPError as e:
+                logger.error(f"TikTok network error: {e}")
+                return UploadResult(
+                    success=False,
+                    error=f"TIKTOK_NETWORK_ERROR: {truncate_error(str(e))}",
+                    platform="tiktok",
+                )
+            except Exception as e:
+                logger.error(f"TikTok upload failed: {e}")
+                return UploadResult(
+                    success=False,
+                    error=f"TIKTOK_UPLOAD_ERROR: {truncate_error(str(e))}",
+                    platform="tiktok",
+                )
+
+        return UploadResult(
+            success=False,
+            error="TIKTOK_UPLOAD_ERROR: Max retries exceeded",
+            platform="tiktok",
+        )
+
+    def _handle_http_error(self, e: httpx.HTTPStatusError, error_body: str) -> UploadResult:
+        """Map an HTTPStatusError to a typed UploadResult."""
+        status_code = e.response.status_code if e.response else 0
+        if status_code == 401:
+            # P2 fix: attempt token refresh on 401 during upload
+            # (refresh is called by the upload method which has retry logic)
+            return UploadResult(
+                success=False,
+                error=f"TIKTOK_AUTH_EXPIRED: Access token expired or invalid. {error_body}",
+                platform="tiktok",
+            )
+        if status_code == 429:
+            message = "TIKTOK_RATE_LIMITED: Rate limit exceeded (6 req/min). Try again later."
+            # The provider's own wait is the only signal the cooldown machine
+            # can act on, and it reads that signal out of this error text.
+            # Dropping it made a 900s ask run at the 60s escalation floor, with
+            # every retry attempt spent inside the window TikTok had named.
+            hint = self._declared_retry_after(e, error_body)
+            if hint:
+                message = f"{message} (Retry-After: {hint})"
+            return UploadResult(
+                success=False,
+                error=message,
+                platform="tiktok",
+            )
+        return UploadResult(
+            success=False,
+            error=f"TIKTOK_HTTP_ERROR: {error_body}",
+            platform="tiktok",
+        )
+
+    @staticmethod
+    def _declared_retry_after(e: httpx.HTTPStatusError, error_body: str) -> str:
+        """The wait TikTok declared, as a bare integer string (``""`` if none).
+
+        Reads ``Retry-After`` from the response headers first, then falls back
+        to a hint inside the JSON error envelope (TikTok sometimes reports the
+        window there instead). Only a numeric value is carried: the cooldown
+        parser reads digits, so the HTTP-date header form would be misread.
+        """
+        response = getattr(e, "response", None)
+        if response is not None:
+            with contextlib.suppress(Exception):
+                header = str(response.headers.get("retry-after") or "").strip()
+                if header.isdigit():
+                    return header
+        from xpst.utils.retry import parse_declared_retry_after_s
+
+        declared = parse_declared_retry_after_s(error_body)
+        return str(int(declared)) if declared else ""
+
+    def _is_sandbox(self) -> bool:
+        """Return whether TikTok sandbox mode is active (no real posts)."""
+        # Sandbox apps can only post to a test environment. We expose this in
+        # metadata so callers know whether the post is publicly visible.
+        return not self.config.tiktok.enabled or bool(getattr(self.config.tiktok, "sandbox", False))
+
+    async def get_followers(self) -> int:
+        """Return the follower count for the configured TikTok user.
+
+        Uses the Display API user info endpoint.
+
+        Returns:
+            Follower count as int, or 0 on error.
+        """
+        try:
+            token = await self._get_access_token()
+            fields = "follower_count"
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(
+                    f"{TIKTOK_DISPLAY_BASE}/user/info/",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={"fields": fields},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return int(data.get("data", {}).get("follower_count", 0))
+        except Exception as e:
+            logger.error(f"TikTok get_followers failed: {e}")
+            return 0
+
+    async def _check_browser_health(self) -> PlatformHealth:
+        """Probe the browser route: persisted profile/cookie jar, live-checked.
+
+        Runs the (sync, Playwright) probe off the event loop. A missing
+        dependency, jar, or expired session are all reported as an honest
+        unauthenticated state with a re-auth nudge — never a silent login.
+        """
+        import asyncio
+
+        from xpst.platforms.tiktok_browser import (
+            BrowserPublishError,
+            BrowserSessionExpiredError,
+        )
+
+        pub = self._browser_publisher()
+        try:
+            details = await asyncio.to_thread(pub.probe)
+        except BrowserSessionExpiredError as e:
+            return PlatformHealth(
+                platform="tiktok",
+                authenticated=False,
+                session_valid=False,
+                error=f"TIKTOK_BROWSER_SESSION_EXPIRED: {truncate_error(str(e))}",
+                details={"route": "tiktok_browser"},
+            )
+        except BrowserPublishError as e:
+            return PlatformHealth(
+                platform="tiktok",
+                authenticated=False,
+                session_valid=False,
+                error=f"TIKTOK_{e.code}",
+                details={"route": "tiktok_browser", "detail": truncate_error(e.detail)},
+            )
+        except Exception as e:
+            return PlatformHealth(
+                platform="tiktok",
+                authenticated=False,
+                session_valid=False,
+                error=f"TIKTOK_BROWSER_PROBE_ERROR: {truncate_error(str(e))}",
+                details={"route": "tiktok_browser"},
+            )
+        logged_in = bool(details.get("logged_in"))
+        return PlatformHealth(
+            platform="tiktok",
+            authenticated=logged_in,
+            session_valid=logged_in,
+            error=None
+            if logged_in
+            else (
+                "TikTok web session is not logged in — re-run `xpst auth tiktok` or re-export "
+                "cookies (the browser publisher will not attempt a silent login)"
+            ),
+            details={"route": "tiktok_browser", **{k: v for k, v in details.items() if k != "url"}},
+        )
+
+    async def check_health(self) -> PlatformHealth:
+        """Check TikTok authentication health for the ACTIVE publish route.
+
+        Browser mode probes the persisted web session (doctor-probe style,
+        never a silent login). API mode probes the Content Posting token as
+        before.
+        """
+        if self._publish_mode() in ("browser", "browser_only"):
+            return await self._check_browser_health()
+        try:
+            token = await self._get_access_token()
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(
+                    f"{TIKTOK_DISPLAY_BASE}/user/info/",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={"fields": "open_id,display_name,follower_count"},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                user_data = data.get("data", {})
+                if not user_data.get("open_id"):
+                    return PlatformHealth(
+                        platform="tiktok",
+                        authenticated=False,
+                        session_valid=False,
+                        error="No user data returned — token may be invalid",
+                    )
+
+                return PlatformHealth(
+                    platform="tiktok",
+                    authenticated=True,
+                    session_valid=True,
+                    details={
+                        "open_id": user_data.get("open_id", ""),
+                        "display_name": user_data.get("display_name", ""),
+                        "follower_count": user_data.get("follower_count", 0),
+                        "sandbox": self._is_sandbox(),
+                    },
+                )
+
+        except httpx.HTTPStatusError as e:
+            status_code = e.response.status_code if e.response else 0
+            if status_code == 401:
+                return PlatformHealth(
+                    platform="tiktok",
+                    authenticated=False,
+                    session_valid=False,
+                    error="TIKTOK_AUTH_EXPIRED: Access token expired. Run 'xpst auth tiktok'",
+                )
+            return PlatformHealth(
+                platform="tiktok",
+                authenticated=False,
+                session_valid=False,
+                error=f"Health check failed: {truncate_error(str(e))}",
+            )
+        except ValueError as e:
+            return PlatformHealth(
+                platform="tiktok",
+                authenticated=False,
+                session_valid=False,
+                error=str(e),
+            )
+        except Exception as e:
+            return PlatformHealth(
+                platform="tiktok",
+                authenticated=False,
+                session_valid=False,
+                error=f"Health check failed: {truncate_error(str(e))}",
+            )
+
+    async def delete(
+        self,
+        post_id: str,
+        *,
+        soft: bool = False,
+        visibility: str | None = None,
+    ) -> DeleteResult:
+        """Delete a TikTok post via the best-effort web-session fallback.
+
+        The TikTok Content Posting API has no delete endpoint (verified, Aug
+        2026), so deletion uses an authenticated ``DELETE`` against the
+        www.tiktok.com web endpoint with the cookie jar we already export for
+        the source side (explicit ``tiktok.cookies_file``, else the
+        CDP-extracted Netscape jar at ``<config_dir>/credentials/
+        tiktok_cookies.txt``).
+
+        On success (HTTP 200 with ``code == 0``) the post is gone and state is
+        marked ``deleted='via-web'``. Posts published through the
+        browser-native route are removed via the creator ``item/delete``
+        web endpoint (the shape the Studio UI itself uses), verified absent
+        through the manage ``item_list`` API. On any failure the result is
+        ``pending`` so the UI can surface the share URL for one-tap manual
+        removal. The adapter contract (``DeleteResult``) stays stable so an
+        official API delete endpoint can be wired here later without any UI
+        change.
+
+        Args:
+            post_id: The post/publish id of the TikTok video to delete.
+            soft: Ignored — TikTok deletes are always hard.
+            visibility: Ignored — TikTok has no soft delete.
+
+        Returns:
+            DeleteResult with outcome DELETED (via-web) or PENDING.
+        """
+        cookies = self._load_tiktok_web_cookies()
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://www.tiktok.com/",
+        }
+        if cookies:
+            headers["Cookie"] = cookies
+        first_detail = ""
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.delete(
+                    "https://www.tiktok.com/api/post/item/delete/",
+                    params={"video_id": post_id},
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                code = data.get("code")
+                if code == 0:
+                    logger.info(f"Deleted TikTok post via web session (video_id={post_id})")
+                    return DeleteResult(
+                        outcome=DeleteOutcome.DELETED,
+                        platform=self.platform_name,
+                        post_id=post_id,
+                        detail="via-web",
+                    )
+                first_detail = f"web API code={code}"
+                logger.warning(
+                    f"TikTok web delete returned code={code} for {post_id}: "
+                    f"{truncate_error(str(data.get('msg') or data.get('message') or data))}"
+                )
+        except Exception as e:
+            # A rejection here is expected for browser-route (manage-owned)
+            # items; fall through to the endpoint the Studio UI itself uses.
+            first_detail = f"web API error: {str(e)[:120]}"
+            logger.warning(f"TikTok web delete failed for {post_id}: {e}")
+
+        import asyncio
+
+        from xpst.platforms.tiktok_browser import TikTokBrowserPublisher
+
+        pub = TikTokBrowserPublisher(
+            cookie_jar_path=self._tiktok_cookie_jar_path(),
+            profile_dir=self._browser_profile_dir(),
+            headless=bool(getattr(self.config.tiktok, "browser_headless", True)),
+        )
+        try:
+            accepted = await asyncio.to_thread(pub.delete_item, post_id)
+            if accepted and await asyncio.to_thread(
+                pub.item_absent, post_id, timeout_s=45
+            ):
+                # Receipt-or-fail: the endpoint only "counts" once the manage
+                # item_list no longer lists the item (deletes are eventually
+                # consistent).
+                logger.info(
+                    f"Deleted TikTok post via creator item_delete (item_id={post_id})"
+                )
+                return DeleteResult(
+                    outcome=DeleteOutcome.DELETED,
+                    platform=self.platform_name,
+                    post_id=post_id,
+                    detail="via-manage-endpoint",
+                )
+            # Endpoint rejected the request or the item lingers — fall back
+            # to the Studio row kebab menu (what a human clicks), re-check.
+            ui_fired = await asyncio.to_thread(pub.delete_via_ui, post_id)
+            if ui_fired and await asyncio.to_thread(
+                pub.item_absent, post_id, timeout_s=45
+            ):
+                logger.info(f"Deleted TikTok post via Studio row menu (item_id={post_id})")
+                return DeleteResult(
+                    outcome=DeleteOutcome.DELETED,
+                    platform=self.platform_name,
+                    post_id=post_id,
+                    detail="via-manage-ui",
+                )
+            logger.warning(
+                f"TikTok delete did not verify for {post_id} "
+                f"(endpoint {'fired' if accepted else 'rejected'}, "
+                f"ui {'clicked' if ui_fired else 'unavailable'}) — reporting pending"
+            )
+            return DeleteResult(
+                outcome=DeleteOutcome.PENDING,
+                platform=self.platform_name,
+                post_id=post_id,
+                detail="delete-not-verified",
+            )
+        except Exception as me:
+            logger.warning(f"TikTok browser delete failed for {post_id}: {me}")
+        return DeleteResult(
+            outcome=DeleteOutcome.PENDING,
+            platform=self.platform_name,
+            post_id=post_id,
+            detail=first_detail or "no delete path succeeded",
+        )
+
+    # ── Best-effort web-session cookie support ─────────────────────────────
+
+    def _tiktok_cookie_jar_path(self) -> Path | None:
+        """Locate an exported Netscape cookie jar for the TikTok web session.
+
+        Resolution order mirrors the source-side strategy (see
+        ``sources/tiktok.py::_build_base_command``): explicit
+        ``tiktok.cookies_file`` first, then the CDP-extracted default jar at
+        ``<config_dir>/credentials/tiktok_cookies.txt``.
+
+        Returns:
+            Path to an existing jar, or None if none is available.
+        """
+        explicit = getattr(self.config.tiktok, "cookies_file", None)
+        if explicit:
+            jar = Path(explicit).expanduser()
+            if jar.exists():
+                return jar
+        default_jar = (
+            Path(self.config.config_dir).expanduser() / "credentials" / "tiktok_cookies.txt"
+        )
+        if default_jar.exists():
+            return default_jar
+        return None
+
+    def _load_tiktok_web_cookies(self) -> str:
+        """Build a ``Cookie`` header value from the exported Netscape jar.
+
+        Only cookies scoped to tiktok.com domains are included; expired
+        cookies are skipped. Returns an empty string when no usable jar (or no
+        matching cookies) exists — the web delete then simply is more likely
+        to come back ``pending``.
+        """
+        jar = self._tiktok_cookie_jar_path()
+        if jar is None:
+            logger.debug("No TikTok cookie jar available for web-session delete")
+            return ""
+        try:
+            now = time.time()
+            pairs: list[str] = []
+            for line in jar.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split("\t")
+                if len(parts) < 7:
+                    continue
+                domain, _inc_sub, _path, _sec, expires, name, value = parts[:7]
+                if not domain or name == "" or value == "":
+                    continue
+                if not (domain.rstrip(".").endswith("tiktok.com")):
+                    continue
+                if expires.strip().isdigit():
+                    exp = int(expires)
+                    if exp != 0 and exp < now:
+                        continue  # expired
+                pairs.append(f"{name}={value}")
+            return "; ".join(pairs)
+        except OSError as e:
+            logger.debug(f"Could not read TikTok cookie jar {jar}: {e}")
+            return ""
+
+
+PlatformRegistry.register("tiktok", TikTokUploader)

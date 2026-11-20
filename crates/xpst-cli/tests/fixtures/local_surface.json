@@ -1,0 +1,708 @@
+{
+  "schema_version": 1,
+  "captured_from": {
+    "repo": "TysAIs/xPST",
+    "source": "src/xpst/cli.py"
+  },
+  "note": "Captured by running the shipped Python CLI against scratch profiles. scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent; snapshot modified_at is stripped and its epoch recorded instead.",
+  "scenario_count": 19,
+  "scenarios": [
+    {
+      "name": "status_empty_profile",
+      "argv": [
+        "status",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "version": 2,
+        "total_videos_tracked": 0,
+        "total_processed": 0,
+        "cross_posted_count": 0,
+        "by_platform": {
+          "youtube": 0,
+          "x": 0,
+          "instagram": 0,
+          "tiktok": 0,
+          "threads": 0
+        },
+        "last_check": null,
+        "last_wake_check": null,
+        "dead_letter_count": 0,
+        "platform_health": {
+          "youtube": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "x": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "instagram": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "tiktok": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "threads": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          }
+        },
+        "platform_health_note": "platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness."
+      }
+    },
+    {
+      "name": "status_rich_state",
+      "argv": [
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "state.json": "{\n  \"version\": 2,\n  \"posted_videos\": {\n    \"v1\": {\n      \"source_platform\": \"tiktok\",\n      \"source_url\": \"https://example.invalid/v1\",\n      \"posted_to\": {\n        \"youtube\": {\n          \"id\": \"a\",\n          \"deleted\": true\n        },\n        \"x\": {\n          \"id\": \"b\"\n        },\n        \"bluesky\": {\n          \"id\": \"c\"\n        }\n      },\n      \"errors\": {\n        \"instagram\": {\n          \"error\": \"boom\",\n          \"timestamp\": null,\n          \"count\": 2\n        }\n      }\n    },\n    \"v2\": {\n      \"posted_to\": {},\n      \"errors\": {}\n    }\n  },\n  \"health\": {\n    \"total_processed\": 5,\n    \"last_check\": \"2026-01-02T03:04:05\",\n    \"last_wake_check\": null,\n    \"platforms\": {\n      \"youtube\": {\n        \"status\": \"ok\",\n        \"last_success\": \"2026-01-01T00:00:00\",\n        \"failures\": 0\n      },\n      \"x\": {\n        \"status\": \"error\",\n        \"failures\": 3\n      }\n    }\n  }\n}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "version": 2,
+        "total_videos_tracked": 2,
+        "total_processed": 5,
+        "cross_posted_count": 3,
+        "by_platform": {
+          "youtube": 1,
+          "x": 1,
+          "instagram": 0,
+          "tiktok": 0,
+          "threads": 0
+        },
+        "last_check": "2026-01-02T03:04:05",
+        "last_wake_check": null,
+        "dead_letter_count": 1,
+        "platform_health": {
+          "youtube": {
+            "status": "ok",
+            "last_success": "2026-01-01T00:00:00",
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "x": {
+            "status": "error",
+            "last_success": null,
+            "failures": 3,
+            "historical": true,
+            "source": "state_history"
+          }
+        },
+        "platform_health_note": "platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness."
+      }
+    },
+    {
+      "name": "status_corrupt_state",
+      "argv": [
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "state.json": "{not json"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "version": 2,
+        "total_videos_tracked": 0,
+        "total_processed": 0,
+        "cross_posted_count": 0,
+        "by_platform": {
+          "youtube": 0,
+          "x": 0,
+          "instagram": 0,
+          "tiktok": 0,
+          "threads": 0
+        },
+        "last_check": null,
+        "last_wake_check": null,
+        "dead_letter_count": 0,
+        "platform_health": {
+          "youtube": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "x": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "instagram": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "tiktok": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "threads": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          }
+        },
+        "platform_health_note": "platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness."
+      }
+    },
+    {
+      "name": "status_legacy_v1",
+      "argv": [
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "state.json": "{\"posted_videos\": {\"old\": {\"posted_to\": {\"youtube\": {\"id\": \"x\"}}}}, \"health\": {\"total_processed\": 1, \"platforms\": {\"youtube\": {\"status\": \"ok\", \"failures\": 0}}}}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "version": 2,
+        "total_videos_tracked": 1,
+        "total_processed": 1,
+        "cross_posted_count": 1,
+        "by_platform": {
+          "youtube": 1,
+          "x": 0,
+          "instagram": 0,
+          "tiktok": 0,
+          "threads": 0
+        },
+        "last_check": null,
+        "last_wake_check": null,
+        "dead_letter_count": 0,
+        "platform_health": {
+          "youtube": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          }
+        },
+        "platform_health_note": "platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness."
+      }
+    },
+    {
+      "name": "status_health_without_platforms",
+      "argv": [
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "state.json": "{\"version\": 2, \"posted_videos\": {}, \"health\": {\"total_processed\": 3}}"
+      },
+      "compare": "divergence",
+      "exit_code": 1,
+      "rust_exit_code": 0,
+      "why": "Python's get_statistics() indexes health['platforms'] directly and raises KeyError (exit 1, traceback, no JSON). The Rust reader fills the same default platform table the loader creates for a missing health block, so status answers instead of crashing."
+    },
+    {
+      "name": "status_legacy_cross_posted",
+      "argv": [
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "state.json": "{\"cross_posted\": {\"tiktok:abc\": {\"youtube\": {\"post_id\": \"p1\", \"url\": \"u\", \"timestamp\": \"t\"}}}}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "version": 2,
+        "total_videos_tracked": 1,
+        "total_processed": 0,
+        "cross_posted_count": 1,
+        "by_platform": {
+          "youtube": 1,
+          "x": 0,
+          "instagram": 0,
+          "tiktok": 0,
+          "threads": 0
+        },
+        "last_check": null,
+        "last_wake_check": null,
+        "dead_letter_count": 0,
+        "platform_health": {
+          "youtube": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "x": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "instagram": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "tiktok": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "threads": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          }
+        },
+        "platform_health_note": "platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness."
+      }
+    },
+    {
+      "name": "status_backup_recovery",
+      "argv": [
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "state.json": "[]",
+        "backups/state_0000000000000000100.json": "{\"version\": 2, \"posted_videos\": {\"b\": {\"posted_to\": {\"x\": {\"id\": \"1\"}}}}}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "version": 2,
+        "total_videos_tracked": 1,
+        "total_processed": 0,
+        "cross_posted_count": 1,
+        "by_platform": {
+          "youtube": 0,
+          "x": 1,
+          "instagram": 0,
+          "tiktok": 0,
+          "threads": 0
+        },
+        "last_check": null,
+        "last_wake_check": null,
+        "dead_letter_count": 0,
+        "platform_health": {
+          "youtube": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "x": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "instagram": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "tiktok": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "threads": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          }
+        },
+        "platform_health_note": "platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness."
+      }
+    },
+    {
+      "name": "failures_list_rich",
+      "argv": [
+        "failures",
+        "list",
+        "--json"
+      ],
+      "seed": {
+        "state.json": "{\n  \"version\": 2,\n  \"posted_videos\": {\n    \"v1\": {\n      \"source_platform\": \"tiktok\",\n      \"source_url\": \"https://example.invalid/v1\",\n      \"posted_to\": {\n        \"youtube\": {\n          \"id\": \"a\",\n          \"deleted\": true\n        },\n        \"x\": {\n          \"id\": \"b\"\n        },\n        \"bluesky\": {\n          \"id\": \"c\"\n        }\n      },\n      \"errors\": {\n        \"instagram\": {\n          \"error\": \"boom\",\n          \"timestamp\": null,\n          \"count\": 2\n        }\n      }\n    },\n    \"v2\": {\n      \"posted_to\": {},\n      \"errors\": {}\n    }\n  },\n  \"health\": {\n    \"total_processed\": 5,\n    \"last_check\": \"2026-01-02T03:04:05\",\n    \"last_wake_check\": null,\n    \"platforms\": {\n      \"youtube\": {\n        \"status\": \"ok\",\n        \"last_success\": \"2026-01-01T00:00:00\",\n        \"failures\": 0\n      },\n      \"x\": {\n        \"status\": \"error\",\n        \"failures\": 3\n      }\n    }\n  }\n}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "failures": [
+          {
+            "video_id": "v1",
+            "platform": "instagram",
+            "error": "boom",
+            "timestamp": null,
+            "count": 2,
+            "source_url": "https://example.invalid/v1",
+            "status": "open",
+            "resolved": false,
+            "age_hours": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "failures_list_empty",
+      "argv": [
+        "failures",
+        "list",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "failures": []
+      }
+    },
+    {
+      "name": "schedule_list_missing_store",
+      "argv": [
+        "schedule",
+        "list",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": []
+    },
+    {
+      "name": "schedule_list_empty_store",
+      "argv": [
+        "schedule",
+        "list",
+        "--json"
+      ],
+      "seed": {
+        "schedule.json": "[]"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": []
+    },
+    {
+      "name": "schedule_list_entries",
+      "argv": [
+        "schedule",
+        "list",
+        "--json"
+      ],
+      "seed": {
+        "schedule.json": "[{\"id\": \"id-late\", \"video_path\": \"/media/clip.mp4\", \"caption\": \"later\", \"scheduled_time\": \"2026-02-01T12:00:00+00:00\", \"timezone\": \"UTC\", \"platforms\": [\"youtube\", \"x\"], \"status\": \"pending\"}, {\"id\": \"id-early\", \"video_path\": \"\", \"caption\": \"text post\", \"scheduled_time\": \"2026-01-15T09:30:00+00:00\", \"timezone\": \"America/New_York\", \"platforms\": [], \"status\": \"completed\"}, {\"id\": \"id-bad\", \"caption\": \"no time\", \"status\": \"weird\"}, 7]"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": [
+        {
+          "id": "id-bad",
+          "caption": "no time",
+          "status": "weird",
+          "scheduled_time_local": null
+        },
+        {
+          "id": "id-early",
+          "video_path": "",
+          "caption": "text post",
+          "scheduled_time": "2026-01-15T09:30:00+00:00",
+          "timezone": "America/New_York",
+          "platforms": [],
+          "status": "completed",
+          "scheduled_time_local": "2026-01-15T04:30:00-05:00"
+        },
+        {
+          "id": "id-late",
+          "video_path": "/media/clip.mp4",
+          "caption": "later",
+          "scheduled_time": "2026-02-01T12:00:00+00:00",
+          "timezone": "UTC",
+          "platforms": [
+            "youtube",
+            "x"
+          ],
+          "status": "pending",
+          "scheduled_time_local": "2026-02-01T12:00:00+00:00"
+        }
+      ]
+    },
+    {
+      "name": "schedule_list_paused",
+      "argv": [
+        "schedule",
+        "list",
+        "--json"
+      ],
+      "seed": {
+        "schedule.json": "[{\"id\": \"id-late\", \"video_path\": \"/media/clip.mp4\", \"caption\": \"later\", \"scheduled_time\": \"2026-02-01T12:00:00+00:00\", \"timezone\": \"UTC\", \"platforms\": [\"youtube\", \"x\"], \"status\": \"pending\"}, {\"id\": \"id-early\", \"video_path\": \"\", \"caption\": \"text post\", \"scheduled_time\": \"2026-01-15T09:30:00+00:00\", \"timezone\": \"America/New_York\", \"platforms\": [], \"status\": \"completed\"}]",
+        "schedule.paused.json": "{\"paused_at\": \"2026-01-01T00:00:00+00:00\", \"reason\": \"operator pause\"}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "entries": [
+          {
+            "id": "id-early",
+            "video_path": "",
+            "caption": "text post",
+            "scheduled_time": "2026-01-15T09:30:00+00:00",
+            "timezone": "America/New_York",
+            "platforms": [],
+            "status": "completed",
+            "scheduled_time_local": "2026-01-15T04:30:00-05:00"
+          },
+          {
+            "id": "id-late",
+            "video_path": "/media/clip.mp4",
+            "caption": "later",
+            "scheduled_time": "2026-02-01T12:00:00+00:00",
+            "timezone": "UTC",
+            "platforms": [
+              "youtube",
+              "x"
+            ],
+            "status": "pending",
+            "scheduled_time_local": "2026-02-01T12:00:00+00:00"
+          }
+        ],
+        "paused": {
+          "paused": true,
+          "paused_at": "2026-01-01T00:00:00+00:00",
+          "reason": "operator pause"
+        }
+      }
+    },
+    {
+      "name": "schedule_list_snapshots",
+      "argv": [
+        "schedule",
+        "list",
+        "--json"
+      ],
+      "seed": {
+        "schedule.json": "[]",
+        "schedule.json.paused-20260101-000000": "[{\"id\": \"s1\"}, {\"id\": \"s2\"}]"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "snapshot_epoch": 1767225600,
+      "stdout_json": {
+        "entries": [],
+        "paused": {
+          "paused": false,
+          "paused_at": null,
+          "reason": ""
+        },
+        "paused_snapshots": [
+          {
+            "file": "schedule.json.paused-20260101-000000",
+            "entries": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "schedule_list_non_array",
+      "argv": [
+        "schedule",
+        "list",
+        "--json"
+      ],
+      "seed": {
+        "schedule.json": "{}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": []
+    },
+    {
+      "name": "schedule_list_unreadable_pause",
+      "argv": [
+        "schedule",
+        "list",
+        "--json"
+      ],
+      "seed": {
+        "schedule.paused.json": "[1,2,3]"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "entries": [],
+        "paused": {
+          "paused": true,
+          "paused_at": null,
+          "reason": "unreadable pause marker"
+        }
+      }
+    },
+    {
+      "name": "status_explicit_config_missing",
+      "argv": [
+        "--config",
+        "MISSING",
+        "status",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "exit",
+      "exit_code": 2
+    },
+    {
+      "name": "status_reads_state_from_the_config_directory",
+      "argv": [
+        "--config",
+        "ALT",
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "alt/config.yaml": "version: 4\n",
+        "alt/state.json": "{\"version\": 2, \"posted_videos\": {\"z\": {\"posted_to\": {\"threads\": {\"id\": \"t\"}}}}}",
+        "state.json": "{\"version\": 2, \"posted_videos\": {\"ignored\": {\"posted_to\": {}}}}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "substitutions": {
+        "ALT": "alt/config.yaml"
+      },
+      "stdout_json": {
+        "version": 2,
+        "total_videos_tracked": 1,
+        "total_processed": 0,
+        "cross_posted_count": 1,
+        "by_platform": {
+          "youtube": 0,
+          "x": 0,
+          "instagram": 0,
+          "tiktok": 0,
+          "threads": 1
+        },
+        "last_check": null,
+        "last_wake_check": null,
+        "dead_letter_count": 0,
+        "platform_health": {
+          "youtube": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "x": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "instagram": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "tiktok": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          },
+          "threads": {
+            "status": "ok",
+            "last_success": null,
+            "failures": 0,
+            "historical": true,
+            "source": "state_history"
+          }
+        },
+        "platform_health_note": "platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness."
+      }
+    },
+    {
+      "name": "schedule_list_ignores_root_config",
+      "argv": [
+        "--config",
+        "MISSING",
+        "schedule",
+        "list",
+        "--json"
+      ],
+      "seed": {
+        "schedule.json": "[{\"id\": \"id-late\", \"video_path\": \"/media/clip.mp4\", \"caption\": \"later\", \"scheduled_time\": \"2026-02-01T12:00:00+00:00\", \"timezone\": \"UTC\", \"platforms\": [\"youtube\", \"x\"], \"status\": \"pending\"}]"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": [
+        {
+          "id": "id-late",
+          "video_path": "/media/clip.mp4",
+          "caption": "later",
+          "scheduled_time": "2026-02-01T12:00:00+00:00",
+          "timezone": "UTC",
+          "platforms": [
+            "youtube",
+            "x"
+          ],
+          "status": "pending",
+          "scheduled_time_local": "2026-02-01T12:00:00+00:00"
+        }
+      ]
+    }
+  ]
+}

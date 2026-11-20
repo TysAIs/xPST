@@ -1,0 +1,531 @@
+"""Secure credential storage for xPST
+
+Uses the OS keychain (macOS Keychain, Windows Credential Locker, Linux Secret Service)
+for secure credential storage. Falls back to local encrypted files if keyring is unavailable.
+
+Security model:
+- Credentials stored in OS keychain (encrypted, requires auth to access)
+- Never stored in plain text on disk
+- Fallback files encrypted with a Fernet key derived (via scrypt KDF) from a
+  per-install random secret. The secret and KDF salt are generated on first use
+  and stored ``0600`` (owner read/write only) under the credentials directory.
+- If the ``cryptography`` dependency is unavailable, xPST REFUSES to write
+  credentials in plaintext and logs an error instead.
+- Session files contain only non-sensitive metadata
+- OAuth tokens stored separately from session data
+"""
+
+import base64
+import json
+import os
+import secrets
+import stat
+from pathlib import Path
+
+from xpst.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+# Try to import keyring
+try:
+    import keyring
+    import keyring.backends
+    HAS_KEYRING = True
+except ImportError:
+    HAS_KEYRING = False
+    logger.warning("keyring not installed. Using fallback file storage. Install with: pip install keyring")
+
+# Try to import cryptography for encrypted fallback
+try:
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+    HAS_CRYPTO = True
+except ImportError:
+    HAS_CRYPTO = False
+    logger.warning(
+        "cryptography not installed. Fallback credential storage is disabled "
+        "(xPST refuses to write plaintext secrets). Install with: pip install cryptography"
+    )
+
+# scrypt KDF parameters (RFC 7914 recommended interactive cost factors)
+_SCRYPT_N = 2 ** 14
+_SCRYPT_R = 8
+_SCRYPT_P = 1
+_SECRET_BYTES = 32
+_SALT_BYTES = 16
+
+#: Characters a credential key may not contain. The file store writes
+#: ``<key>.enc`` verbatim, so a key has to be a legal file name on every
+#: platform xPST ships on: ``/`` and ``\`` would escape the credentials
+#: directory, and the reserved set is refused outright by Windows — where
+#: ``os.replace`` fails with ``WinError 87`` for a name containing ``:``, which
+#: is exactly how a namespaced key like ``stream_destination:youtube`` looked
+#: correct on Linux/macOS and could never be stored on Windows.
+_UNSAFE_KEY_CHARS = frozenset('<>:"/\\|?*')
+
+
+class PlaintextStorageError(RuntimeError):
+    """Raised when xPST would have to store a credential in cleartext.
+
+    xPST never writes secrets to disk unencrypted. When neither the OS keychain
+    nor the ``cryptography`` package is available, storing fails loudly with this
+    error instead of silently persisting a plaintext token.
+    """
+
+
+class CredentialStore:
+    """Secure credential storage using OS keychain.
+
+    Stores credentials in the system keychain:
+    - macOS: Keychain (encrypted, requires Touch ID/password)
+    - Windows: Credential Locker (encrypted, tied to user account)
+    - Linux: Secret Service (GNOME Keyring, KWallet)
+
+    Falls back to encrypted file-based storage if keyring is unavailable.
+    """
+
+    SERVICE_NAME = "xpst"
+
+    def __init__(self, config_dir: str = "~/.xpst"):
+        """Initialize credential store.
+
+        Args:
+            config_dir: Configuration directory for fallback storage
+        """
+        self.config_dir = Path(config_dir).expanduser()
+        self.creds_dir = self.config_dir / "credentials"
+        self.creds_dir.mkdir(parents=True, exist_ok=True)
+        # Credentials directory stays owner-only: the files inside are 0600, but
+        # a world-readable 0755 directory still exposes *which* providers are
+        # configured (filenames carry the key names) to any local user.
+        try:
+            os.chmod(self.creds_dir, 0o700)
+        except OSError:
+            pass
+        self._keyring_index_file = self.creds_dir / "_keyring_index.json"
+        # Per-install secret + salt used to derive the fallback Fernet key.
+        self._secret_file = self.creds_dir / ".fallback_secret"
+        self._salt_file = self.creds_dir / ".fallback_salt"
+
+        # Keyring is opt-in, not opt-out. On macOS, non-code-signed CLI apps
+        # trigger a Keychain password dialog on *every* access — store, retrieve,
+        # and even the availability probe. That makes the OS keychain unusable
+        # for a CLI tool. The encrypted file fallback (Fernet + scrypt) is the
+        # default.
+        #
+        # To force keychain usage (e.g. on Linux with Secret Service, or a
+        # code-signed macOS build), set XPST_USE_KEYRING=1.
+        # To explicitly disable keyring even if it would otherwise work, set
+        # XPST_NO_KEYRING=1 (takes precedence).
+        use_keyring_env = os.environ.get("XPST_USE_KEYRING", "").lower() in ("1", "true", "yes")
+        no_keyring_env = os.environ.get("XPST_NO_KEYRING", "").lower() in ("1", "true", "yes")
+
+        if no_keyring_env:
+            self._use_keyring = False
+            logger.info("Keyring disabled by XPST_NO_KEYRING. Using encrypted file storage.")
+        elif use_keyring_env and HAS_KEYRING:
+            try:
+                keyring.get_password(self.SERVICE_NAME, "__test__")
+                self._use_keyring = True
+                logger.info("Using OS keychain for credential storage (XPST_USE_KEYRING=1)")
+            except Exception as e:
+                logger.warning(f"Keyring not available: {e}. Using encrypted file storage.")
+                self._use_keyring = False
+        else:
+            self._use_keyring = False
+            logger.info("Using encrypted file storage (set XPST_USE_KEYRING=1 for OS keychain).")
+
+        # Initialize encryption for fallback
+        if HAS_CRYPTO:
+            self._fernet_key = self._derive_fernet_key()
+            self._fernet = Fernet(self._fernet_key)
+        else:
+            self._fernet = None
+
+    @staticmethod
+    def _credential_path(creds_dir: Path, key: str) -> Path:
+        """Return the encrypted file path for ``key``, refusing unusable keys.
+
+        A key is used verbatim as a file name, so an unusable one has to fail
+        here with a message that names the key — never later as an opaque
+        ``OSError`` from the atomic rename (Windows reports ``WinError 87`` for a
+        colon), and never as a silently different file.
+        """
+        if (
+            not key
+            or key != key.strip()
+            or any(ch in _UNSAFE_KEY_CHARS or ord(ch) < 32 for ch in key)
+        ):
+            raise ValueError(
+                f"credential key {key!r} cannot be stored: keys become file names, "
+                f"so they may not be empty, start or end with whitespace, or contain "
+                f"any of {' '.join(sorted(_UNSAFE_KEY_CHARS))} or control characters. "
+                f"Use a namespace separator such as '_'."
+            )
+        return creds_dir / f"{key}.enc"
+
+    def _existing_credential_path(self, key: str) -> Path | None:
+        """Like :meth:`_credential_path`, but ``None`` instead of raising.
+
+        Read and delete paths use this: a key that could never be written cannot
+        be present, so "not found" is the honest answer rather than an exception.
+        """
+        try:
+            return self._credential_path(self.creds_dir, key)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _write_secret_file(path: Path, data: bytes) -> None:
+        """Write secret material to ``path`` with restrictive 0600 permissions.
+
+        The write is ATOMIC (temp file + rename): a failure partway through
+        (e.g. disk-full) leaves the previous file intact instead of truncating
+        an existing credential to zero bytes. On platforms where ``os.open``
+        honours the mode (POSIX) the permissions are correct from creation;
+        ``chmod`` is also applied for defence in depth and to fix any
+        pre-existing file that may have looser permissions.
+        """
+        # O_BINARY is required on Windows: without it the CRT translates
+        # 0x0A bytes in the random secret to \r\n on write, so the on-disk
+        # secret differs from the in-memory one used to derive the first
+        # Fernet key — every later decrypt fails and credentials silently
+        # return None. No-op on POSIX.
+        tmp_path = path.parent / f".{path.name}.tmp.{os.getpid()}.{secrets.token_hex(4)}"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+        fd = os.open(tmp_path, flags, 0o600)
+        try:
+            view = memoryview(data)
+            while view:
+                written = os.write(fd, view)
+                view = view[written:]
+            os.fsync(fd)
+        except Exception:
+            # Remove the partial temp file; the original stays untouched.
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+            raise
+        else:
+            os.close(fd)
+
+        try:
+            os.replace(tmp_path, path)
+        except Exception:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+            raise
+        try:
+            os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
+
+    def _load_or_create_secret_material(self) -> tuple[bytes, bytes]:
+        """Return ``(secret, salt)``, generating and persisting them on first use.
+
+        Both values are random per install and stored 0600 under the
+        credentials directory. They are never derived from world-readable
+        machine identifiers.
+        """
+        if self._secret_file.exists():
+            secret = self._secret_file.read_bytes()
+        else:
+            secret = secrets.token_bytes(_SECRET_BYTES)
+            self._write_secret_file(self._secret_file, secret)
+
+        if self._salt_file.exists():
+            salt = self._salt_file.read_bytes()
+        else:
+            salt = secrets.token_bytes(_SALT_BYTES)
+            self._write_secret_file(self._salt_file, salt)
+
+        return secret, salt
+
+    def _derive_fernet_key(self) -> bytes:
+        """Derive a Fernet key from a per-install random secret via scrypt KDF."""
+        secret, salt = self._load_or_create_secret_material()
+        kdf = Scrypt(salt=salt, length=32, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P)
+        key_material = kdf.derive(secret)
+        return base64.urlsafe_b64encode(key_material)
+
+    def _fernet_encrypt(self, value: str) -> bytes:
+        """Encrypt a value using Fernet.
+
+        Raises:
+            PlaintextStorageError: if Fernet encryption is unavailable.
+                xPST never writes credentials in cleartext.
+        """
+        if self._fernet:
+            return self._fernet.encrypt(value.encode())
+        raise PlaintextStorageError(
+            "Refusing to store credential without encryption. "
+            "Install the 'cryptography' package: pip install cryptography"
+        )
+
+    def _fernet_decrypt(self, data: bytes) -> str:
+        """Decrypt a value using Fernet.
+
+        Raises:
+            PlaintextStorageError: if Fernet is unavailable; xPST does not
+                read credentials it would have refused to write in cleartext.
+        """
+        if self._fernet:
+            return self._fernet.decrypt(data).decode()
+        raise PlaintextStorageError(
+            "Cannot decrypt fallback credential without the 'cryptography' package."
+        )
+
+    def store(self, key: str, value: str) -> None:
+        """Store a credential securely.
+
+        Args:
+            key: Credential key (e.g., "youtube_token", "instagram_sessionid")
+            value: Credential value (JSON string or plain text)
+
+        Raises:
+            PlaintextStorageError: if the OS keychain is unavailable AND the
+                ``cryptography`` package is not installed. xPST refuses to write
+                credentials in cleartext rather than silently degrading security.
+        """
+        if self._use_keyring:
+            try:
+                keyring.set_password(self.SERVICE_NAME, key, value)
+                self._add_to_keyring_index(key)
+                logger.debug(f"Stored credential in keychain: {key}")
+                return
+            except Exception as e:
+                logger.warning(f"Keyring store failed: {e}. Falling back to encrypted file.")
+
+        # Fallback: encrypted file storage. Refuse rather than write plaintext.
+        if self._fernet is None:
+            logger.error(
+                "Cannot store credential '%s': encryption unavailable and the OS "
+                "keychain is not usable. Install 'cryptography' or 'keyring'.",
+                key,
+            )
+            raise PlaintextStorageError(
+                "Refusing to store credential without encryption. "
+                "Install 'cryptography' (pip install cryptography) or enable the OS keychain."
+            )
+
+        cred_file = self._credential_path(self.creds_dir, key)
+        encrypted = self._fernet_encrypt(value)
+        self._write_secret_file(cred_file, encrypted)
+        logger.debug(f"Stored credential in encrypted file: {cred_file}")
+
+    def retrieve(self, key: str) -> str | None:
+        """Retrieve a credential.
+
+        Args:
+            key: Credential key
+
+        Returns:
+            Credential value or None if not found
+        """
+        if self._use_keyring:
+            try:
+                value = keyring.get_password(self.SERVICE_NAME, key)
+                if value is not None:
+                    return value
+            except Exception as e:
+                logger.warning(f"Keyring retrieve failed: {e}. Trying encrypted file.")
+
+        # Fallback: encrypted file storage. An unusable key cannot have a file —
+        # ``store`` refuses it — so it reads as absent instead of raising.
+        cred_file = self._existing_credential_path(key)
+        if cred_file is not None and cred_file.exists():
+            try:
+                data = cred_file.read_bytes()
+                return self._fernet_decrypt(data)
+            except Exception as e:
+                # Do not crash and do not leak the value — tell the user their
+                # stored credential is unreadable and re-auth is needed.
+                logger.warning(
+                    "Stored credential '%s' could not be decrypted (%s). The "
+                    "encryption key may have changed (e.g. the fallback secret "
+                    "was regenerated), the file may be corrupted, or it was "
+                    "written by a different install. Re-authentication "
+                    "required for this platform.",
+                    key,
+                    type(e).__name__,
+                )
+                return None
+
+        return None
+
+    def delete(self, key: str) -> bool:
+        """Delete a credential.
+
+        Args:
+            key: Credential key
+
+        Returns:
+            True if deleted, False if not found
+        """
+        deleted = False
+
+        if self._use_keyring:
+            try:
+                keyring.delete_password(self.SERVICE_NAME, key)
+                self._remove_from_keyring_index(key)
+                deleted = True
+            except keyring.errors.PasswordDeleteError:
+                pass
+            except Exception as e:
+                logger.warning(f"Keyring delete failed: {e}")
+
+        # Also delete from file storage
+        cred_file = self._existing_credential_path(key)
+        if cred_file is not None and cred_file.exists():
+            cred_file.unlink()
+            deleted = True
+
+        return deleted
+
+    def list_keys(self) -> list[str]:
+        """List all stored credential keys.
+
+        Returns:
+            List of credential keys
+        """
+        keys = []
+
+        # List from file storage
+        for cred_file in self.creds_dir.glob("*.enc"):
+            if cred_file.name == "_keyring_index.json":
+                continue
+            keys.append(cred_file.stem)
+
+        # Also include keys from keyring index
+        keys.extend(self._load_keyring_index())
+
+        return sorted(set(keys))
+
+    def _load_keyring_index(self) -> list[str]:
+        """Load the keyring index file that tracks stored key names.
+
+        The index allows ``list_keys()`` to enumerate keyring entries
+        since OS keychains don't support enumeration natively.
+
+        Returns:
+            List of credential key names stored in keyring.
+        """
+        try:
+            if self._keyring_index_file.exists():
+                data = json.loads(self._keyring_index_file.read_text())
+                if isinstance(data, list):
+                    return data
+        except (json.JSONDecodeError, OSError):
+            pass
+        return []
+
+    def _save_keyring_index(self, keys: list[str]) -> None:
+        """Persist the keyring index to disk.
+
+        Args:
+            keys: List of key names to save.
+        """
+        try:
+            self._keyring_index_file.write_text(json.dumps(sorted(set(keys)), indent=2))
+            # Restrict permissions to owner-only (consistent with secret/salt files)
+            try:
+                self._keyring_index_file.chmod(0o600)
+            except OSError:
+                pass  # Windows doesn't support Unix perms
+        except OSError as e:
+            logger.warning(f"Failed to save keyring index: {e}")
+
+    def _add_to_keyring_index(self, key: str) -> None:
+        """Add a key name to the keyring index (idempotent).
+
+        Args:
+            key: Credential key name to add.
+        """
+        keys = self._load_keyring_index()
+        if key not in keys:
+            keys.append(key)
+            self._save_keyring_index(keys)
+
+    def _remove_from_keyring_index(self, key: str) -> None:
+        """Remove a key name from the keyring index.
+
+        Args:
+            key: Credential key name to remove.
+        """
+        keys = self._load_keyring_index()
+        if key in keys:
+            keys.remove(key)
+            self._save_keyring_index(keys)
+
+    def store_json(self, key: str, data: dict) -> None:
+        """Store JSON data as a credential.
+
+        Args:
+            key: Credential key
+            data: Dictionary to store as JSON
+        """
+        self.store(key, json.dumps(data))
+
+    def retrieve_json(self, key: str) -> dict | None:
+        """Retrieve JSON credential data.
+
+        Args:
+            key: Credential key
+
+        Returns:
+            Dictionary or None if not found
+        """
+        value = self.retrieve(key)
+        if value:
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return None
+        return None
+
+    def migrate_from_files(self) -> int:
+        """Migrate credentials from file storage to keyring.
+
+        Returns:
+            Number of credentials migrated
+        """
+        if not self._use_keyring:
+            return 0
+
+        migrated = 0
+
+        # Migrate legacy plaintext .json files
+        for cred_file in self.creds_dir.glob("*.json"):
+            key = cred_file.stem
+            try:
+                data = json.loads(cred_file.read_text())
+                value = data.get("value")
+                if value:
+                    keyring.set_password(self.SERVICE_NAME, key, value)
+                    cred_file.unlink()
+                    migrated += 1
+                    logger.info(f"Migrated credential to keychain: {key}")
+            except Exception as e:
+                logger.warning(f"Failed to migrate {key}: {e}")
+
+        # Migrate encrypted .enc files
+        for cred_file in self.creds_dir.glob("*.enc"):
+            key = cred_file.stem
+            try:
+                value = self.retrieve(key)
+                if value:
+                    keyring.set_password(self.SERVICE_NAME, key, value)
+                    cred_file.unlink()
+                    migrated += 1
+                    logger.info(f"Migrated encrypted credential to keychain: {key}")
+            except Exception as e:
+                logger.warning(f"Failed to migrate {key}: {e}")
+
+        return migrated

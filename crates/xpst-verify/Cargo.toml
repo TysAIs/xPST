@@ -1,0 +1,48 @@
+[package]
+name = "xpst-verify"
+description = "Read-only live credential smoke: one identity request per platform, behind an explicit opt-in."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "xpst-verify"
+path = "src/main.rs"
+
+# Read-only by construction: this crate has no store, no state writer and no
+# token-refresh path in its dependency graph. It can make a request and print a
+# verdict; it cannot publish, cannot rewrite a credential file.
+[dependencies]
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+xpst-config = { path = "../xpst-config" }
+# The credential store, used for ONE operation: `get`. The account sections
+# carry a reference (`bluesky_app_password`, `mastodon_access_token`) and the
+# secret lives behind this crate's keychain-first / encrypted-file policy. The
+# store is opened with `EncryptedFileOnly` and only when the entry and its key
+# material already exist, so this dependency adds a decrypt path and no write
+# path: nothing under `~/.xpst` is created or rewritten by the smoke.
+xpst-authflow = { path = "../xpst-authflow" }
+# Same HTTP stack the Bluesky provider already ships (MIT OR Apache-2.0), so the
+# smoke adds no new supply chain. `blocking` keeps the tool a plain synchronous
+# binary: no runtime to leak, no background tasks.
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls",
+    "charset",
+    "blocking",
+] }
+# RFC 3339 parsing for the stored token expiry, so the report can quote it.
+jiff = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+# Tests build a throwaway profile: config.yaml plus encrypted credential
+# entries, removed when the test ends.
+tempfile = "3"
+
+[lints]
+workspace = true

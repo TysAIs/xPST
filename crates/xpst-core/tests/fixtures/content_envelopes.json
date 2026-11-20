@@ -1,0 +1,4001 @@
+{
+  "generated_from": "src/xpst/content.py",
+  "thresholds": {
+    "shorts_max_seconds": 60,
+    "long_min_seconds": 180
+  },
+  "content_types": [
+    "video",
+    "image",
+    "carousel",
+    "text",
+    "thread"
+  ],
+  "envelopes": [
+    {
+      "platform": "youtube",
+      "display_name": "YouTube",
+      "max_duration_seconds": 43200,
+      "shorts_max_duration_seconds": 60,
+      "max_bytes": 274877906944,
+      "containers": [
+        ".mp4",
+        ".mov"
+      ],
+      "video_codec": "h264",
+      "aspect_min": null,
+      "aspect_max": null,
+      "shorts_max_aspect_ratio": 1.0,
+      "modes": [
+        "shorts",
+        "long"
+      ],
+      "long_form": true,
+      "source": "YouTube Data API v3 videos.insert (resumable upload); YouTube upload limits: 12 hours / 256 GB; Shorts: ≤ 60 s, square or taller than wide",
+      "note": "Both modes use the same resumable videos.insert call; the mode decides the title tag, the returned URL, and which ceiling is enforced.",
+      "duration_cap_shorts": 60,
+      "duration_cap_long": 43200
+    },
+    {
+      "platform": "x",
+      "display_name": "X",
+      "max_duration_seconds": 140,
+      "shorts_max_duration_seconds": null,
+      "max_bytes": 536870912,
+      "containers": [
+        ".mp4",
+        ".mov"
+      ],
+      "video_codec": "h264",
+      "aspect_min": 0.41841004184100417,
+      "aspect_max": 2.39,
+      "shorts_max_aspect_ratio": null,
+      "modes": [
+        "shorts"
+      ],
+      "long_form": false,
+      "source": "X media upload limits: 140 s of video for standard accounts, 512 MB, 1:2.39-2.39:1; Premium accounts allow longer videos (raise it with x.max_video_duration_seconds)",
+      "note": "No long-form path until the account's real cap is raised; over 140 s is refused, never truncated.",
+      "duration_cap_shorts": 140,
+      "duration_cap_long": 140
+    },
+    {
+      "platform": "instagram",
+      "display_name": "Instagram Reels",
+      "max_duration_seconds": 900,
+      "shorts_max_duration_seconds": null,
+      "max_bytes": 4294967296,
+      "containers": [
+        ".mp4",
+        ".mov"
+      ],
+      "video_codec": "h264",
+      "aspect_min": null,
+      "aspect_max": null,
+      "shorts_max_aspect_ratio": null,
+      "modes": [
+        "shorts"
+      ],
+      "long_form": false,
+      "source": "Meta Reels API: Reels up to 15 minutes, 4 GB",
+      "note": "",
+      "duration_cap_shorts": 900,
+      "duration_cap_long": 900
+    },
+    {
+      "platform": "tiktok",
+      "display_name": "TikTok",
+      "max_duration_seconds": 600,
+      "shorts_max_duration_seconds": null,
+      "max_bytes": 1073741824,
+      "containers": [
+        ".mp4",
+        ".mov"
+      ],
+      "video_codec": "h264",
+      "aspect_min": null,
+      "aspect_max": null,
+      "shorts_max_aspect_ratio": null,
+      "modes": [
+        "shorts"
+      ],
+      "long_form": false,
+      "source": "TikTok Content Posting API: video up to 10 minutes, 1 GB",
+      "note": "",
+      "duration_cap_shorts": 600,
+      "duration_cap_long": 600
+    },
+    {
+      "platform": "threads",
+      "display_name": "Threads",
+      "max_duration_seconds": 300,
+      "shorts_max_duration_seconds": null,
+      "max_bytes": 1073741824,
+      "containers": [
+        ".mp4",
+        ".mov"
+      ],
+      "video_codec": "h264",
+      "aspect_min": null,
+      "aspect_max": null,
+      "shorts_max_aspect_ratio": null,
+      "modes": [
+        "shorts"
+      ],
+      "long_form": false,
+      "source": "Threads API: video up to 5 minutes (the container fetches it from a public URL)",
+      "note": "",
+      "duration_cap_shorts": 300,
+      "duration_cap_long": 300
+    },
+    {
+      "platform": "facebook",
+      "display_name": "Facebook Page",
+      "max_duration_seconds": 14400,
+      "shorts_max_duration_seconds": null,
+      "max_bytes": 10737418240,
+      "containers": [
+        ".mp4",
+        ".mov"
+      ],
+      "video_codec": "h264",
+      "aspect_min": null,
+      "aspect_max": null,
+      "shorts_max_aspect_ratio": null,
+      "modes": [
+        "shorts"
+      ],
+      "long_form": false,
+      "source": "Graph API /{page-id}/videos: up to 4 hours, 10 GB",
+      "note": "",
+      "duration_cap_shorts": 14400,
+      "duration_cap_long": 14400
+    },
+    {
+      "platform": "rumble",
+      "display_name": "Rumble",
+      "max_duration_seconds": null,
+      "shorts_max_duration_seconds": null,
+      "max_bytes": null,
+      "containers": [
+        ".mp4",
+        ".mov"
+      ],
+      "video_codec": "h264",
+      "aspect_min": null,
+      "aspect_max": null,
+      "shorts_max_aspect_ratio": null,
+      "modes": [
+        "long"
+      ],
+      "long_form": true,
+      "source": "Rumble video upload API is partner-gated; limits are reported by the service per plan",
+      "note": "Integration-uncertain: no self-serve developer console, so the manual handoff is the reliable path.",
+      "duration_cap_shorts": null,
+      "duration_cap_long": null
+    }
+  ],
+  "capabilities": [
+    {
+      "platform": "youtube",
+      "display_name": "YouTube",
+      "publishing": true,
+      "media_transport": "local_upload",
+      "declared": [
+        "video"
+      ],
+      "implemented": [
+        "video"
+      ],
+      "has_video_envelope": true
+    },
+    {
+      "platform": "x",
+      "display_name": "X",
+      "publishing": true,
+      "media_transport": "local_upload",
+      "declared": [
+        "carousel",
+        "image",
+        "text",
+        "video"
+      ],
+      "implemented": [
+        "carousel",
+        "image",
+        "text",
+        "video"
+      ],
+      "has_video_envelope": true
+    },
+    {
+      "platform": "instagram",
+      "display_name": "Instagram Reels",
+      "publishing": true,
+      "media_transport": "local_upload",
+      "declared": [
+        "carousel",
+        "image",
+        "video"
+      ],
+      "implemented": [
+        "carousel",
+        "image",
+        "video"
+      ],
+      "has_video_envelope": true
+    },
+    {
+      "platform": "tiktok",
+      "display_name": "TikTok",
+      "publishing": true,
+      "media_transport": "local_upload",
+      "declared": [
+        "video"
+      ],
+      "implemented": [
+        "video"
+      ],
+      "has_video_envelope": true
+    },
+    {
+      "platform": "threads",
+      "display_name": "Threads",
+      "publishing": true,
+      "media_transport": "public_url",
+      "declared": [
+        "text",
+        "video"
+      ],
+      "implemented": [
+        "text",
+        "video"
+      ],
+      "has_video_envelope": true
+    },
+    {
+      "platform": "facebook",
+      "display_name": "Facebook Page",
+      "publishing": true,
+      "media_transport": "local_upload",
+      "declared": [
+        "video"
+      ],
+      "implemented": [
+        "video"
+      ],
+      "has_video_envelope": true
+    },
+    {
+      "platform": "rumble",
+      "display_name": "Rumble",
+      "publishing": true,
+      "media_transport": "local_upload",
+      "declared": [
+        "video"
+      ],
+      "implemented": [
+        "video"
+      ],
+      "has_video_envelope": true
+    },
+    {
+      "platform": "bluesky",
+      "display_name": "Bluesky",
+      "publishing": true,
+      "media_transport": "local_upload",
+      "declared": [
+        "carousel",
+        "image",
+        "text"
+      ],
+      "implemented": [
+        "carousel",
+        "image",
+        "text"
+      ],
+      "has_video_envelope": false
+    },
+    {
+      "platform": "messenger",
+      "display_name": "Messenger",
+      "publishing": false,
+      "media_transport": "local_upload",
+      "declared": [
+        "text"
+      ],
+      "implemented": [
+        "text"
+      ],
+      "has_video_envelope": false
+    }
+  ],
+  "aliases": [
+    {
+      "label": "album",
+      "content_type": "carousel"
+    },
+    {
+      "label": "carousel",
+      "content_type": "carousel"
+    },
+    {
+      "label": "gallery",
+      "content_type": "carousel"
+    },
+    {
+      "label": "image",
+      "content_type": "image"
+    },
+    {
+      "label": "images",
+      "content_type": "image"
+    },
+    {
+      "label": "photo",
+      "content_type": "image"
+    },
+    {
+      "label": "photos",
+      "content_type": "image"
+    },
+    {
+      "label": "picture",
+      "content_type": "image"
+    },
+    {
+      "label": "post",
+      "content_type": "text"
+    },
+    {
+      "label": "reel",
+      "content_type": "video"
+    },
+    {
+      "label": "reels",
+      "content_type": "video"
+    },
+    {
+      "label": "short",
+      "content_type": "video"
+    },
+    {
+      "label": "shorts",
+      "content_type": "video"
+    },
+    {
+      "label": "status",
+      "content_type": "text"
+    },
+    {
+      "label": "text",
+      "content_type": "text"
+    },
+    {
+      "label": "thread",
+      "content_type": "thread"
+    },
+    {
+      "label": "threads",
+      "content_type": "thread"
+    },
+    {
+      "label": "tweet",
+      "content_type": "text"
+    },
+    {
+      "label": "video",
+      "content_type": "video"
+    },
+    {
+      "label": "videos",
+      "content_type": "video"
+    }
+  ],
+  "mode_coercion": [
+    {
+      "input": "shorts",
+      "mode": "shorts",
+      "error": null
+    },
+    {
+      "input": "SHORTS",
+      "mode": "shorts",
+      "error": null
+    },
+    {
+      "input": " long ",
+      "mode": "long",
+      "error": null
+    },
+    {
+      "input": "Long",
+      "mode": "long",
+      "error": null
+    },
+    {
+      "input": "medium",
+      "mode": null,
+      "error": "Unknown video mode 'medium': choose one of shorts, long."
+    },
+    {
+      "input": "",
+      "mode": null,
+      "error": "Unknown video mode '': choose one of shorts, long."
+    }
+  ],
+  "classify": [
+    {
+      "duration_s": null,
+      "width": null,
+      "height": null,
+      "mode": null
+    },
+    {
+      "duration_s": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null
+    },
+    {
+      "duration_s": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": null
+    },
+    {
+      "duration_s": null,
+      "width": 1080,
+      "height": 1080,
+      "mode": null
+    },
+    {
+      "duration_s": null,
+      "width": 1080,
+      "height": 1081,
+      "mode": null
+    },
+    {
+      "duration_s": null,
+      "width": 1081,
+      "height": 1080,
+      "mode": null
+    },
+    {
+      "duration_s": null,
+      "width": 0,
+      "height": 0,
+      "mode": null
+    },
+    {
+      "duration_s": null,
+      "width": 0,
+      "height": 1920,
+      "mode": null
+    },
+    {
+      "duration_s": null,
+      "width": 1080,
+      "height": 0,
+      "mode": null
+    },
+    {
+      "duration_s": 0,
+      "width": null,
+      "height": null,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 0,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 0,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 0,
+      "width": 1080,
+      "height": 1080,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 0,
+      "width": 1080,
+      "height": 1081,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 0,
+      "width": 1081,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 0,
+      "width": 0,
+      "height": 0,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 0,
+      "width": 0,
+      "height": 1920,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 0,
+      "width": 1080,
+      "height": 0,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 1,
+      "width": null,
+      "height": null,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 1,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 1,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 1,
+      "width": 1080,
+      "height": 1080,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 1,
+      "width": 1080,
+      "height": 1081,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 1,
+      "width": 1081,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 1,
+      "width": 0,
+      "height": 0,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 1,
+      "width": 0,
+      "height": 1920,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 1,
+      "width": 1080,
+      "height": 0,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 30,
+      "width": null,
+      "height": null,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 30,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 30,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 30,
+      "width": 1080,
+      "height": 1080,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 30,
+      "width": 1080,
+      "height": 1081,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 30,
+      "width": 1081,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 30,
+      "width": 0,
+      "height": 0,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 30,
+      "width": 0,
+      "height": 1920,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 30,
+      "width": 1080,
+      "height": 0,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 59,
+      "width": null,
+      "height": null,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 59,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 59,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 59,
+      "width": 1080,
+      "height": 1080,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 59,
+      "width": 1080,
+      "height": 1081,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 59,
+      "width": 1081,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 59,
+      "width": 0,
+      "height": 0,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 59,
+      "width": 0,
+      "height": 1920,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 59,
+      "width": 1080,
+      "height": 0,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 60,
+      "width": null,
+      "height": null,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 60,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 60,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 60,
+      "width": 1080,
+      "height": 1080,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 60,
+      "width": 1080,
+      "height": 1081,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 60,
+      "width": 1081,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 60,
+      "width": 0,
+      "height": 0,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 60,
+      "width": 0,
+      "height": 1920,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 60,
+      "width": 1080,
+      "height": 0,
+      "mode": "shorts"
+    },
+    {
+      "duration_s": 60.5,
+      "width": null,
+      "height": null,
+      "mode": null
+    },
+    {
+      "duration_s": 60.5,
+      "width": 1080,
+      "height": 1920,
+      "mode": null
+    },
+    {
+      "duration_s": 60.5,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 60.5,
+      "width": 1080,
+      "height": 1080,
+      "mode": null
+    },
+    {
+      "duration_s": 60.5,
+      "width": 1080,
+      "height": 1081,
+      "mode": null
+    },
+    {
+      "duration_s": 60.5,
+      "width": 1081,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 60.5,
+      "width": 0,
+      "height": 0,
+      "mode": null
+    },
+    {
+      "duration_s": 60.5,
+      "width": 0,
+      "height": 1920,
+      "mode": null
+    },
+    {
+      "duration_s": 60.5,
+      "width": 1080,
+      "height": 0,
+      "mode": null
+    },
+    {
+      "duration_s": 61,
+      "width": null,
+      "height": null,
+      "mode": null
+    },
+    {
+      "duration_s": 61,
+      "width": 1080,
+      "height": 1920,
+      "mode": null
+    },
+    {
+      "duration_s": 61,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 61,
+      "width": 1080,
+      "height": 1080,
+      "mode": null
+    },
+    {
+      "duration_s": 61,
+      "width": 1080,
+      "height": 1081,
+      "mode": null
+    },
+    {
+      "duration_s": 61,
+      "width": 1081,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 61,
+      "width": 0,
+      "height": 0,
+      "mode": null
+    },
+    {
+      "duration_s": 61,
+      "width": 0,
+      "height": 1920,
+      "mode": null
+    },
+    {
+      "duration_s": 61,
+      "width": 1080,
+      "height": 0,
+      "mode": null
+    },
+    {
+      "duration_s": 90,
+      "width": null,
+      "height": null,
+      "mode": null
+    },
+    {
+      "duration_s": 90,
+      "width": 1080,
+      "height": 1920,
+      "mode": null
+    },
+    {
+      "duration_s": 90,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 90,
+      "width": 1080,
+      "height": 1080,
+      "mode": null
+    },
+    {
+      "duration_s": 90,
+      "width": 1080,
+      "height": 1081,
+      "mode": null
+    },
+    {
+      "duration_s": 90,
+      "width": 1081,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 90,
+      "width": 0,
+      "height": 0,
+      "mode": null
+    },
+    {
+      "duration_s": 90,
+      "width": 0,
+      "height": 1920,
+      "mode": null
+    },
+    {
+      "duration_s": 90,
+      "width": 1080,
+      "height": 0,
+      "mode": null
+    },
+    {
+      "duration_s": 120,
+      "width": null,
+      "height": null,
+      "mode": null
+    },
+    {
+      "duration_s": 120,
+      "width": 1080,
+      "height": 1920,
+      "mode": null
+    },
+    {
+      "duration_s": 120,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 120,
+      "width": 1080,
+      "height": 1080,
+      "mode": null
+    },
+    {
+      "duration_s": 120,
+      "width": 1080,
+      "height": 1081,
+      "mode": null
+    },
+    {
+      "duration_s": 120,
+      "width": 1081,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 120,
+      "width": 0,
+      "height": 0,
+      "mode": null
+    },
+    {
+      "duration_s": 120,
+      "width": 0,
+      "height": 1920,
+      "mode": null
+    },
+    {
+      "duration_s": 120,
+      "width": 1080,
+      "height": 0,
+      "mode": null
+    },
+    {
+      "duration_s": 179.9,
+      "width": null,
+      "height": null,
+      "mode": null
+    },
+    {
+      "duration_s": 179.9,
+      "width": 1080,
+      "height": 1920,
+      "mode": null
+    },
+    {
+      "duration_s": 179.9,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 179.9,
+      "width": 1080,
+      "height": 1080,
+      "mode": null
+    },
+    {
+      "duration_s": 179.9,
+      "width": 1080,
+      "height": 1081,
+      "mode": null
+    },
+    {
+      "duration_s": 179.9,
+      "width": 1081,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 179.9,
+      "width": 0,
+      "height": 0,
+      "mode": null
+    },
+    {
+      "duration_s": 179.9,
+      "width": 0,
+      "height": 1920,
+      "mode": null
+    },
+    {
+      "duration_s": 179.9,
+      "width": 1080,
+      "height": 0,
+      "mode": null
+    },
+    {
+      "duration_s": 180,
+      "width": null,
+      "height": null,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180,
+      "width": 1080,
+      "height": 1920,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180,
+      "width": 1080,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180,
+      "width": 1080,
+      "height": 1081,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180,
+      "width": 1081,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180,
+      "width": 0,
+      "height": 0,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180,
+      "width": 0,
+      "height": 1920,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180,
+      "width": 1080,
+      "height": 0,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180.5,
+      "width": null,
+      "height": null,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180.5,
+      "width": 1080,
+      "height": 1920,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180.5,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180.5,
+      "width": 1080,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180.5,
+      "width": 1080,
+      "height": 1081,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180.5,
+      "width": 1081,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180.5,
+      "width": 0,
+      "height": 0,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180.5,
+      "width": 0,
+      "height": 1920,
+      "mode": "long"
+    },
+    {
+      "duration_s": 180.5,
+      "width": 1080,
+      "height": 0,
+      "mode": "long"
+    },
+    {
+      "duration_s": 600,
+      "width": null,
+      "height": null,
+      "mode": "long"
+    },
+    {
+      "duration_s": 600,
+      "width": 1080,
+      "height": 1920,
+      "mode": "long"
+    },
+    {
+      "duration_s": 600,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 600,
+      "width": 1080,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 600,
+      "width": 1080,
+      "height": 1081,
+      "mode": "long"
+    },
+    {
+      "duration_s": 600,
+      "width": 1081,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 600,
+      "width": 0,
+      "height": 0,
+      "mode": "long"
+    },
+    {
+      "duration_s": 600,
+      "width": 0,
+      "height": 1920,
+      "mode": "long"
+    },
+    {
+      "duration_s": 600,
+      "width": 1080,
+      "height": 0,
+      "mode": "long"
+    },
+    {
+      "duration_s": 43200,
+      "width": null,
+      "height": null,
+      "mode": "long"
+    },
+    {
+      "duration_s": 43200,
+      "width": 1080,
+      "height": 1920,
+      "mode": "long"
+    },
+    {
+      "duration_s": 43200,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 43200,
+      "width": 1080,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 43200,
+      "width": 1080,
+      "height": 1081,
+      "mode": "long"
+    },
+    {
+      "duration_s": 43200,
+      "width": 1081,
+      "height": 1080,
+      "mode": "long"
+    },
+    {
+      "duration_s": 43200,
+      "width": 0,
+      "height": 0,
+      "mode": "long"
+    },
+    {
+      "duration_s": 43200,
+      "width": 0,
+      "height": 1920,
+      "mode": "long"
+    },
+    {
+      "duration_s": 43200,
+      "width": 1080,
+      "height": 0,
+      "mode": "long"
+    }
+  ],
+  "violations": [
+    {
+      "platform": "youtube",
+      "duration_s": null,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 60,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 60.5,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": "video_envelope.duration",
+      "severity": "error",
+      "message": "Short-form is 60 s (1 min) — over YouTube's 60 s (1 min) limit. YouTube video envelope: max duration 12 h; short-form mode 60 s; max size 256 GB; short-form needs width/height ≤ 1.00 (square or vertical); containers .mp4, .mov; codec h264; modes shorts, long. Refused rather than truncated."
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 61,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": "video_envelope.duration",
+      "severity": "error",
+      "message": "Short-form is 61 s (1 min 1 s) — over YouTube's 60 s (1 min) limit. YouTube video envelope: max duration 12 h; short-form mode 60 s; max size 256 GB; short-form needs width/height ≤ 1.00 (square or vertical); containers .mp4, .mov; codec h264; modes shorts, long. Refused rather than truncated."
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 90,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": "video_envelope.duration",
+      "severity": "error",
+      "message": "Short-form is 90 s (1 min 30 s) — over YouTube's 60 s (1 min) limit. YouTube video envelope: max duration 12 h; short-form mode 60 s; max size 256 GB; short-form needs width/height ≤ 1.00 (square or vertical); containers .mp4, .mov; codec h264; modes shorts, long. Refused rather than truncated."
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 140,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 141,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 180,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 600,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 901,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 43200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 43201,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": "video_envelope.duration",
+      "severity": "error",
+      "message": "Video is 43201 s (12 h 0 min) — over YouTube's 43200 s (12 h) limit. YouTube video envelope: max duration 12 h; short-form mode 60 s; max size 256 GB; short-form needs width/height ≤ 1.00 (square or vertical); containers .mp4, .mov; codec h264; modes shorts, long. Refused rather than truncated."
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 30,
+      "size_bytes": 1073741824,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 30,
+      "size_bytes": 1073741825,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "shorts",
+      "code": "video_envelope.aspect",
+      "severity": "error",
+      "message": "1920x1080 is aspect 1.78 — a YouTube short must be square or vertical (width/height ≤ 1.00). Publish it as long-form, or export a vertical rendition. YouTube video envelope: max duration 12 h; short-form mode 60 s; max size 256 GB; short-form needs width/height ≤ 1.00 (square or vertical); containers .mp4, .mov; codec h264; modes shorts, long."
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 608,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 100,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 2400,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "youtube",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 239,
+      "height": 100,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "x",
+      "duration_s": null,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "x",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "x",
+      "duration_s": 60,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "x",
+      "duration_s": 60.5,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "x",
+      "duration_s": 61,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "x",
+      "duration_s": 90,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "x",
+      "duration_s": 140,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "x",
+      "duration_s": 141,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": "video_envelope.duration",
+      "severity": "error",
+      "message": "Video is 141 s (2 min 21 s) — over X's 140 s (2 min 20 s) limit. X video envelope: max duration 140 s; max size 512 MB; aspect 0.42-2.39 (width/height); containers .mp4, .mov; codec h264; modes shorts. Refused rather than truncated."
+    },
+    {
+      "platform": "x",
+      "duration_s": 180,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "X has no long-form path (modes: shorts). X video envelope: max duration 140 s; max size 512 MB; aspect 0.42-2.39 (width/height); containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "x",
+      "duration_s": 200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": "video_envelope.duration",
+      "severity": "error",
+      "message": "Video is 200 s (3 min 20 s) — over X's 140 s (2 min 20 s) limit. X video envelope: max duration 140 s; max size 512 MB; aspect 0.42-2.39 (width/height); containers .mp4, .mov; codec h264; modes shorts. Refused rather than truncated."
+    },
+    {
+      "platform": "x",
+      "duration_s": 600,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "X has no long-form path (modes: shorts). X video envelope: max duration 140 s; max size 512 MB; aspect 0.42-2.39 (width/height); containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "x",
+      "duration_s": 901,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": "video_envelope.duration",
+      "severity": "error",
+      "message": "Video is 901 s (15 min 1 s) — over X's 140 s (2 min 20 s) limit. X video envelope: max duration 140 s; max size 512 MB; aspect 0.42-2.39 (width/height); containers .mp4, .mov; codec h264; modes shorts. Refused rather than truncated."
+    },
+    {
+      "platform": "x",
+      "duration_s": 43200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "X has no long-form path (modes: shorts). X video envelope: max duration 140 s; max size 512 MB; aspect 0.42-2.39 (width/height); containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "x",
+      "duration_s": 43201,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "X has no long-form path (modes: shorts). X video envelope: max duration 140 s; max size 512 MB; aspect 0.42-2.39 (width/height); containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "x",
+      "duration_s": 30,
+      "size_bytes": 1073741824,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": "video_envelope.size",
+      "severity": "error",
+      "message": "File is 1 GB — over X's 512 MB limit. X video envelope: max duration 140 s; max size 512 MB; aspect 0.42-2.39 (width/height); containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "x",
+      "duration_s": 30,
+      "size_bytes": 1073741825,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": "video_envelope.size",
+      "severity": "error",
+      "message": "File is 1 GB — over X's 512 MB limit. X video envelope: max duration 140 s; max size 512 MB; aspect 0.42-2.39 (width/height); containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "x",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "x",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 608,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "x",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "x",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 100,
+      "height": 1000,
+      "mode": null,
+      "code": "video_envelope.aspect",
+      "severity": "error",
+      "message": "100x1000 is aspect 0.10 — outside X's 0.42-2.39 range. X video envelope: max duration 140 s; max size 512 MB; aspect 0.42-2.39 (width/height); containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "x",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 2400,
+      "height": 1000,
+      "mode": null,
+      "code": "video_envelope.aspect",
+      "severity": "error",
+      "message": "2400x1000 is aspect 2.40 — outside X's 0.42-2.39 range. X video envelope: max duration 140 s; max size 512 MB; aspect 0.42-2.39 (width/height); containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "x",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 239,
+      "height": 100,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": null,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 60,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 60.5,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 61,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 90,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 140,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 141,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 180,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Instagram Reels has no long-form path (modes: shorts). Instagram Reels video envelope: max duration 15 min; max size 4 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 600,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Instagram Reels has no long-form path (modes: shorts). Instagram Reels video envelope: max duration 15 min; max size 4 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 901,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": "video_envelope.duration",
+      "severity": "error",
+      "message": "Video is 901 s (15 min 1 s) — over Instagram Reels's 900 s (15 min) limit. Instagram Reels video envelope: max duration 15 min; max size 4 GB; containers .mp4, .mov; codec h264; modes shorts. Refused rather than truncated."
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 43200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Instagram Reels has no long-form path (modes: shorts). Instagram Reels video envelope: max duration 15 min; max size 4 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 43201,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Instagram Reels has no long-form path (modes: shorts). Instagram Reels video envelope: max duration 15 min; max size 4 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 30,
+      "size_bytes": 1073741824,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 30,
+      "size_bytes": 1073741825,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 608,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 100,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 2400,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "instagram",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 239,
+      "height": 100,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": null,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 60,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 60.5,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 61,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 90,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 140,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 141,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 180,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "TikTok has no long-form path (modes: shorts). TikTok video envelope: max duration 10 min; max size 1 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 600,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "TikTok has no long-form path (modes: shorts). TikTok video envelope: max duration 10 min; max size 1 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 901,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": "video_envelope.duration",
+      "severity": "error",
+      "message": "Video is 901 s (15 min 1 s) — over TikTok's 600 s (10 min) limit. TikTok video envelope: max duration 10 min; max size 1 GB; containers .mp4, .mov; codec h264; modes shorts. Refused rather than truncated."
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 43200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "TikTok has no long-form path (modes: shorts). TikTok video envelope: max duration 10 min; max size 1 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 43201,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "TikTok has no long-form path (modes: shorts). TikTok video envelope: max duration 10 min; max size 1 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 30,
+      "size_bytes": 1073741824,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 30,
+      "size_bytes": 1073741825,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": "video_envelope.size",
+      "severity": "error",
+      "message": "File is 1 GB — over TikTok's 1 GB limit. TikTok video envelope: max duration 10 min; max size 1 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 608,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 100,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 2400,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "tiktok",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 239,
+      "height": 100,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "threads",
+      "duration_s": null,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "threads",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "threads",
+      "duration_s": 60,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "threads",
+      "duration_s": 60.5,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "threads",
+      "duration_s": 61,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "threads",
+      "duration_s": 90,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "threads",
+      "duration_s": 140,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "threads",
+      "duration_s": 141,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "threads",
+      "duration_s": 180,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Threads has no long-form path (modes: shorts). Threads video envelope: max duration 300 s; max size 1 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "threads",
+      "duration_s": 200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "threads",
+      "duration_s": 600,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Threads has no long-form path (modes: shorts). Threads video envelope: max duration 300 s; max size 1 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "threads",
+      "duration_s": 901,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": "video_envelope.duration",
+      "severity": "error",
+      "message": "Video is 901 s (15 min 1 s) — over Threads's 300 s (5 min) limit. Threads video envelope: max duration 300 s; max size 1 GB; containers .mp4, .mov; codec h264; modes shorts. Refused rather than truncated."
+    },
+    {
+      "platform": "threads",
+      "duration_s": 43200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Threads has no long-form path (modes: shorts). Threads video envelope: max duration 300 s; max size 1 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "threads",
+      "duration_s": 43201,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Threads has no long-form path (modes: shorts). Threads video envelope: max duration 300 s; max size 1 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "threads",
+      "duration_s": 30,
+      "size_bytes": 1073741824,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "threads",
+      "duration_s": 30,
+      "size_bytes": 1073741825,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": "video_envelope.size",
+      "severity": "error",
+      "message": "File is 1 GB — over Threads's 1 GB limit. Threads video envelope: max duration 300 s; max size 1 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "threads",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "threads",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 608,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "threads",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "threads",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 100,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "threads",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 2400,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "threads",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 239,
+      "height": 100,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": null,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 60,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 60.5,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 61,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 90,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 140,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 141,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 180,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Facebook Page has no long-form path (modes: shorts). Facebook Page video envelope: max duration 4 h; max size 10 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 600,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Facebook Page has no long-form path (modes: shorts). Facebook Page video envelope: max duration 4 h; max size 10 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 901,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 43200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Facebook Page has no long-form path (modes: shorts). Facebook Page video envelope: max duration 4 h; max size 10 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 43201,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Facebook Page has no long-form path (modes: shorts). Facebook Page video envelope: max duration 4 h; max size 10 GB; containers .mp4, .mov; codec h264; modes shorts."
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 30,
+      "size_bytes": 1073741824,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 30,
+      "size_bytes": 1073741825,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 608,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 100,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 2400,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "facebook",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 239,
+      "height": 100,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "rumble",
+      "duration_s": null,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 60,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 60.5,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Rumble has no shorts-form path (modes: long). Rumble video envelope: max duration unknown; max size unknown; containers .mp4, .mov; codec h264; modes long."
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 61,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Rumble has no shorts-form path (modes: long). Rumble video envelope: max duration unknown; max size unknown; containers .mp4, .mov; codec h264; modes long."
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 90,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Rumble has no shorts-form path (modes: long). Rumble video envelope: max duration unknown; max size unknown; containers .mp4, .mov; codec h264; modes long."
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 140,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 141,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 180,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 600,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 901,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 43200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 43201,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 30,
+      "size_bytes": 1073741824,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 30,
+      "size_bytes": 1073741825,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "shorts",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Rumble has no shorts-form path (modes: long). Rumble video envelope: max duration unknown; max size unknown; containers .mp4, .mov; codec h264; modes long."
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 608,
+      "height": 1080,
+      "mode": "shorts",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Rumble has no shorts-form path (modes: long). Rumble video envelope: max duration unknown; max size unknown; containers .mp4, .mov; codec h264; modes long."
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1080,
+      "mode": "shorts",
+      "code": "video_envelope.mode",
+      "severity": "error",
+      "message": "Rumble has no shorts-form path (modes: long). Rumble video envelope: max duration unknown; max size unknown; containers .mp4, .mov; codec h264; modes long."
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 100,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 2400,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "rumble",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 239,
+      "height": 100,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": null,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 60,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 60.5,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 61,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 90,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 140,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 141,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 180,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 600,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 901,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 43200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 43201,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 30,
+      "size_bytes": 1073741824,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 30,
+      "size_bytes": 1073741825,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 608,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 100,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 2400,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "bluesky",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 239,
+      "height": 100,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": null,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 60,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 60.5,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 61,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 90,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 140,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 141,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 180,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 600,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 901,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 43200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 43201,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 30,
+      "size_bytes": 1073741824,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 30,
+      "size_bytes": 1073741825,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 608,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 100,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 2400,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "messenger",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 239,
+      "height": 100,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": null,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 60,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 60.5,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 61,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 90,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 140,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 141,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 180,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 600,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 901,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 43200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 43201,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 30,
+      "size_bytes": 1073741824,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 30,
+      "size_bytes": 1073741825,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 608,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 100,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 2400,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": "myspace",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 239,
+      "height": 100,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": null,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 60,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 60.5,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": "video_envelope.duration",
+      "severity": "error",
+      "message": "Short-form is 60 s (1 min) — over YouTube's 60 s (1 min) limit. YouTube video envelope: max duration 12 h; short-form mode 60 s; max size 256 GB; short-form needs width/height ≤ 1.00 (square or vertical); containers .mp4, .mov; codec h264; modes shorts, long. Refused rather than truncated."
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 61,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": "video_envelope.duration",
+      "severity": "error",
+      "message": "Short-form is 61 s (1 min 1 s) — over YouTube's 60 s (1 min) limit. YouTube video envelope: max duration 12 h; short-form mode 60 s; max size 256 GB; short-form needs width/height ≤ 1.00 (square or vertical); containers .mp4, .mov; codec h264; modes shorts, long. Refused rather than truncated."
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 90,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "shorts",
+      "code": "video_envelope.duration",
+      "severity": "error",
+      "message": "Short-form is 90 s (1 min 30 s) — over YouTube's 60 s (1 min) limit. YouTube video envelope: max duration 12 h; short-form mode 60 s; max size 256 GB; short-form needs width/height ≤ 1.00 (square or vertical); containers .mp4, .mov; codec h264; modes shorts, long. Refused rather than truncated."
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 140,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 141,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 180,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1920,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 600,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 901,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 43200,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 43201,
+      "size_bytes": null,
+      "width": null,
+      "height": null,
+      "mode": "long",
+      "code": "video_envelope.duration",
+      "severity": "error",
+      "message": "Video is 43201 s (12 h 0 min) — over YouTube's 43200 s (12 h) limit. YouTube video envelope: max duration 12 h; short-form mode 60 s; max size 256 GB; short-form needs width/height ≤ 1.00 (square or vertical); containers .mp4, .mov; codec h264; modes shorts, long. Refused rather than truncated."
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 30,
+      "size_bytes": 1073741824,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 30,
+      "size_bytes": 1073741825,
+      "width": 1080,
+      "height": 1920,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1920,
+      "height": 1080,
+      "mode": "shorts",
+      "code": "video_envelope.aspect",
+      "severity": "error",
+      "message": "1920x1080 is aspect 1.78 — a YouTube short must be square or vertical (width/height ≤ 1.00). Publish it as long-form, or export a vertical rendition. YouTube video envelope: max duration 12 h; short-form mode 60 s; max size 256 GB; short-form needs width/height ≤ 1.00 (square or vertical); containers .mp4, .mov; codec h264; modes shorts, long."
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 608,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 1080,
+      "height": 1080,
+      "mode": "shorts",
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 100,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 2400,
+      "height": 1000,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    },
+    {
+      "platform": " YouTube ",
+      "duration_s": 30,
+      "size_bytes": null,
+      "width": 239,
+      "height": 100,
+      "mode": null,
+      "code": null,
+      "severity": null,
+      "message": null
+    }
+  ],
+  "formatting": {
+    "seconds": [
+      {
+        "value": null,
+        "text": "unknown"
+      },
+      {
+        "value": 0,
+        "text": "0 s"
+      },
+      {
+        "value": 2.5,
+        "text": "2 s"
+      },
+      {
+        "value": 3.5,
+        "text": "4 s"
+      },
+      {
+        "value": 59.4,
+        "text": "59 s"
+      },
+      {
+        "value": 59.5,
+        "text": "60 s (1 min)"
+      },
+      {
+        "value": 60,
+        "text": "60 s (1 min)"
+      },
+      {
+        "value": 140,
+        "text": "140 s (2 min 20 s)"
+      },
+      {
+        "value": 599,
+        "text": "599 s (9 min 59 s)"
+      },
+      {
+        "value": 600,
+        "text": "600 s (10 min)"
+      },
+      {
+        "value": 3599,
+        "text": "3599 s (59 min 59 s)"
+      },
+      {
+        "value": 3600,
+        "text": "3600 s (1 h)"
+      },
+      {
+        "value": 3601,
+        "text": "3601 s (1 h 0 min)"
+      },
+      {
+        "value": 43200,
+        "text": "43200 s (12 h)"
+      }
+    ],
+    "bytes": [
+      {
+        "value": null,
+        "text": "unknown"
+      },
+      {
+        "value": 0,
+        "text": "0 B"
+      },
+      {
+        "value": 1023,
+        "text": "1023 B"
+      },
+      {
+        "value": 1024,
+        "text": "1 KB"
+      },
+      {
+        "value": 536870912,
+        "text": "512 MB"
+      },
+      {
+        "value": 1073741824,
+        "text": "1 GB"
+      },
+      {
+        "value": 10737418240,
+        "text": "10 GB"
+      },
+      {
+        "value": 274877906944,
+        "text": "256 GB"
+      },
+      {
+        "value": 1099511627776,
+        "text": "1 TB"
+      }
+    ]
+  }
+}

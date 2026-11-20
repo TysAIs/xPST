@@ -1,0 +1,1609 @@
+# xPST CLI Tutorial — Complete Command-Line Guide
+
+> **In-depth tutorial for every xPST CLI command with examples.**
+>
+ xPST provides 50 top-level commands covering the entire cross-posting workflow.
+> This guide explains each one with real examples, flags, and expected output.
+
+---
+
+## Table of Contents
+
+- [Installation & First-Time Setup](#installation--first-time-setup)
+- [Setup Wizard — `xpst setup`](#setup-wizard--xpst-setup)
+- [Streamlined Connection — `xpst connect`](#streamlined-connection--xpst-connect)
+- [Authentication — `xpst auth`](#authentication--xpst-auth)
+- [Core Posting](#core-posting)
+  - [`xpst run`](#xpst-run)
+  - [`xpst watch`](#xpst-watch)
+  - [`xpst post`](#xpst-post)
+  - [`xpst preflight`](#xpst-preflight)
+  - [`xpst backfill`](#xpst-backfill)
+  - [`xpst delete`](#xpst-delete)
+- [Scheduling](#scheduling)
+  - [`xpst schedule add`](#xpst-schedule-add)
+  - [`xpst schedule list`](#xpst-schedule-list)
+  - [`xpst schedule remove`](#xpst-schedule-remove)
+  - [`xpst schedule run`](#xpst-schedule-run)
+  - [`xpst schedule install`](#xpst-schedule-install)
+- [Analytics & Observability](#analytics--observability)
+  - [`xpst analytics`](#xpst-analytics)
+  - [`xpst analytics export`](#xpst-analytics-export)
+  - [`xpst status`](#xpst-status)
+  - [`xpst health`](#xpst-health)
+  - [`xpst logs`](#xpst-logs)
+  - [`xpst diagnostics`](#xpst-diagnostics)
+  - [`xpst failures`](#xpst-failures)
+- [Configuration Management](#configuration-management)
+  - [`xpst config show`](#xpst-config-show)
+  - [`xpst config set`](#xpst-config-set)
+  - [`xpst config validate`](#xpst-config-validate)
+  - [`xpst config fix`](#xpst-config-fix)
+  - [`xpst config export` / `import`](#xpst-config-export--import)
+- [State Management](#state-management)
+  - [`xpst state export` / `import` / `backup`](#xpst-state-export--import--backup)
+- [Readiness & Providers](#readiness--providers)
+  - [`xpst readiness`](#xpst-readiness)
+  - [`xpst providers`](#xpst-providers)
+  - [`xpst capabilities`](#xpst-capabilities)
+- [Knowledge Base — `xpst kb`](#knowledge-base--xpst-kb)
+- [Surfaces](#surfaces)
+  - [`xpst app`](#xpst-app)
+  - [`xpst dashboard`](#xpst-dashboard)
+  - [`xpst mcp`](#xpst-mcp)
+- [Plugins — `xpst plugins`](#plugins--xpst-plugins)
+- [Maintenance](#maintenance)
+  - [`xpst update`](#xpst-update)
+  - [`xpst version`](#xpst-version)
+- [Exit Codes Reference](#exit-codes-reference)
+- [JSON Output Mode for Scripting](#json-output-mode-for-scripting)
+- [Dry-Run Mode](#dry-run-mode)
+
+---
+
+## Installation & First-Time Setup
+
+### Install
+
+```bash
+# Recommended: install from source with uv
+git clone https://github.com/TysAIs/xPST.git
+cd xPST
+uv venv && uv pip install -e ".[full]"
+```
+
+Or with pip:
+
+```bash
+git clone https://github.com/TysAIs/xPST.git
+cd xPST
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[full]"
+```
+
+### Verify the install
+
+```bash
+xpst version
+```
+
+Expected output:
+
+```
+xPST v0.1.0
+
+Dependencies:
+  click         8.1.7
+  rich          13.7.0
+  yt-dlp       2025.1.1
+  ...
+```
+
+### First-time setup
+
+```bash
+xpst setup       # interactive wizard
+xpst health      # test connectivity (no uploads)
+xpst run         # check for new videos and post
+```
+
+---
+
+## Setup Wizard — `xpst setup`
+
+The interactive first-time setup wizard walks you through connecting your platforms and writing `~/.xpst/config.yaml`.
+
+```bash
+xpst setup
+```
+
+The wizard will:
+1. Ask which platforms you want to configure
+2. Guide you through authentication for selected platforms
+3. Create the `~/.xpst/` directory structure
+4. Write a starter `config.yaml` with safe defaults
+5. Run a health check to verify configured connectivity
+
+The available integrations are not equally ready: YouTube, Instagram, and X
+are live-verified; TikTok is source-only; Threads and Messenger are currently
+disabled/unauthenticated. See [INSTALL.md](INSTALL.md#capability-truth-table).
+
+**Example session:**
+
+```
+Welcome to xPST setup!
+
+Which platforms would you like to connect?
+  [x] YouTube   (OAuth 2.0 — official Data API v3)
+  [x] Instagram (official Meta Graph API; instagrapi session fallback)
+  [x] X/Twitter  (cookie-based)
+  [x] TikTok    (source-only; destination pending external review)
+  [x] Threads   (opt-in; currently disabled/unauthenticated)
+
+...
+
+✅ YouTube connected
+✅ Instagram connected
+✅ X connected
+
+Setup complete for the connected platforms. Run `xpst health` to verify, then
+`xpst run` to start.
+```
+
+---
+
+## Streamlined Connection — `xpst connect`
+
+A streamlined account connection wizard, faster than the full setup.
+
+```bash
+xpst connect              # connect all platforms interactively
+xpst connect youtube       # connect YouTube only
+xpst connect instagram     # connect Instagram only
+xpst connect x             # connect X only
+xpst connect tiktok        # connect TikTok source
+xpst connect --test        # test existing connections only
+```
+
+The `connect` wizard covers `tiktok`, `youtube`, `x`, `instagram`, `threads`, and
+`messenger`.
+
+Use `--test` to verify that your existing connections are still working without going through the wizard again.
+
+**Example:**
+
+```bash
+$ xpst connect --test
+
+Testing YouTube...  ✅ OK
+Testing Instagram... ✅ OK
+Testing X...       ✅ OK
+Testing TikTok...  ✅ OK
+
+All platforms connected and responding.
+```
+
+If any connection fails, the command exits with code 3 (authentication failure).
+
+---
+
+## Authentication — `xpst auth`
+
+Authenticate with a specific platform or check auth status.
+
+```bash
+xpst auth youtube       # guide YouTube OAuth setup
+xpst auth x              # guide X cookie setup
+xpst auth instagram      # guide Instagram auth setup (Graph API or session)
+xpst auth tiktok         # guide TikTok source setup (destination pending review)
+xpst auth threads        # guide Threads setup (currently disabled)
+xpst auth status         # show auth + quota status for all platforms
+xpst auth status --refresh   # renew due/expiring tokens, then report
+xpst refresh-tokens      # renew due/expiring tokens only (cron-friendly)
+```
+
+**Truthful badges.** `xpst auth status` never reports a platform as connected
+just because a credential is stored. Each platform carries a badge derived from
+the live check that was just run, plus the timestamp of that check:
+
+| Badge | Meaning |
+|-------|---------|
+| `connected` | a passing live check proved it works right now |
+| `expiring` | still usable, but the credential's deadline is close (or has expired and xPST is refreshing it). A token xPST renews itself warns inside 24 hours; a credential **only you can renew** warns 7 days out, so there is time to act before a post fails |
+| `needs_reauth` | user action required — run `xpst connect <platform>` |
+| `source_only` | usable as a source only (TikTok download), never as an upload target |
+| `disabled` | switched off in config |
+| `unknown` | no live check ran (or it is older than the freshness window) — deliberately not green |
+
+`source_only` describes the *route*, not the platform name: TikTok configured
+with `publish_mode: browser` posts through the logged-in TikTok Studio web
+session, so its credential is reported as `auth_mode: session` and it badges
+`connected`/`needs_reauth` from that session's live probe. The download side
+keeps its own separate `source_only` verdict on the `source` role.
+
+An automatic refresh path keeps the badge green for tokens xPST renews itself
+(YouTube refresh tokens, Threads/Meta long-lived tokens); a failed refresh is
+recorded and downgrades the badge to `needs_reauth` instead of promising a
+retry that is not happening.
+
+**Credential-health watchdog.** `xpst auth status` (and the same payload over
+MCP and the dashboard) also carries `credential_health`: a forward-looking
+report naming the credentials that will die before anyone notices, how long is
+left, and the exact command that fixes each one — `needs_attention` (act now),
+`unverifiable` (the provider reports no expiry, so xPST says it cannot predict
+it instead of guessing), and `not_applicable` (disabled, source-only, or not an
+account surface). It is derived from the badges above — no extra probing, and it
+never invents a deadline.
+
+**Instagram auth modes.** The recommended/primary mode is the official Meta Graph
+API (`auth_mode: "graph_api"`, using a `graph_access_token` and `graph_ig_user_id`).
+An instagrapi session (`auth_mode: "session"`) is available as a fallback; it uses
+the unofficial private API and carries account-ban risk.
+
+**TikTok auth.** TikTok source authentication/configuration uses yt-dlp and
+optional browser cookies. On the Content Posting API route, destination
+publishing is pending external developer review and approved app credentials;
+do not treat that destination path as ready. With `publish_mode: browser`
+(or `browser_only`) publishing goes through the logged-in TikTok Studio web
+session instead, and the platform's credential is reported as
+`auth_mode: session` — its provider row, `video_destination` role and badge all
+describe that session (and say `needs_reauth` when it is logged out).
+
+### `xpst auth status`
+
+Shows a table of platform authentication and quota status:
+
+```bash
+$ xpst auth status
+```
+
+```
+xPST Authentication Status
+
+Credential Storage: OS Keychain
+Stored Credentials: 3
+  🔑 youtube_token
+  🔑 x_cookies
+  🔑 instagram_session
+
+Platform Status:
+| Platform  | Badge                   | Quota (Daily) | Remaining | Details      |
+|-----------|-------------------------|---------------|-----------|--------------|
+| YouTube   | Connected (checked 8s ago) |    5       |     5     | Keyring      |
+| X/Twitter | Connected (checked 8s ago) |    5       |     5     | Keyring      |
+| Instagram | Needs re-auth           |       5       |     5     | Keyring — Session expired - run 'xpst auth instagram' |
+| TikTok    | Source only             |       5       |     5     | source_only  |
+```
+
+With `--json`:
+
+```bash
+$ xpst auth status --json
+```
+
+```json
+{
+  "credential_storage": "OS Keychain",
+  "stored_credentials": ["youtube_token", "x_cookies", "instagram_session"],
+  "platforms": {
+    "youtube": { "authenticated": true, "quota_remaining": 5 },
+    "x": { "authenticated": true, "quota_remaining": 5 },
+    "instagram": { "authenticated": true, "quota_remaining": 5 }
+  }
+}
+```
+
+---
+
+## Core Posting
+
+### `xpst run`
+
+The one-shot command: check a source for new videos and cross-post them to all connected destinations.
+
+```bash
+xpst run                          # default source: TikTok → all connected destinations
+xpst run --source tiktok           # explicit TikTok source
+xpst run --source local            # post from local files
+xpst run --source all              # bidirectional: ALL sources → ALL destinations
+xpst run --bidirectional           # same as --source all
+xpst run --dry-run                # show what would happen without uploading
+xpst run --json                   # machine-readable output
+```
+
+**Source choices:** `tiktok`, `youtube`, `x`, `instagram`, `local`, `all`
+
+**Destinations:** xPST can target YouTube Shorts, Instagram Reels, X/Twitter,
+TikTok, and Threads in configuration, but it posts only to destinations that
+are configured and currently available. The current live status is in
+[INSTALL.md](INSTALL.md#capability-truth-table).
+
+#### Example: default run
+
+The output below is illustrative; it does not assert that every listed platform
+is live or configured in your environment.
+
+```bash
+$ xpst run
+```
+
+```
+xPST - Checking tiktok for new videos...
+
+abc123 - ✅ Success
+Caption: My latest video about cooking...
+| Platform  | Status | URL/Error                              |
+|-----------|--------|----------------------------------------|
+| YouTube   | OK     | https://youtube.com/shorts/abc123      |
+| Instagram | OK     | https://instagram.com/reel/abc123      |
+| X         | OK     | https://x.com/i/status/123456          |
+```
+
+#### Example: dry run
+
+```bash
+$ xpst run --dry-run
+```
+
+```
+Dry run — would post:
+  abc123: My latest video about cooking... → youtube, instagram, x, threads
+  def456: Another great video... → youtube, instagram, x, threads
+```
+
+(With a non-TikTok source, `tiktok` can appear as a destination in the provider
+registry, but it is currently source-only in the live capability state. The list
+must be interpreted together with [INSTALL.md](INSTALL.md#capability-truth-table).)
+
+#### Example: bidirectional
+
+The following is an illustrative shape of bidirectional output, not a claim that
+all listed destinations are live or configured:
+
+```bash
+$ xpst run --source all
+```
+
+```
+xPST - Bidirectional cross-posting check...
+
+In bidirectional mode, xPST monitors configured sources and fans each new video
+out to destinations that are configured and available.
+
+The engine deduplicates across platforms so content is not double-posted.
+```
+
+#### JSON output
+
+```bash
+$ xpst run --json | jq '.results[0]'
+```
+
+```json
+{
+  "video_id": "abc123",
+  "caption": "My latest video about cooking...",
+  "all_success": true,
+  "partial_success": false,
+  "platforms": {
+    "youtube": { "success": true, "post_url": "https://...", "post_id": "abc123" },
+    "instagram": { "success": true, "post_url": "https://...", "post_id": "abc123" },
+    "x": { "success": true, "post_url": "https://...", "post_id": "123456" }
+  }
+}
+```
+
+---
+
+### `xpst watch`
+
+Continuous monitoring mode: checks for new videos on an interval and runs until you press Ctrl+C.
+
+```bash
+xpst watch                        # default: TikTok, every 900s (from config)
+xpst watch --interval 300          # check every 5 minutes
+xpst watch --source local          # watch local files
+xpst watch --source all            # bidirectional watch (all sources)
+xpst watch --bidirectional         # same as --source all
+```
+
+**Example:**
+
+```bash
+$ xpst watch --interval 300 --source local
+```
+
+```
+xPST - Source: local watching every 300s (Ctrl+C to stop)
+
+abc123 - ✅ Success
+...
+
+Next check in 300s...
+Next check in 300s...
+^C
+Stopped by user
+```
+
+Features during watch:
+- **Crash recovery** — checks for partially-completed uploads on startup and queues retries
+- **Catch-up** — if your machine was asleep, it runs a catch-up cycle
+- **Jittered intervals** — anti-bot timing adds randomness to the interval (bidirectional mode)
+
+---
+
+### `xpst post`
+
+Manually post a local video file, a carousel (multiple `--video` flags), or a text post
+(`--text "..."`, or `--caption` with `--content-type text`). `--content-type` states what
+the post is in the canonical vocabulary (`video`, `image`, `carousel`, `text`, `thread`);
+omit it and the media decides (one file = video, several = carousel). A text post carries no
+media at all: no file to encode and no ffmpeg needed.
+
+A content type the chosen destination cannot publish is refused **before anything is
+uploaded**, with the reason in `blockers` and exit code 1 — never reported as a success. Run
+`xpst capabilities` to see what each destination can actually publish.
+
+`--dry-run` answers the same question the live run would face, not just the request shape:
+`ready`/`blockers` come from the canonical preflight, so a destination that live would
+refuse (disabled in configuration, credentials missing, quota exhausted) already blocks
+the dry run with a message naming it. `"ready": true` never appears beside a non-empty
+`blockers` list, so a gate can read the field and trust it: ready means nothing blocks
+this request. A pre-upload refusal (a content type the destination cannot publish, a
+caption past its limit) still exits `1` in the same invocation; a per-destination blocker
+is reported in `blockers` while the run itself is not aborted.
+
+```bash
+# Single video to the format route ∩ connected accounts (never an implied "all")
+xpst post -v ./my-video.mp4 -c "My awesome video!"
+
+# Be explicit about every connected account that accepts this format
+xpst post -v ./my-video.mp4 -c "My awesome video!" --all
+
+# Single video to specific platforms
+xpst post -v ./my-video.mp4 -c "Check this out!" -p youtube,x
+
+# Carousel (multiple files = carousel post)
+xpst post -v ./img1.jpg -v ./img2.jpg -v ./img3.jpg -c "Swipe to see more!" -p instagram,x
+
+# Different caption per destination (override wins for that destination only)
+xpst post -v ./my-video.mp4 -c "Full story in the video!" -p youtube,x \
+  --caption-for x="Short version — full story on YouTube."
+```
+
+**One length verdict per destination.** A caption longer than a destination's
+limit is refused with the destination and the number named — xPST never
+truncates a post into something you did not write — and the refusal is the same
+in `--dry-run`, in the live run, and in the uploader itself. `--caption-for`
+is the way through: the override is what gets validated for that destination, so
+a YouTube-length body plus a short X copy publishes to both.
+
+```bash
+# Dry run
+xpst post -v ./my-video.mp4 -c "Test" --dry-run
+
+# Ask for a private/unlisted upload (YouTube and TikTok Direct Post honour it)
+xpst post -v ./my-video.mp4 -c "Test" -p youtube --visibility unlisted
+xpst post -v ./my-video.mp4 -c "Test" -p youtube --visibility private
+xpst post -v ./my-video.mp4 -c "Test" -p tiktok --visibility private
+
+# State the modality explicitly
+xpst post -v ./clip.mp4 -c "Test" --content-type video -p youtube
+
+# Text post: no media pipeline, one API call per destination
+xpst post --text "Shipping the text-post path today." -p x,threads
+
+# A text post to a destination with no text path is refused, and it says why
+xpst post --text "hello world" -p youtube
+
+# JSON output
+xpst post -v ./my-video.mp4 -c "Test" --json
+```
+
+**Visibility.** `--visibility public|unlisted|private` asks for an upload-time
+visibility. Omit it for the destination's own default (public). YouTube honours
+every level by setting the upload's `status.privacyStatus`; TikTok's Content
+Posting API honours `private` (as `SELF_ONLY`) and `public` (as
+`PUBLIC_TO_EVERYONE`). An invalid value is rejected by the CLI parser (exit `2`)
+— it is never silently coerced to `public`.
+
+What a destination can do is decided in ONE registry (`xpst.visibility`), and the
+plan payload states the level each destination would use — so "post it privately"
+is a fact you can read, not a scope decision you have to assume:
+
+- a destination that **cannot** honour the request on the route that would run
+  is **refused**: nothing is uploaded there, the plan carries
+  `VISIBILITY_UNAVAILABLE`, and the destination's state is
+  `refused_visibility`. `xpst post --visibility private -p tiktok` refuses when
+  TikTok is configured for its browser route (`publish_mode: browser`), because
+  TikTok Studio's composer decides the audience itself. Direct Post
+  (`publish_mode: auto`) asks `creator_info/query` and refuses — never
+  downgrades — if the client may not use the requested level.
+- a destination with **no such mode at all** (X, Instagram, Threads, Facebook,
+  Bluesky) prints an advisory naming it as PUBLIC and still publishes. "Post
+  privately to YouTube and X" is not a thing X can do, and the plan says so.
+
+This is the supported way to post something you are not ready to publish, instead
+of posting publicly and unpublishing afterwards.
+
+**Example:**
+
+```bash
+$ xpst post -v ./cooking-short.mp4 -c "3-minute pasta recipe! 🍝" -p youtube,instagram
+```
+
+```
+Posting to: youtube, instagram
+
+abc123 - ✅ Success
+Caption: 3-minute pasta recipe! 🍝
+| Platform  | Status | URL                                    |
+|-----------|--------|----------------------------------------|
+| YouTube   | OK     | https://youtube.com/shorts/abc123      |
+| Instagram | OK     | https://instagram.com/reel/abc123      |
+```
+
+**Carousel example:**
+
+```bash
+$ xpst post -v ./slide1.jpg -v ./slide2.jpg -v ./slide3.jpg -c "Thread 🧵" -p x
+```
+
+```
+Posting carousel (3 items) to: x
+
+carousel123 - ✅ Success
+```
+
+**Targets are opt-in and never implied.** `-p/--platforms` takes an explicit set;
+`--all` explicitly means every connected account that accepts this format; with
+neither, the target set is the **format route ∩ connected accounts** — a
+destination is never added just because an account exists. A destination you
+name that is not connected is reported as `skipped_unconnected` with the
+`xpst connect` command: visible, and **not** a failure. With no connected
+account at all, the run refuses with one actionable error naming that command.
+
+**Exit status.** `xpst post` exits non-zero when nothing was published, so
+`xpst post … && echo ok` (and every cron job or agent wrapper that branches on
+the exit status) cannot read a failed post as success:
+
+| Exit | When |
+|------|------|
+| `0` | At least one destination published — **a partial success is a success** — or every destination was already posted (nothing to do) |
+| `4` | Every attempted destination failed for quota / rate-limit reasons |
+| `3` | Every attempted destination failed to authenticate |
+| `10` | No destination was attempted at all, or every attempted destination is unavailable or refused the media (e.g. `THREADS_NEEDS_URL`) |
+| `1` | Every attempted destination failed for any other reason, or for a mix of reasons |
+| `0` with `status: "skipped"` | Every named destination is unconnected — nothing was attempted, nothing failed |
+
+The `--json` payload carries the legacy keys (`all_success`, `partial_success`,
+and the per-platform `success` / `outcome` / `error` fields) plus the canonical
+route outcome: `destinations` (one `state` per destination: `posted`,
+`skipped_unconnected`, `unsupported_format`, `refused_by_community`, `failed`),
+`skipped_unconnected` and `status`. A non-zero run also carries `exit_code`, so
+a JSON caller never has to guess.
+
+```bash
+xpst post -v ./clip.mp4 -c "…" -p youtube,x --json
+if [ $? -ne 0 ]; then echo "post failed (see per-platform error)"; fi
+```
+
+---
+
+### `xpst preflight`
+
+Resolve and print the per-destination plan **before** anything is published.
+It makes no network call and uploads nothing. The output is the same plan object
+`xpst post` and `xpst schedule add` consume, so what you see is what will run.
+
+```bash
+# Auto-classify the format, target the format route ∩ connected accounts
+xpst preflight ./clip.mp4 --caption "Launch day"
+
+# Plan for an explicit destination and include the rendition decision
+xpst preflight ./clip.mp4 --caption "Launch day" -p youtube,x --transform
+
+# Plan a text post; --all is explicit
+xpst preflight --text "Shipping today" --all --json
+```
+
+Each destination is reported with one canonical state: `posted` (will publish),
+`skipped_unconnected` (with the `xpst connect <platform>` command),
+`unsupported_format` (with that destination's envelope: duration, container,
+codec, byte and caption ceilings) or `failed`. A caption or video outside the
+envelope is **refused, not truncated**, and the message carries the envelope so
+you can fix it once.
+
+Exit codes: `0` when at least one destination will publish, `2` when no
+destination resolved (nothing connected / nothing accepts the format — the
+error names the connect command), `1` when the plan resolved but nothing will
+publish.
+
+---
+
+### `xpst backfill`
+
+Retry failed or incomplete posts from history. Scans the state for videos that didn't make it to all platforms and re-attempts them.
+
+```bash
+xpst backfill                     # retry all incomplete posts (limit 10)
+xpst backfill --platforms youtube   # only backfill YouTube
+xpst backfill --limit 50           # increase the limit
+xpst backfill --dry-run           # show what would be backfilled
+xpst backfill --json
+```
+
+**Example dry run:**
+
+```bash
+$ xpst backfill --dry-run
+```
+
+```
+Dry run — 3 videos need backfilling:
+  abc123 → instagram
+  def456 → youtube, x
+  ghi789 → x
+```
+
+---
+
+### `xpst delete`
+
+Delete a posted video from one or all platforms.
+
+```bash
+xpst delete abc123                          # delete from all platforms
+xpst delete abc123 --platform youtube         # delete from YouTube only
+xpst delete abc123 -p instagram,x             # delete from Instagram and X
+xpst delete abc123 --yes                     # skip confirmation
+xpst delete abc123 --json
+```
+
+**VIDEO_ID accepts three forms.** xPST's internal id, the *platform-side* post
+id as the platform shows it, or the full post URL — the latter two are resolved
+back to xPST's record through stored state:
+
+```bash
+xpst delete RZ6i-0HM5dM -p youtube --yes                       # platform post id
+xpst delete https://youtube.com/shorts/RZ6i-0HM5dM -p youtube --yes  # full URL
+```
+
+An id or URL that does not match any recorded post keeps the truthful
+`unsupported` / not-found outcome — it never reports a deletion that did not
+happen. Use `--soft --visibility unlisted|private` to unpublish (reversibly)
+instead of hard-deleting, YouTube only.
+
+**Example:**
+
+```bash
+$ xpst delete abc123 --platform youtube
+```
+
+```
+Delete abc123 from youtube? [y/N]: y
+  ✓ Deleted from youtube
+```
+
+---
+
+## Scheduling
+
+### `xpst schedule add`
+
+Schedule a post for later publishing.
+
+```bash
+xpst schedule add video.mp4 --caption 'My video' --at '2026-06-20 10:00'
+xpst schedule add video.mp4 -c 'My video' --at '2026-06-20T10:00:00' -p youtube,instagram
+xpst schedule add video.mp4 -c 'Daily update' --at '2026-06-20 10:00' --repeat daily
+xpst schedule add video.mp4 -c 'Long copy' --caption-for x='short copy' --at '2026-06-20 10:00'
+xpst schedule add --text -c 'A text-only post' --at '2026-06-20 10:00' -p x
+```
+
+**Text-only posts:** pass `--text` and no FILE. The caption IS the post; the
+entry is stored as `content_type=text` (no media path) and fires through the
+text route — never a media encoder.
+
+**Time formats accepted:** `YYYY-MM-DD HH:MM`, `YYYY-MM-DDTHH:MM:SS`, `YYYY-MM-DD HH:MM:SS`
+
+**Repeat rules:** `none`, `daily`, `weekly`, `monthly`
+
+**Per-destination copy:** `--caption-for PLATFORM=TEXT` (repeatable, same as
+`xpst post`) is stored with the entry and honoured when the schedule fires —
+each destination gets its own copy instead of the shared caption everywhere.
+
+**Example:**
+
+```bash
+$ xpst schedule add ./promo.mp4 --caption "Big announcement!" --at '2026-06-25 14:00' -p youtube,x
+```
+
+```
+✓ Scheduled post
+  ID:        sched_a1b2c3
+  File:      /path/to/promo.mp4
+  Caption:   Big announcement!
+  Time:      2026-06-25 14:00
+  Platforms: youtube, x
+```
+
+---
+
+### `xpst schedule list`
+
+List all scheduled posts with their status.
+
+```bash
+xpst schedule list
+xpst schedule list --json
+```
+
+**Example:**
+
+```bash
+$ xpst schedule list
+```
+
+```
+Scheduled Posts
+| ID          | File       | Caption              | Scheduled       | Platforms | Status   |
+|-------------|------------|----------------------|-----------------|-----------|----------|
+| sched_a1b2c3| promo.mp4  | Big announcement!   | 2026-06-25 14:00| youtube,x | pending  |
+| sched_d4e5f6| daily.mp4  | Daily update        | 2026-06-20 10:00| all       | completed|
+| sched_g7h8i9| failed.mp4 | Oops                | 2026-06-18 09:00| instagram | failed    |
+```
+
+---
+
+### `xpst schedule remove`
+
+Remove a scheduled post by ID.
+
+```bash
+xpst schedule remove sched_a1b2c3
+xpst schedule remove sched_a1b2c3 --json
+```
+
+---
+
+### `xpst schedule run`
+
+Process all due scheduled posts. Typically called by cron or the OS scheduler, but can be run manually.
+
+```bash
+xpst schedule run                 # process all due posts
+xpst schedule run --dry-run       # show what would be posted
+xpst schedule run --json
+```
+
+**Example:**
+
+```bash
+$ xpst schedule run
+```
+
+```
+Found 2 due post(s)
+  ✓ sched_a1b2c3: posted successfully
+  ⚠ sched_g7h8i9: partial — x: rate limit exceeded
+
+Processed 2 scheduled post(s)
+```
+
+---
+
+### `xpst schedule install`
+
+Install an OS-level scheduler to run `xpst schedule run` periodically.
+
+```bash
+xpst schedule install                      # install (default: every 15 min)
+xpst schedule install --interval 30        # every 30 minutes
+xpst schedule install --remove            # uninstall the scheduler
+```
+
+- **macOS:** Creates a LaunchAgent at `~/Library/LaunchAgents/com.xpst.schedule.plist`
+- **Linux:** Adds a crontab entry
+- **Windows:** Creates a Scheduled Task named `XpstScheduleRun`
+
+**Example on macOS:**
+
+```bash
+$ xpst schedule install --interval 15
+```
+
+```
+✓ LaunchAgent installed: ~/Library/LaunchAgents/com.xpst.schedule.plist
+  Runs every 15 minutes
+  Logs: ~/.xpst/logs/launchagent.log
+  Uninstall: xpst schedule install --remove
+```
+
+---
+
+## Analytics & Observability
+
+### `xpst analytics`
+
+Show cross-platform engagement metrics (views, likes, comments, shares) for all your cross-posted videos.
+
+```bash
+xpst analytics                    # show summary for all platforms
+xpst analytics -p youtube,x        # specific platforms only
+xpst analytics --refresh           # force refresh (ignore cache)
+xpst analytics --live              # force a live provider round-trip now (MCP live=true)
+xpst analytics --recorded          # recorded snapshots only; zero network calls (MCP live=false)
+xpst analytics --json
+```
+
+**Example:**
+
+```bash
+$ xpst analytics
+```
+
+```
+xPST - Cross-Platform Analytics
+
+Fetching analytics for 47 posts across 3 platforms...
+
+Platform Analytics
+| Platform  | Posts | Views   | Likes  | Comments | Shares |
+|-----------|-------|---------|---------|----------|---------|
+| YouTube   |   20  |  12,345 |  1,234  |    156    |    -    |
+| Instagram |   15  |   8,901 |ibu89    |     89    |    45   |
+| X         |   12  |   5,678 |  567     | 78 (replies)| 234 (RTs)|
+| **TOTAL** | **47** |**26,924**|**2,890**|  **323**  | **279**|
+
+Top Posts by Views:
+| # | Platform | Post ID     | Views  | Likes | Comments |
+|---|----------|-------------|---------|-------|----------|
+| 1 | YouTube  | abc123...   | 5,432   | 5432 |
+```
+
+---
+
+### `xpst analytics export`
+
+Export analytics data to a JSON or CSV file.
+
+```bash
+xpst analytics export -o ./analytics.json
+xpst analytics export -o ./analytics.csv --format csv
+xpst analytics export -o ./data.json -p youtube --refresh
+```
+
+---
+
+### `xpst status`
+
+Show cross-posting statistics and overall health status.
+
+```bash
+xpst status
+xpst status --json
+```
+
+Shows: total videos posted, per-platform breakdown, quota remaining, last check time, and any issues.
+
+---
+
+### `xpst health`
+
+Test connectivity to all platforms and sources. **No uploads are made.**
+
+```bash
+xpst health
+xpst health --json
+```
+
+**Example:**
+
+```bash
+$ xpst health
+```
+
+```
+xPST Health Check
+
+YouTube:       ✅ OK (authenticated, quota: 5/5)
+Instagram:    ✅ OK (authenticated, quota: 5/5)
+X:            ✅ OK (authenticated, quota: 5/5)
+TikTok:       ✅ OK (authenticated — source + Content Posting API)
+Threads:      ✅ OK (authenticated, quota: 5/5)
+
+All platforms healthy.
+```
+
+If any platform fails, the exit code is `10` (platform unavailable).
+
+---
+
+### `xpst logs`
+
+View recent log entries (last 50 lines by default).
+
+```bash
+xpst logs
+xpst logs --json
+```
+
+---
+
+### `xpst diagnostics`
+
+Export a redacted local diagnostics bundle as a zip file — useful for filing bug reports.
+
+```bash
+xpst diagnostics                       # creates a timestamped zip
+xpst diagnostics -o ./report.zip       # specify output path
+xpst diagnostics --log-lines 500      # include more log lines
+```
+
+```
+Diagnostics bundle written: ~/.xpst/diagnostics-20260619-143022.zip
+Review diagnostics.json before sharing if logs may contain private details.
+```
+
+---
+
+### `xpst failures`
+
+Inspect and retry failed uploads from the dead-letter queue.
+
+```bash
+xpst failures list                     # list all failed uploads
+xpst failures list --json
+xpst failures retry abc123 --platform x  # retry a specific failure
+```
+
+**Example:**
+
+```bash
+$ xpst failures list
+```
+
+```
+Failed Uploads (dead-letter queue)
+| Video   | Platform  | Error                        | Count |
+|---------|-----------|------------------------------|-------|
+| abc123  | x         | Rate limit exceeded           |   3   |
+| def456  | instagram | Session expired, re-auth needed|  1   |
+
+Retry one with: xpst failures retry <video_id> --platform <name>
+```
+
+```bash
+$ xpst failures retry abc123 --platform x
+```
+
+```
+Retrying abc123 on x from abc123_source.mp4...
+Retry succeeded: https://x.com/i/status/123456
+```
+
+---
+
+## Configuration Management
+
+### `xpst config show`
+
+Display the current configuration as YAML. Sensitive values (passwords, tokens, secrets) are masked by default.
+
+```bash
+xpst config show
+xpst config show --raw         # show raw values (no masking)
+xpst config show --json
+xpst config show --file ~/work/other-config.yaml   # read a specific config file
+```
+
+`--file` outranks the root `--config` and the default profile. A file that does not
+exist is a config error (exit `2`) reported as `CONFIG_FILE_NOT_FOUND` under `--json`,
+never a silent read of the default profile.
+
+---
+
+### `xpst config set`
+
+Set a configuration value using dotted keys. Supports booleans, integers, floats, and strings.
+
+```bash
+xpst config set accounts.youtube.enabled true
+xpst config set rate_limits.youtube 10
+xpst config set monitoring.log_level DEBUG
+xpst config set schedule.check_interval 600
+```
+
+```
+✓ Set rate_limits.youtube = 10
+```
+
+---
+
+### `xpst config validate`
+
+Validate configuration for errors. Checks required fields, path existence, and platform config validity.
+
+```bash
+xpst config validate
+xpst config validate --json
+xpst config validate --file ~/work/other-config.yaml
+```
+
+Exit code `0` if valid, `2` if invalid (config error).
+
+**Example:**
+
+```bash
+$ xpst config validate
+```
+
+```
+Configuration Validation
+| Check                           | Status | Details                    |
+|--------------------------------|---------|---------------------------|
+| Config file loaded             |  PASS   | OK                        |
+| Config file exists             |  PASS   | ~/.xpst/config.yaml       |
+| Download directory accessible  |  PASS   | ~/.xpst/downloads/other   |
+| YouTube credentials            |  PASS   | ~/.xpst/credentials/...   |
+| Instagram credentials          |  FAIL   | session not configured     |
+| YouTube rate limit             |  PASS   | 5                         |
+
+5 of 6 checks passed ✓
+```
+
+---
+
+### `xpst config fix`
+
+Detect and auto-fix common configuration issues: missing credentials directory, stale paths, invalid ports, missing required fields.
+
+```bash
+xpst config fix
+xpst config fix --yes          # apply fixes without confirmation
+xpst config fix --json
+```
+
+---
+
+### `xpst config export` / `import`
+
+Export and import configuration to/from files.
+
+```bash
+# Export (masked by default)
+xpst config export ./my-config-backup.yaml
+xpst config export ./my-config-backup.yaml --raw   # unmasked
+
+# Import (merge by default)
+xpst config import ./my-config.yaml
+xpst config import ./my-config.yaml --replace       # replace entirely
+xpst config import ./my-config.yaml --yes            # skip confirmation
+xpst config import ./my-config.yaml --strict         # fail on warnings
+```
+
+Import shows a diff of changes before applying:
+
+```
+Added keys:
+  + rate_limits.tiktok
+Changed values:
+  ~ schedule.check_interval: 900 → 600
+
+Apply these changes? (y/n): y
+✓ Config merged from ./my-config.yaml
+```
+
+---
+
+## State Management
+
+State (`~/.xpst/state.json`) is the single source of truth for what has been posted. Losing it means the next watch cycle re-posts the recent catalog publicly. These commands make it durable.
+
+### `xpst state export` / `import` / `backup`
+
+```bash
+# Export state to a file (validated copy)
+xpst state export ./state-backup.json
+
+# Import state from a file (current state is backed up first)
+xpst state import ~/state-from-other-machine.json
+xpst state import ~/state.json --yes    # skip confirmation
+
+# Snapshot state with rotation (keeps last 10 by default)
+xpst state backup
+xpst state backup --keep 20             # retain 20 backups
+```
+
+**Example:**
+
+```bash
+$ xpst state export ./state-backup.json
+Exported ~/.xpst/state.json -> ./state-backup.json
+
+$ xpst state import ./state-backup.json
+Current state backed up to state.json.pre-import-20260619-143022
+Imported 47 posted-video records. Review with `xpst status` before the next run.
+```
+
+---
+
+## Readiness & Providers
+
+### `xpst readiness`
+
+Show first-run readiness and recommended next actions. Useful after a fresh install or after changing config.
+
+```bash
+xpst readiness
+xpst readiness --fix        # create missing local folders and save safe defaults
+xpst readiness --json
+```
+
+---
+
+### `xpst providers`
+
+Show the supported source and destination provider catalog with capabilities.
+
+```bash
+xpst providers
+xpst providers --json
+```
+
+**Example:**
+
+```bash
+$ xpst providers
+```
+
+```
+Sources (where xPST pulls from):
+| Provider   | Type     | Capabilities              |
+|------------|----------|--------------------------|
+| TikTok     | download | HD downloads, cookies      |
+| YouTube    | download| Channel/video downloads     |
+| Instagram  | download| Session-based listing       |
+| X          | download| yt-dlp with twikit metadata|
+| Local      | files    | Folders, videos, carousels  |
+
+Destinations (where xPST posts):
+| Provider   | API type                          | Auth method           |
+|------------|-----------------------------------|----------------------|
+| YouTube    | Data API v3 (official)            | OAuth 2.0            |
+| Instagram  | Meta Graph API (official, primary); instagrapi session (fallback) | OAuth token / Session |
+| X          | twikit (unofficial)               | Cookies              |
+| TikTok     | Source-only; destination pending external review | yt-dlp source path |
+| Threads    | Disabled / unauthenticated; opt-in destination | OAuth 2.0 (when enabled) |
+```
+
+> TikTok is currently source-only. Destination publishing awaits external
+> developer review and approved app credentials. Threads is currently disabled
+> and unauthenticated; provider entries document code paths, not readiness.
+
+---
+
+### `xpst capabilities`
+
+Show what xPST can publish, per destination: the content types each destination declares
+and the ones it can actually publish. This is the document a human reads and the one an
+agent plans against — it comes from a single source (`xpst.content`), the same one served
+by the MCP tool `xpst_capabilities` and `GET /api/capabilities`.
+
+A destination never declares a content type it cannot post, so anything listed under
+`implemented` has real code behind it (and the test suite fails if that stops being true).
+
+```bash
+xpst capabilities
+xpst capabilities --json
+```
+
+**Example:**
+
+```bash
+$ xpst capabilities
+```
+
+```
+What xPST can publish
+Vocabulary: video, image, carousel, text, thread
+
+| Destination            | Declared | Implemented | Notes |
+|------------------------|----------|-------------|-------|
+| YouTube (youtube)      | video  | video       | two modes: Shorts (≤60 s, square-or-vertical) or long-form (resumable upload, 12 h); `--shorts/--long` or derived from the probe; ambiguous is refused |
+| X (x)                  | video, carousel, text | video, carousel, text | carousel is a tweet thread, one media per tweet; text is one post (280 chars, no media); video over the account's 140 s cap is refused |
+| Instagram Reels (instagram) | video, carousel | video, carousel | native album upload (2-10 items) |
+| Threads (threads)      | video, text | video, text | video needs a public URL; text is a media_type TEXT container (500 chars) |
+| Rumble (rumble)        | video  | video       | long-form; integration-uncertain (partner-gated API): API key → upload, otherwise a manual handoff |
+```
+
+The JSON form also carries `publish_routes` (the publishing path per content type) and
+`declared_but_unimplemented` (empty — any entry there would be a false capability).
+
+---
+
+## Knowledge Base — `xpst kb`
+
+The knowledge base ingests your videos, transcribes them, extracts cited knowledge "nuggets," embeds them, and stores them locally for semantic search.
+
+> **Requires the `knowledge` extra:** `pip install "xpst[knowledge]"`
+
+### `xpst kb add`
+
+Ingest a local file or URL: transcribe, extract cited nuggets, embed, and store.
+
+```bash
+xpst kb add ./my-video.mp4
+xpst kb add https://youtube.com/watch?v=abc123
+xpst kb add ./my-video.mp4 --workspace my-project
+```
+
+### `xpst kb query`
+
+Semantic search over your stored content. Returns cited nuggets with provenance and similarity scores.
+
+```bash
+xpst kb query "cooking techniques"
+xpst kb query "what did I say about marketing?" --limit 10
+xpst kb query "Pasta recipes" --json
+```
+
+Queries are embedded and vector-searched against the store, with an automatic substring-match fallback when embeddings are unavailable. Every hit carries provenance (source URL, timestamps) and a similarity score.
+
+### `xpst kb organize`
+
+Discover knowledge areas, tag difficulty, and assign nuggets to areas.
+
+```bash
+xpst kb organize
+xpst kb organize --threshold 0.75
+xpst kb organize --workspace my-project
+```
+
+### `xpst kb areas`
+
+List discovered knowledge areas in course order (beginner → advanced).
+
+```bash
+xpst kb areas
+```
+
+### `xpst kb course`
+
+Emit the organized, cited outline as a course.
+
+```bash
+xpst kb course
+```
+
+### `xpst kb doctor`
+
+Read-only health check of the knowledge workspace.
+
+```bash
+xpst kb doctor
+```
+
+### `xpst kb reembed`
+
+Re-embed all nuggets with the currently configured embedding model (useful after model changes).
+
+```bash
+xpst kb reembed
+xpst kb reembed --force
+```
+
+### `xpst kb migrate-store`
+
+Migrate the store format (run after upgrading xPST if the store schema changed).
+
+```bash
+xpst kb migrate-store
+```
+
+---
+
+## Surfaces
+
+### `xpst app`
+
+Launch the installed desktop app (the Tauri shell). It appears in your dock/taskbar.
+
+```bash
+xpst app
+```
+
+`xpst app` locates the installed desktop app (the Tauri shell). It is not a
+Python module, so it is located on disk (`/Applications/xPST.app` or
+`~/Applications/xPST.app` on macOS, the installed executable elsewhere); when no
+build is installed it prints where to get one and exits gracefully:
+
+```bash
+Install a published bundle from https://github.com/TysAIs/xPST/releases
+```
+
+See [TUTORIAL_APP.md](TUTORIAL_APP.md) for the full desktop app walkthrough.
+
+---
+
+### `xpst dashboard`
+
+Launch the local web API dashboard at `http://127.0.0.1:8080`.
+
+```bash
+xpst dashboard
+xpst dashboard --port 9000 --host 0.0.0.0
+```
+
+The dashboard provides:
+- Upload history
+- Per-platform health
+- Analytics charts
+- Quota tracking
+- Dead-letter queue of failed posts
+- Real-time updates via WebSocket
+
+By default, binds to `127.0.0.1` (loopback only) for security.
+
+---
+
+### `xpst mcp`
+
+Start the MCP (Model Context Protocol) server over stdio. Used by AI agents (Claude Desktop, Claude Code, etc.).
+
+```bash
+xpst mcp
+```
+
+Or use the dedicated entry point:
+
+```bash
+xpst-mcp
+```
+
+See [TUTORIAL_MCP.md](TUTORIAL_MCP.md) for the full MCP walkthrough.
+
+---
+
+## Phone and device pairing
+
+A phone reaches the same engine over the network. Two commands do the whole job:
+`xpst ui --host <address>` binds where the phone can reach it, and `xpst pair` issues
+the one-time code that gives that phone its own credential.
+
+```bash
+# Bind an address the phone can reach (a trusted LAN, tailnet or tunnel).
+xpst ui --host 0.0.0.0 --port 8080 --no-browser
+
+# On the engine machine: issue a one-time, single-use pairing code.
+xpst pair --label phone --host <address the phone will use> --port 8080
+```
+
+Enter the code on the `#/phone` screen. The phone exchanges it at `POST /api/pair` for
+a per-device token (returned once, stored hashed on the engine) and keeps it. A
+non-loopback bind requires a credential for reads on `/api` as well as writes; the
+static app shell stays public so an unpaired phone can reach the pairing screen.
+
+```bash
+# List paired devices (label, created, last seen, revoked) — never their tokens.
+xpst devices
+
+# Cut one device off immediately.
+xpst devices --revoke dev_1a2b3c4d5e6f
+```
+
+Both commands accept `--json`. `xpst pair --ttl 300` shortens the code lifetime and
+`xpst pair --code ABCD2345` uses a fixed code when you need to read it to someone.
+
+The phone flow is compose → destinations → preview → confirm → publish → readback. The
+preview is local (`network_calls: false`), a dry run uploads nothing, and a destination
+in a rate-limit cooldown is reported as **deferred with its window** rather than failed —
+the plan stays retryable and the retry publishes only what was deferred.
+
+---
+
+## Plugins — `xpst plugins`
+
+Manage xPST plugins. Place `.py` files in `~/.xpst/plugins/` to add custom uploaders and sources.
+
+```bash
+xpst plugins list                      # list installed plugins
+xpst plugins docs                       # generate markdown docs for all plugins
+xpst plugins docs -o ./plugin-docs.md   # write docs to a file
+```
+
+---
+
+## Maintenance
+
+### `xpst update`
+
+Update xPST dependencies to latest versions.
+
+```bash
+xpst update                # update all dependencies
+xpst update --check        # check for updates without installing
+xpst update --components    # show app, helper, and provider metadata update status
+```
+
+---
+
+### `xpst version`
+
+Show xPST version and all dependency versions.
+
+```bash
+xpst version
+xpst version --json
+```
+
+**JSON output:**
+
+```json
+{
+  "xpst": "0.1.0",
+  "python": "3.11.15",
+  "click": "8.1.7",
+  "rich": "13.7.0",
+  "yt-dlp": "2025.1.1"
+}
+```
+
+---
+
+
+## Exit Codes Reference
+
+xPST uses meaningful exit codes for scripting and agent integration:
+
+| Code | Constant | Meaning |
+|------|----------|---------|
+| `0` | `EXIT_SUCCESS` | Success |
+| `1` | `EXIT_GENERAL` | General error |
+| `2` | `EXIT_CONFIG_ERROR` | Configuration error (also Click usage errors) |
+| `3` | `EXIT_AUTH_FAILURE` | Authentication failure |
+| `4` | `EXIT_RATE_LIMIT` | Rate limit exceeded |
+| `10` | `EXIT_PLATFORM_UNAVAILABLE` | Platform unavailable |
+
+**Read-only status commands (`xpst doctor`, `xpst readiness`, `xpst health`)
+exit `0` whenever they produced their report.** The verdict is data, not
+process status: `doctor` carries `all_clear` and `issues[]`, `readiness`
+carries `ready`, and `health` carries per-platform `authenticated` / `state`.
+On a fresh install with nothing connected all three answer honestly in the
+payload and exit `0` — missing accounts are a *state to fix*, not a failure of
+the command — so a first-run script reads the payload instead of treating a
+non-zero status as "doctor is broken":
+
+```bash
+xpst doctor --json > doctor.json || exit $?   # only a broken invocation/config gets here
+jq -e '.all_clear' doctor.json || echo "connect accounts: xpst connect youtube"
+```
+
+A non-zero exit from these three commands means the command could not do its
+job: an unreadable or corrupt config exits `2`, and an internal error exits
+`1`. Commands that *perform* something (`post`, `connect`, `run`, …) keep the
+meaningful codes in the table above.
+
+**Posting rule (`xpst post`).** A post where nothing was published never exits
+`0`, because the exit status is what scripts and agents branch on. When every
+attempted destination failed, the exit code names the shared reason: `4` for
+quota/rate limits, `3` for authentication, `10` when no destination was
+attempted at all or every destination is unavailable / refused the media
+(e.g. `THREADS_NEEDS_URL`), and `1` for anything else, including a mix of
+reasons. **A partial success exits `0`** (something was published), and so does
+a run where every destination was already posted. The `--json` payload keeps
+its shape — `all_success`, `partial_success`, and per-platform
+`success` / `outcome` / `error` — and a non-zero run adds `exit_code`:
+
+```bash
+xpst post -v ./clip.mp4 -c "…" -p youtube,x --json || echo "post failed"
+```
+
+**Batch rule (`xpst run`, `xpst backfill`, `xpst schedule run`).** Commands that
+post a batch use the same families, aggregated per result. The run exits `0`
+when **at least one** result published something (a partial success is a
+success, and so is an idempotent "already posted" no-op). When nothing was
+published, the exit code names the shared reason across the results that
+failed — `4` quota/rate limits, `3` authentication, `10` when no destination
+was attempted at all or every destination was unavailable / refused the media,
+and `1` for anything else, including a mix of reasons. **"No new videos" and
+"nothing due" exit `0`**: nothing was attempted because there was nothing to do,
+which is not a failure — a deliberate difference from `xpst post`, where a run
+with no attemptable destination is a failure. A non-zero batch adds
+`exit_code` to its `--json` payload; everything else in that payload
+(`all_success` / `partial_success` / per-platform fields) is unchanged. The MCP
+equivalents (`xpst_run`, `xpst_backfill`) carry the same verdict as data, since
+they have no exit status of their own: `exit_code` (the code the CLI would exit
+with), `batch_status` (`published` / `partial` / `failed` / `nothing_to_do`) and
+`failed_destinations` — one entry per failed destination, with its error and
+family — so an agent reading MCP sees the failure a cron job would exit on,
+including the partial case where the batch still exits `0`.
+
+Use these in shell scripts:
+
+```bash
+if xpst run --quiet; then
+    echo "Posted successfully"
+elif [ $? -eq 3 ]; then
+    echo "Auth failure — run xpst auth"
+elif [ $? -eq 4 ]; then
+    echo "Rate limited — wait or increase rate_limits"
+fi
+```
+
+---
+
+## JSON Output Mode for Scripting
+
+All commands accept `--json` for machine-readable output. Additionally, the CLI **auto-enables JSON mode when stdout is not a TTY** (piped to another process).
+
+This makes xPST ideal for scripting and agent integration:
+
+```bash
+# Pipe to jq for filtering
+xpst status --json | jq '.stats.posted'
+xpst run --dry-run --json | jq '.videos[].video_id'
+xpst analytics --json | jq '.platforms.youtube'
+
+# Use in shell scripts
+POSTED=$(xpst status --json | jq '.stats.posted')
+if [ "$POSTED" -gt 0 ]; then
+    echo "You have $POSTED videos cross-posted"
+fi
+
+# Combine with other tools
+xpst health --json | jq '.platforms | to_entries | map(select(.value.ok == false)) | .[].key'
+```
+
+When stdout is a pipe, you can omit `--json`:
+
+```bash
+xpst status | jq .          # auto JSON because piped
+xpst run | jq .             # auto JSON because piped
+```
+
+---
+
+## Dry-Run Mode
+
+All posting commands support `--dry-run` to preview what would happen without uploading. This is the safest way to see what xPST would do before committing.
+
+```bash
+xpst run --dry-run                     # preview cross-posting from default source
+xpst run --dry-run --source all         # preview bidirectional cross-posting
+xpst post -v ./video.mp4 -c "Test" --dry-run
+xpst backfill --dry-run
+xpst schedule run --dry-run
+```
+
+Dry-run mode makes **no network calls and no uploads**. It only fetches metadata (for `run`) to show what would be posted, or reads local state (for `backfill`) to show what would be retried.
+
+**Example:**
+
+```bash
+$ xpst run --dry-run --source tiktok
+```
+
+```
+Dry run — would post:
+  abc123: My latest video about cooking... → youtube, instagram, x, threads
+  def456: Another great video... → youtube, instagram, x, threads
+```
+
+The destination list reflects the connected platforms other than the source (here, TikTok).
+With all five platforms connected, a non-TikTok source would also include `tiktok`.
+
+```bash
+$ xpst run --dry-run --json --source tiktok | jq '.videos | length'
+2
+```
+
+---
+
+## Next Steps
+
+- **Desktop app walkthrough:** [TUTORIAL_APP.md](TUTORIAL_APP.md)
+- **MCP integration guide:** [TUTORIAL_MCP.md](TUTORIAL_MCP.md)
+- **Architecture details:** [ARCHITECTURE.md](ARCHITECTURE.md)
+- **Per-platform auth guides:** [QUICKSTART.md](QUICKSTART.md)

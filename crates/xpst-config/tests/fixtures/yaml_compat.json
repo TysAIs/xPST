@@ -1,0 +1,149 @@
+[
+  {
+    "id": "realistic_v4",
+    "yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    token_file: /home/someone/.xpst/credentials/youtube_token.json\n    channel_id: UC0000000000000000000000\n  x:\n    enabled: false\n    cookies_file: ''\n    auth_mode: cookies\n    username: someone\n    api_key: sk-test-000\n  bluesky:\n    enabled: true\n    identifier: someone.bsky.social\n    service: https://bsky.social\n    app_password: abcd-efgh-ijkl-mnop\n  mastodon:\n    enabled: false\n    instance: https://mastodon.example\n    access_token: tok_123\nvideo:\n  download_dir: /tmp/xpst-downloads\n  max_duration: 180\nmonitoring:\n  log_file: /tmp/xpst-logs/xpst.log\n  level: INFO\nschedule:\n  times: [\"09:00\", \"18:00\"]\n  timezone: America/Denver\n  max_per_day: 3\nnotifications:\n  webhook_url: https://hooks.example/T000/B000/XXXX\n  enabled: false\n",
+    "json_raw": "{\"version\": 4, \"accounts\": {\"youtube\": {\"enabled\": true, \"token_file\": \"/home/someone/.xpst/credentials/youtube_token.json\", \"channel_id\": \"UC0000000000000000000000\"}, \"x\": {\"enabled\": false, \"cookies_file\": \"\", \"auth_mode\": \"cookies\", \"username\": \"someone\", \"api_key\": \"sk-test-000\"}, \"bluesky\": {\"enabled\": true, \"identifier\": \"someone.bsky.social\", \"service\": \"https://bsky.social\", \"app_password\": \"abcd-efgh-ijkl-mnop\"}, \"mastodon\": {\"enabled\": false, \"instance\": \"https://mastodon.example\", \"access_token\": \"tok_123\"}}, \"video\": {\"download_dir\": \"/tmp/xpst-downloads\", \"max_duration\": 180}, \"monitoring\": {\"log_file\": \"/tmp/xpst-logs/xpst.log\", \"level\": \"INFO\"}, \"schedule\": {\"times\": [\"09:00\", \"18:00\"], \"timezone\": \"America/Denver\", \"max_per_day\": 3}, \"notifications\": {\"webhook_url\": \"https://hooks.example/T000/B000/XXXX\", \"enabled\": false}}",
+    "json_masked": "{\"version\": 4, \"accounts\": {\"youtube\": {\"enabled\": true, \"token_file\": \"***\", \"channel_id\": \"UC0000000000000000000000\"}, \"x\": {\"enabled\": false, \"cookies_file\": \"\", \"auth_mode\": \"***\", \"username\": \"someone\", \"api_key\": \"***\"}, \"bluesky\": {\"enabled\": true, \"identifier\": \"someone.bsky.social\", \"service\": \"https://bsky.social\", \"app_password\": \"***\"}, \"mastodon\": {\"enabled\": false, \"instance\": \"https://mastodon.example\", \"access_token\": \"***\"}}, \"video\": {\"download_dir\": \"/tmp/xpst-downloads\", \"max_duration\": 180}, \"monitoring\": {\"log_file\": \"/tmp/xpst-logs/xpst.log\", \"level\": \"INFO\"}, \"schedule\": {\"times\": [\"09:00\", \"18:00\"], \"timezone\": \"America/Denver\", \"max_per_day\": 3}, \"notifications\": {\"webhook_url\": \"***\", \"enabled\": false}}",
+    "outcome": "ok"
+  },
+  {
+    "id": "yaml11_lookalike_scalars",
+    "yaml": "version: 4\noptions:\n  flag_on: on\n  flag_yes: yes\n  flag_off: off\n  flag_no: no\n  single_y: y\n  single_n: n\n  truthy: true\n  falsy: false\n",
+    "json_raw": "{\"version\": 4, \"options\": {\"flag_on\": \"on\", \"flag_yes\": \"yes\", \"flag_off\": \"off\", \"flag_no\": \"no\", \"single_y\": \"y\", \"single_n\": \"n\", \"truthy\": true, \"falsy\": false}}",
+    "json_masked": "{\"version\": 4, \"options\": {\"flag_on\": \"on\", \"flag_yes\": \"yes\", \"flag_off\": \"off\", \"flag_no\": \"no\", \"single_y\": \"y\", \"single_n\": \"n\", \"truthy\": true, \"falsy\": false}}",
+    "outcome": "ok"
+  },
+  {
+    "id": "numeric_strings",
+    "yaml": "version: 4\nvalues:\n  phone: '0123456789'\n  leading_zero: 007\n  underscored: 1_000\n  quoted_int: '42'\n  plain_int: 42\n  negative: -17\n  hex: 0x1f\n  octal: 0o17\n  float: 1.10\n  expo: 1e3\n  version_string: 4.1.0\n",
+    "json_raw": "{\"version\": 4, \"values\": {\"phone\": \"0123456789\", \"leading_zero\": \"007\", \"underscored\": \"1_000\", \"quoted_int\": \"42\", \"plain_int\": 42, \"negative\": -17, \"hex\": 31, \"octal\": 15, \"float\": 1.1, \"expo\": 1000.0, \"version_string\": \"4.1.0\"}}",
+    "json_masked": "{\"version\": 4, \"values\": {\"phone\": \"0123456789\", \"leading_zero\": \"007\", \"underscored\": \"1_000\", \"quoted_int\": \"42\", \"plain_int\": 42, \"negative\": -17, \"hex\": 31, \"octal\": 15, \"float\": 1.1, \"expo\": 1000.0, \"version_string\": \"4.1.0\"}}",
+    "outcome": "ok"
+  },
+  {
+    "id": "strings_needing_quotes",
+    "yaml": "version: 4\ntext:\n  colon: 'a: b'\n  hash: '#x'\n  empty: ''\n  tilde_home: ~/x/y\n  truthy_string: 'true'\n  null_string: 'null'\n  digits: '123'\n  spaced: '  padded  '\n  unicode: \"café 🚀\"\n",
+    "json_raw": "{\"version\": 4, \"text\": {\"colon\": \"a: b\", \"hash\": \"#x\", \"empty\": \"\", \"tilde_home\": \"~/x/y\", \"truthy_string\": \"true\", \"null_string\": \"null\", \"digits\": \"123\", \"spaced\": \"  padded  \", \"unicode\": \"café 🚀\"}}",
+    "json_masked": "{\"version\": 4, \"text\": {\"colon\": \"a: b\", \"hash\": \"#x\", \"empty\": \"\", \"tilde_home\": \"~/x/y\", \"truthy_string\": \"true\", \"null_string\": \"null\", \"digits\": \"123\", \"spaced\": \"  padded  \", \"unicode\": \"café 🚀\"}}",
+    "outcome": "ok"
+  },
+  {
+    "id": "block_and_multiline",
+    "yaml": "version: 4\nmonitoring:\n  notes: |\n    line one\n    line two\n  folded: >\n    wrapped text\n    continues here\n",
+    "json_raw": "{\"version\": 4, \"monitoring\": {\"notes\": \"line one\\nline two\\n\", \"folded\": \"wrapped text continues here\\n\"}}",
+    "json_masked": "{\"version\": 4, \"monitoring\": {\"notes\": \"line one\\nline two\\n\", \"folded\": \"wrapped text continues here\\n\"}}",
+    "outcome": "ok"
+  },
+  {
+    "id": "nulls_and_empty",
+    "yaml": "version: 4\nempty_value:\nexplicit_null: null\ntilde_null: ~\nempty_map: {}\nempty_list: []\n",
+    "json_raw": "{\"version\": 4, \"empty_value\": null, \"explicit_null\": null, \"tilde_null\": null, \"empty_map\": {}, \"empty_list\": []}",
+    "json_masked": "{\"version\": 4, \"empty_value\": null, \"explicit_null\": null, \"tilde_null\": null, \"empty_map\": {}, \"empty_list\": []}",
+    "outcome": "ok"
+  },
+  {
+    "id": "nested_sequences",
+    "yaml": "version: 4\nroutes:\n  - name: first\n    destinations: [youtube, x]\n    weights: [1, 2.5, 3]\n  - name: second\n    destinations:\n      - bluesky\n",
+    "json_raw": "{\"version\": 4, \"routes\": [{\"name\": \"first\", \"destinations\": [\"youtube\", \"x\"], \"weights\": [1, 2.5, 3]}, {\"name\": \"second\", \"destinations\": [\"bluesky\"]}]}",
+    "json_masked": "{\"version\": 4, \"routes\": [{\"name\": \"first\", \"destinations\": [\"youtube\", \"x\"], \"weights\": [1, 2.5, 3]}, {\"name\": \"second\", \"destinations\": [\"bluesky\"]}]}",
+    "outcome": "ok"
+  },
+  {
+    "id": "deep_nesting",
+    "yaml": "version: 4\na:\n  b:\n    c:\n      d:\n        e: 1\n        f: [1, [2, [3]]]\n",
+    "json_raw": "{\"version\": 4, \"a\": {\"b\": {\"c\": {\"d\": {\"e\": 1, \"f\": [1, [2, [3]]]}}}}}",
+    "json_masked": "{\"version\": 4, \"a\": {\"b\": {\"c\": {\"d\": {\"e\": 1, \"f\": [1, [2, [3]]]}}}}}",
+    "outcome": "ok"
+  },
+  {
+    "id": "anchors_and_aliases",
+    "yaml": "version: 4\ndefaults: &d\n  enabled: true\n  retries: 3\nservice_a:\n  <<: *d\n  name: a\nservice_b:\n  <<: *d\n  name: b\n",
+    "json_raw": "{\"version\": 4, \"defaults\": {\"enabled\": true, \"retries\": 3}, \"service_a\": {\"<<\": {\"enabled\": true, \"retries\": 3}, \"name\": \"a\"}, \"service_b\": {\"<<\": {\"enabled\": true, \"retries\": 3}, \"name\": \"b\"}}",
+    "json_masked": "{\"version\": 4, \"defaults\": {\"enabled\": true, \"retries\": 3}, \"service_a\": {\"<<\": {\"enabled\": true, \"retries\": 3}, \"name\": \"a\"}, \"service_b\": {\"<<\": {\"enabled\": true, \"retries\": 3}, \"name\": \"b\"}}",
+    "outcome": "ok"
+  },
+  {
+    "id": "duplicate_keys",
+    "yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    enabled: false\n",
+    "json_raw": null,
+    "json_masked": null,
+    "outcome": "error"
+  },
+  {
+    "id": "non_string_keys",
+    "yaml": "version: 4\nports:\n  1: one\n  true: yes_key\n",
+    "json_raw": "{\"version\": 4, \"ports\": {\"1\": \"one\", \"true\": \"yes_key\"}}",
+    "json_masked": "{\"version\": 4, \"ports\": {\"1\": \"one\", \"true\": \"yes_key\"}}",
+    "outcome": "ok"
+  },
+  {
+    "id": "integer_top_level_key",
+    "yaml": "version: 4\ncache:\n  443: https\n",
+    "json_raw": "{\"version\": 4, \"cache\": {\"443\": \"https\"}}",
+    "json_masked": "{\"version\": 4, \"cache\": {\"443\": \"https\"}}",
+    "outcome": "ok"
+  },
+  {
+    "id": "not_a_mapping",
+    "yaml": "- just\n- a\n- list\n",
+    "json_raw": null,
+    "json_masked": null,
+    "outcome": "error"
+  },
+  {
+    "id": "empty_document",
+    "yaml": "",
+    "json_raw": null,
+    "json_masked": null,
+    "outcome": "error"
+  },
+  {
+    "id": "null_document",
+    "yaml": "null\n",
+    "json_raw": null,
+    "json_masked": null,
+    "outcome": "error"
+  },
+  {
+    "id": "scalar_document",
+    "yaml": "42\n",
+    "json_raw": null,
+    "json_masked": null,
+    "outcome": "error"
+  },
+  {
+    "id": "invalid_yaml",
+    "yaml": "accounts: [\n",
+    "json_raw": null,
+    "json_masked": null,
+    "outcome": "error"
+  },
+  {
+    "id": "tab_indented",
+    "yaml": "version: 4\naccounts:\n\tyoutube:\n\t\tenabled: true\n",
+    "json_raw": null,
+    "json_masked": null,
+    "outcome": "error"
+  },
+  {
+    "id": "duplicate_top_level",
+    "yaml": "version: 4\nversion: 4\n",
+    "json_raw": null,
+    "json_masked": null,
+    "outcome": "error"
+  },
+  {
+    "id": "comments_and_blank_lines",
+    "yaml": "# xPST config\nversion: 4   # schema\n\naccounts:\n  # nothing configured\n  youtube:\n    enabled: false\n",
+    "json_raw": "{\"version\": 4, \"accounts\": {\"youtube\": {\"enabled\": false}}}",
+    "json_masked": "{\"version\": 4, \"accounts\": {\"youtube\": {\"enabled\": false}}}",
+    "outcome": "ok"
+  },
+  {
+    "id": "long_line",
+    "yaml": "version: 4\nmonitoring:\n  note: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+    "json_raw": "{\"version\": 4, \"monitoring\": {\"note\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}",
+    "json_masked": "{\"version\": 4, \"monitoring\": {\"note\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}",
+    "outcome": "ok"
+  }
+]

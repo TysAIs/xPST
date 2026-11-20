@@ -1,0 +1,121 @@
+"""Live-stream relay: one ingest, many destinations, no re-encode.
+
+The stream pillar is a *local* feature. xPST prepares the destinations and the
+relay configuration; MediaMTX (MIT, an external child process like ffmpeg and
+yt-dlp) moves the bytes. Nothing in this package uploads video, contacts a
+platform unless asked for a key, or spends money.
+
+See ``docs/STREAM-RELAY.md`` for the operator flow and the per-platform matrix.
+"""
+
+from __future__ import annotations
+
+from xpst.stream.destinations import (
+    API,
+    MANUAL,
+    SIMULCAST_REFUSALS,
+    STREAM_INGEST_PATHS,
+    UNSUPPORTED,
+    StreamIngestPath,
+    api_destinations,
+    ingest_path,
+    manual_destinations,
+    refusal_reason,
+    registry_snapshot,
+    unsupported_destinations,
+)
+from xpst.stream.ingest import (
+    APP_CREDENTIAL_PREFIX,
+    APP_REGISTRATIONS,
+    CREDENTIALS_MISSING,
+    INVALID_RESPONSE,
+    LIVE_NOT_ENABLED,
+    LIVE_STATUS_PLATFORMS,
+    MANUAL_REQUIRED,
+    NETWORK_ERROR,
+    NOT_SUPPORTED,
+    PLATFORM_ERROR,
+    AppCredentials,
+    AppRegistration,
+    FetchedKey,
+    FetchReadiness,
+    IngestKeyError,
+    LiveStatus,
+    clear_app_credentials,
+    fetch_and_store_key,
+    fetch_ingest_key,
+    fetch_readiness,
+    live_status,
+    load_app_credentials,
+    registration,
+    store_app_credentials,
+)
+from xpst.stream.keys import (
+    KEY_PREFIX,
+    clear_destination,
+    destination_status,
+    load_destinations,
+    store_destination,
+)
+from xpst.stream.relay import (
+    DEFAULT_PATH_NAME,
+    DEFAULT_RTMP_PORT,
+    RelayConfigError,
+    RelayDestination,
+    build_relay_config,
+    relay_summary,
+    render_relay_config,
+    write_relay_config,
+)
+
+__all__ = [
+    "API",
+    "APP_CREDENTIAL_PREFIX",
+    "APP_REGISTRATIONS",
+    "CREDENTIALS_MISSING",
+    "DEFAULT_PATH_NAME",
+    "DEFAULT_RTMP_PORT",
+    "INVALID_RESPONSE",
+    "KEY_PREFIX",
+    "LIVE_NOT_ENABLED",
+    "LIVE_STATUS_PLATFORMS",
+    "MANUAL",
+    "MANUAL_REQUIRED",
+    "NETWORK_ERROR",
+    "NOT_SUPPORTED",
+    "PLATFORM_ERROR",
+    "SIMULCAST_REFUSALS",
+    "STREAM_INGEST_PATHS",
+    "UNSUPPORTED",
+    "AppCredentials",
+    "AppRegistration",
+    "FetchedKey",
+    "FetchReadiness",
+    "IngestKeyError",
+    "LiveStatus",
+    "RelayConfigError",
+    "RelayDestination",
+    "StreamIngestPath",
+    "api_destinations",
+    "build_relay_config",
+    "clear_app_credentials",
+    "clear_destination",
+    "destination_status",
+    "fetch_and_store_key",
+    "fetch_ingest_key",
+    "fetch_readiness",
+    "ingest_path",
+    "live_status",
+    "load_app_credentials",
+    "load_destinations",
+    "manual_destinations",
+    "refusal_reason",
+    "registration",
+    "registry_snapshot",
+    "relay_summary",
+    "render_relay_config",
+    "store_app_credentials",
+    "store_destination",
+    "unsupported_destinations",
+    "write_relay_config",
+]

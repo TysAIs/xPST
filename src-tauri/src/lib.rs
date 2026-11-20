@@ -1,0 +1,1209 @@
+// xPST desktop shell — Tauri 2 wrapper around the Python engine sidecar.
+//
+// Responsibilities:
+//   1. Engine lifecycle: pick a free ephemeral port, spawn the PyInstaller
+//      onedir engine (bundle resource `binaries/engine/`) with
+//      XPST_DASHBOARD_PORT set, poll GET /health (60s timeout, any HTTP
+//      response = up), then navigate the webview to the engine URL. The
+//      sidecar is killed on exit/panic/SIGTERM/SIGINT.
+//   2. Single instance: a second launch focuses the existing window and exits
+//      (tauri-plugin-single-instance, registered FIRST in the builder chain).
+//   3. Deep link: `xpst://` URLs (OAuth callbacks) are received at runtime via
+//      `deep_link().on_open_url()` (covers both cold-start and running-app
+//      opens on desktop; the plugin consumes RunEvent::Opened internally).
+//   4. Engine forwarding: each received URL is POSTed as JSON
+//      `{"url": "...", "source": "tauri-deep-link"}` to the dashboard engine's
+//      `http://127.0.0.1:<port>/oauth/callback` route (port resolution below —
+//      matches the port this shell spawned the engine on). The engine-side
+//      listener contract lives in `src/xpst/utils/oauth_local.py` (local
+//      redirect capture: code + state); the shell is a dumb pipe — it never
+//      inspects or consumes the OAuth payload itself.
+//
+// Boot probes (stderr, consumed by scripts/tauri-smoke.sh):
+//   BOOT_TO_VISIBLE_SECS / ENGINE_HEALTH_WAIT_SECS / BOOT_TO_READY_SECS /
+//   WEBVIEW_URL — and engine lifecycle log lines under [xpst-shell].
+//
+// Deep-link proof-of-receipt instrumentation (also used by scripts/deeplink-e2e.sh):
+//   - marker file (XPST_DEEPLINK_MARKER, default
+//     $TMPDIR/xpst-deeplink-last-url.txt): last received URL, verbatim.
+//   - log file (XPST_SHELL_LOG, default $TMPDIR/xpst-tauri-shell.log):
+//     SHELL_STARTED / DEEPLINK_RECEIVED / DEEPLINK_FORWARDED lines with
+//     outcome=forwarded:<status> | engine_unreachable:<err> | http:<status>.
+
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
+use tauri::{Manager, RunEvent, Url, WebviewWindow};
+use tauri_plugin_deep_link::DeepLinkExt;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+use tauri_plugin_shell::ShellExt;
+use tauri_plugin_updater::UpdaterExt;
+
+/// How long to wait for the engine to become healthy before giving up.
+const ENGINE_HEALTH_TIMEOUT: Duration = Duration::from_secs(60);
+/// Interval between health probes.
+const ENGINE_POLL_INTERVAL: Duration = Duration::from_millis(150);
+/// TCP connect/read timeout for a single health probe.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+/// Engine callback host + path (deep-link OAuth forwarding).
+const ENGINE_HOST: &str = "127.0.0.1";
+const ENGINE_CALLBACK_PATH: &str = "/oauth/callback";
+const HTTP_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Process-start timestamp (set once, used for the boot-time probes).
+static BOOT_START: OnceLock<Instant> = OnceLock::new();
+/// Port the shell spawned the engine on (set once the engine is up).
+/// Atomic (not OnceLock): the engine may be respawned on a NEW port after
+/// an unexpected mid-session death, and deep-link forwarding must follow.
+static ENGINE_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+/// Set while the shell is deliberately shutting down so the engine-death
+/// watcher does NOT respawn the sidecar we are killing on purpose.
+static SHUTTING_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Consecutive unexpected engine deaths handled (bounded to avoid a
+/// crash-respawn crash-respawn spin loop on a permanently broken engine).
+static RESPAWNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// Max consecutive engine respawns before giving up and showing the error page.
+const MAX_ENGINE_RESPAWNS: usize = 3;
+
+fn mark_shutting_down() {
+    SHUTTING_DOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn is_shutting_down() -> bool {
+    SHUTTING_DOWN.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+fn marker_path() -> std::path::PathBuf {
+    std::env::var("XPST_DEEPLINK_MARKER")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir().join("xpst-deeplink-last-url.txt"))
+}
+
+fn log_path() -> std::path::PathBuf {
+    std::env::var("XPST_SHELL_LOG")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir().join("xpst-tauri-shell.log"))
+}
+
+/// Engine port resolution for deep-link forwarding: an explicit
+/// XPST_ENGINE_PORT (e2e/testing against an externally started engine)
+/// wins, otherwise the port this shell spawned the engine on, else 8080
+/// (matches `xpst dashboard`).
+fn engine_port() -> u16 {
+    if let Ok(p) = std::env::var("XPST_ENGINE_PORT") {
+        if let Ok(p) = p.parse() {
+            return p;
+        }
+    }
+    let p = ENGINE_PORT.load(std::sync::atomic::Ordering::SeqCst);
+    if p != 0 {
+        return p;
+    }
+    8080
+}
+
+fn shell_log(line: &str) {
+    eprintln!("[xpst-shell] {line}");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path())
+    {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+fn log(msg: &str) {
+    shell_log(msg);
+}
+
+/// Forward a received `xpst://` URL to the engine's OAuth callback route.
+/// Returns a machine-readable outcome for the log:
+///   forwarded:<status> — engine answered with that HTTP status
+///   http:<status>      — engine answered but the route rejected it (e.g. 404
+///                        on an engine older than the shell)
+///   engine_unreachable:<err> — dashboard not running (expected in tests)
+fn forward_to_engine(url: &str) -> String {
+    let port = engine_port();
+    let body = serde_json::json!({ "url": url, "source": "tauri-deep-link" }).to_string();
+    let result = (|| -> Result<u16, String> {
+        let addr = format!("{ENGINE_HOST}:{port}");
+        let mut stream = TcpStream::connect(&addr).map_err(|e| e.to_string())?;
+        stream
+            .set_read_timeout(Some(HTTP_TIMEOUT))
+            .map_err(|e| e.to_string())?;
+        stream
+            .set_write_timeout(Some(HTTP_TIMEOUT))
+            .map_err(|e| e.to_string())?;
+        let request = format!(
+            "POST {ENGINE_CALLBACK_PATH} HTTP/1.1\r\n\
+             Host: {ENGINE_HOST}:{port}\r\n\
+             Content-Type: application/json\r\n\
+             Content-Length: {}\r\n\
+             Connection: close\r\n\
+             \r\n\
+             {body}",
+            body.len()
+        );
+        stream
+            .write_all(request.as_bytes())
+            .map_err(|e| e.to_string())?;
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).map_err(|e| e.to_string())?;
+        let text = String::from_utf8_lossy(&raw);
+        // "HTTP/1.1 200 OK" -> 200
+        let status = text
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<u16>().ok());
+        match status {
+            Some(code) => Ok(code),
+            None => {
+                let head: String = text.chars().take(120).collect();
+                Err(format!("bad_response: {head}"))
+            }
+        }
+    })();
+
+    match result {
+        Ok(status) if (200..300).contains(&status) => format!("forwarded:{status}"),
+        Ok(status) => format!("http:{status}"),
+        Err(e) => format!("engine_unreachable:{e}"),
+    }
+}
+
+/// Handle one received deep link: prove receipt, focus the window, forward.
+fn handle_deep_link(app: &tauri::AppHandle, url: &Url) {
+    let url_str = url.to_string();
+    // 1) Proof of receipt — marker file holds the URL verbatim.
+    if let Err(e) = std::fs::write(marker_path(), &url_str) {
+        log(&format!("DEEPLINK_MARKER_ERROR error={e}"));
+    }
+    log(&format!("DEEPLINK_RECEIVED url={url_str}"));
+
+    // 2) Bring the shell to the front (user just finished an OAuth consent).
+    focus_existing(app);
+
+    // 3) Forward to the engine's OAuth callback route (best effort).
+    let outcome = forward_to_engine(&url_str);
+    log(&format!(
+        "DEEPLINK_FORWARDED url={url_str} outcome={outcome}"
+    ));
+}
+
+/// The JS the shell evaluates to hand dropped file paths to the page.
+///
+/// The composer registers `window.__xpstMediaDrag(phase, paths)` (see
+/// `ui/src/lib/native.js`). The shell pushes *paths*, never bytes: the page
+/// previews through the engine's range-aware stream route, so dropping a 2 GB
+/// video costs the app nothing until the user actually posts it.
+fn drag_payload_script(phase: &str, paths: &[std::path::PathBuf]) -> String {
+    let payload = serde_json::to_string(paths).unwrap_or_else(|_| "[]".to_string());
+    let phase = serde_json::to_string(phase).unwrap_or_else(|_| "\"drop\"".to_string());
+    format!("window.__xpstMediaDrag && window.__xpstMediaDrag({phase}, {payload});")
+}
+
+/// Forward one native drag-and-drop window event into the main webview.
+fn forward_drag_drop(app: &tauri::AppHandle, event: &tauri::DragDropEvent) {
+    // "over" fires on every cursor move; the page only needs enter/leave/drop.
+    let (phase, paths) = match event {
+        tauri::DragDropEvent::Enter { paths, .. } => ("enter", paths.clone()),
+        tauri::DragDropEvent::Drop { paths, .. } => ("drop", paths.clone()),
+        tauri::DragDropEvent::Leave => ("leave", Vec::new()),
+        _ => return,
+    };
+    if let Some(webview) = app.get_webview_window("main") {
+        let script = drag_payload_script(phase, &paths);
+        if let Err(e) = webview.eval(&script) {
+            log(&format!("DRAG_DROP_EVAL_FAILED phase={phase} error={e}"));
+            return;
+        }
+        log(&format!(
+            "DRAG_DROP_FORWARDED phase={phase} count={}",
+            paths.len()
+        ));
+    }
+}
+
+fn focus_existing(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+}
+
+/// Shared handle to the spawned engine child process so it can be killed
+/// from the exit path and the panic hook.
+#[derive(Default)]
+struct EngineHandle {
+    child: Mutex<Option<CommandChild>>,
+}
+
+/// Global access point for the signal handler (which cannot reach Tauri
+/// state). Set once the engine child is spawned.
+static GLOBAL_ENGINE: OnceLock<Arc<EngineHandle>> = OnceLock::new();
+
+#[cfg(unix)]
+extern "C" fn handle_exit_signal(sig: libc::c_int) {
+    // SIGTERM/SIGINT do NOT produce a Tauri RunEvent::ExitRequested, so
+    // without this the engine sidecar would be orphaned when the shell is
+    // terminated externally. Kill the child, then exit with 128+signal.
+    mark_shutting_down();
+    if let Some(engine) = GLOBAL_ENGINE.get() {
+        engine.kill();
+    }
+    std::process::exit(128 + sig);
+}
+
+#[cfg(unix)]
+fn install_signal_handlers() {
+    unsafe {
+        libc::signal(
+            libc::SIGTERM,
+            handle_exit_signal as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGINT,
+            handle_exit_signal as *const () as libc::sighandler_t,
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn install_signal_handlers() {
+    // Windows has no POSIX SIGTERM/SIGINT handler ABI. Tauri exit events and
+    // the EngineHandle Drop/kill path own shutdown on this platform.
+}
+
+impl EngineHandle {
+    fn kill(&self) {
+        if let Some(child) = self.child.lock().unwrap().take() {
+            let _ = child.kill();
+        }
+    }
+}
+
+/// Pick a free loopback port by binding an ephemeral listener and
+/// immediately releasing it. Small TOCTOU window exists, but the engine
+/// is the only consumer and retries are the caller's concern.
+pub fn pick_free_port() -> std::io::Result<u16> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let port = listener.local_addr()?.port();
+    drop(listener);
+    Ok(port)
+}
+
+/// Mint a per-launch token for the engine's mutating routes.
+///
+/// The engine refuses `POST /api/post`, `/api/connect/*` and `/api/onboarding*`
+/// without the dashboard API token, so the shell hands its own webview a
+/// session token through the URL fragment instead of letting it read the
+/// persisted credential from disk. The value is never written to a file and is
+/// regenerated on every boot (including a mid-session engine respawn).
+///
+/// Entropy comes from `RandomState`, whose SipHash keys are seeded from the OS
+/// RNG at randomisation time, mixed with the clock and the pid. That keeps the
+/// crate dependency-free (no `rand`) while making the token unguessable for a
+/// session-scoped loopback credential; the durable credential is the persisted
+/// API token behind `xpst auth api-token`.
+pub fn mint_ui_token() -> String {
+    fn seed(tag: &str) -> u64 {
+        use std::collections::hash_map::RandomState;
+        use std::hash::{BuildHasher, Hasher};
+
+        let mut hasher = RandomState::new().build_hasher();
+        hasher.write(tag.as_bytes());
+        hasher.write_u64(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0),
+        );
+        hasher.write_u32(std::process::id());
+        hasher.finish()
+    }
+
+    let mut token = String::with_capacity(64);
+    for tag in ["xpst-ui-a", "xpst-ui-b", "xpst-ui-c", "xpst-ui-d"] {
+        token.push_str(&format!("{:016x}", seed(tag)));
+    }
+    token
+}
+
+/// Build the engine UI URL the webview should load.
+///
+/// The token travels in the fragment: a fragment is never sent to the server
+/// (so it cannot end up in an access log) and the SPA strips it from the
+/// address bar as soon as it boots.
+pub fn engine_ui_url(port: u16, ui_token: &str) -> String {
+    format!("http://{ENGINE_HOST}:{port}/#xpst_token={ui_token}")
+}
+
+/// Remove a `#xpst_token=...` fragment from a URL before logging it.
+///
+/// `WEBVIEW_URL=` lines are consumed by scripts and the shell log; the session
+/// token must never land there.
+pub fn redact_url(url: &str) -> String {
+    match url.split_once('#') {
+        Some((head, frag)) if frag.starts_with("xpst_token=") => {
+            format!("{head}#xpst_token=<redacted>")
+        }
+        _ => url.to_string(),
+    }
+}
+
+/// Issue a minimal HTTP/1.1 request and return `true` if the server
+/// answers with any valid HTTP response (FastAPI returning *any* HTTP
+/// response means it is up — 200, 401, 404 all count).
+fn http_responds(addr: &str, path: &str) -> bool {
+    let mut stream = match TcpStream::connect(addr) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let _ = stream.set_read_timeout(Some(PROBE_TIMEOUT));
+    let _ = stream.set_write_timeout(Some(PROBE_TIMEOUT));
+    let request = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut buf = [0u8; 128];
+    match stream.read(&mut buf) {
+        Ok(n) if n >= 5 => buf.starts_with(b"HTTP/"),
+        _ => false,
+    }
+}
+
+/// Poll the engine health endpoint until it responds or `deadline`
+/// expires. Returns the elapsed wait time.
+fn wait_for_engine_health(port: u16, timeout: Duration) -> Option<Duration> {
+    let addr = format!("127.0.0.1:{port}");
+    let deadline = Instant::now() + timeout;
+    loop {
+        if http_responds(&addr, "/health") {
+            return Some(BOOT_START.get().map_or(Duration::ZERO, |s| s.elapsed()));
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(ENGINE_POLL_INTERVAL);
+    }
+}
+
+/// Show a minimal error page inside the webview (used when the engine
+/// fails to become healthy within the timeout).
+fn show_engine_error(window: &WebviewWindow) {
+    let html = "<!doctype html><html><body style='font-family:-apple-system,sans-serif;\
+        display:flex;align-items:center;justify-content:center;height:100vh;margin:0;\
+        background:#161617;color:#f5f5f7'><div style='text-align:center'>\
+        <h1>xPST could not start</h1>\
+        <p>The engine failed to become healthy within 60 seconds.<br>\
+        Please restart the application.</p></div></body></html>";
+    let js = format!(
+        "document.open();document.write({});document.close();",
+        serde_json::to_string(html).unwrap_or_default()
+    );
+    let _ = window.eval(&js);
+}
+
+/// Boot the engine sidecar, wait for health, then navigate the main
+/// window onto the engine URL. Runs on a background thread from `setup`.
+fn boot_engine(app: tauri::AppHandle) {
+    // Local (not BOOT_START-relative): on a mid-session respawn this must
+    // report the actual engine bring-up time, not time since app launch.
+    let started = Instant::now();
+
+    let port = match pick_free_port() {
+        Ok(p) => p,
+        Err(e) => {
+            log(&format!("FATAL: could not pick a free port: {e}"));
+            if let Some(w) = app.get_webview_window("main") {
+                show_engine_error(&w);
+            }
+            return;
+        }
+    };
+    log(&format!("engine port: {port}"));
+
+    // NOTE (tradeoff vs externalBin): the PyInstaller onedir directory is
+    // shipped as a bundle resource. Tauri externalBin is intentionally not
+    // used because it accepts a single executable and would require a
+    // onefile build with per-launch extraction. The resource directory keeps
+    // all engine support files beside the executable and avoids extraction.
+    let resource_dir = match app.path().resource_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            log(&format!("FATAL: no resource dir: {e}"));
+            if let Some(w) = app.get_webview_window("main") {
+                show_engine_error(&w);
+            }
+            return;
+        }
+    };
+    let engine_dir = resource_dir.join("binaries/engine");
+    let engine_exe = engine_dir.join(if cfg!(windows) {
+        "xpst-engine.exe"
+    } else {
+        "xpst-engine"
+    });
+    let ui_dir = resource_dir.join("ui");
+    let ui_index = ui_dir.join("index.html");
+    if !engine_exe.is_file() || !ui_index.is_file() {
+        log(&format!(
+            "FATAL: packaged resources missing engine={} ui_index={}",
+            engine_exe.display(),
+            ui_index.display()
+        ));
+        if let Some(w) = app.get_webview_window("main") {
+            show_engine_error(&w);
+        }
+        return;
+    }
+    let mut command = app.shell().command(&engine_exe);
+    command = command.env("XPST_DASHBOARD_PORT", port.to_string());
+    command = command.env("XPST_ENGINE_MODE", "tauri");
+    command = command.env("XPST_UI_DIST", ui_dir);
+    // Per-launch credential for the engine's mutating routes. The engine
+    // accepts it in addition to the persisted API token (which stays on disk in
+    // the encrypted credential store for CLI/MCP/agent callers). Handing the
+    // webview its own token keeps the durable credential out of the browser
+    // context entirely.
+    let ui_token = mint_ui_token();
+    command = command.env("XPST_UI_TOKEN", &ui_token);
+    // Also pass the port as an explicit argv flag. The env var alone was a
+    // single point of failure: an engine build that ignored argv kept the
+    // env path working, but every hand-run/smoke invocation
+    // (`xpst-engine serve --port N`) silently bound 8080, and a leftover
+    // listener there broke startup. Passing both means the port survives
+    // regardless of which path the frozen entrypoint reads. The engine's
+    // entrypoint treats an already-taken port as a loud non-zero exit.
+    command = command.arg("--port").arg(port.to_string());
+    // Media helpers are NOT bundled: ffmpeg+ffprobe were 87 MB of a 192 MB
+    // app (and the flaky download behind them is what kept the release lane
+    // red). The engine resolves XPST_FFMPEG_PATH > system ffmpeg > a copy it
+    // fetched into <config dir>/bin on first use (xpst.media.binaries), so a
+    // machine that already has ffmpeg downloads nothing. Only yt-dlp — a 3 MB
+    // zipapp with no system equivalent — still ships in the bundle.
+    let ytdlp = resource_dir.join("binaries/ytdlp").join(if cfg!(windows) {
+        "yt-dlp.exe"
+    } else {
+        "yt-dlp"
+    });
+    if ytdlp.is_file() {
+        command = command.env("XPST_YTDLP_PATH", ytdlp);
+    }
+
+    let (mut rx, child) = match command.spawn() {
+        Ok(pair) => pair,
+        Err(e) => {
+            log(&format!("FATAL: failed to spawn engine sidecar: {e}"));
+            if let Some(w) = app.get_webview_window("main") {
+                show_engine_error(&w);
+            }
+            return;
+        }
+    };
+    app.state::<Arc<EngineHandle>>()
+        .child
+        .lock()
+        .unwrap()
+        .replace(child);
+    let _ = GLOBAL_ENGINE.set(Arc::clone(
+        &app.state::<Arc<EngineHandle>>().inner().clone(),
+    ));
+    let _ = ENGINE_PORT.store(port, std::sync::atomic::Ordering::SeqCst);
+
+    // Drain sidecar output for the WHOLE session so pipes never fill, and
+    // detect unexpected engine death. (QA adversarial 2026-08: the drain
+    // task used to be aborted once boot completed, so (a) a chatty engine
+    // could block on a full stdout pipe and hang, and (b) a crashed engine
+    // was never noticed — the webview sat on a dead page until the user
+    // restarted the app manually.)
+    let app_for_drain = app.clone();
+    let _drain = tauri::async_runtime::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            match event {
+                CommandEvent::Stdout(line) => {
+                    log(&format!(
+                        "engine stdout: {}",
+                        String::from_utf8_lossy(&line)
+                    ));
+                }
+                CommandEvent::Stderr(line) => {
+                    log(&format!(
+                        "engine stderr: {}",
+                        String::from_utf8_lossy(&line)
+                    ));
+                }
+                CommandEvent::Terminated(status) => {
+                    log(&format!("engine terminated: {status:?}"));
+                    if is_shutting_down() {
+                        log("engine terminated during shutdown — not respawning");
+                        continue;
+                    }
+                    let n = RESPAWNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if n >= MAX_ENGINE_RESPAWNS {
+                        log(&format!("ENGINE_RESPAWN_GIVE_UP attempts={}", n + 1));
+                        if let Some(w) = app_for_drain.get_webview_window("main") {
+                            show_engine_error(&w);
+                        }
+                        continue;
+                    }
+                    log(&format!(
+                        "ENGINE_RESPAWNING attempt={}/{}",
+                        n + 1,
+                        MAX_ENGINE_RESPAWNS
+                    ));
+                    // Give the OS a beat to release ports / clean up.
+                    std::thread::sleep(Duration::from_millis(500));
+                    let handle = app_for_drain.clone();
+                    std::thread::spawn(move || boot_engine(handle));
+                }
+                CommandEvent::Error(err) => {
+                    log(&format!("engine error: {err}"));
+                }
+                _ => {}
+            }
+        }
+    });
+
+    match wait_for_engine_health(port, ENGINE_HEALTH_TIMEOUT) {
+        Some(_since_boot) => {
+            // Healthy boot: reset the consecutive-respawn budget so a
+            // one-off crash does not permanently consume the retries.
+            RESPAWNS.store(0, std::sync::atomic::Ordering::SeqCst);
+            let health_wait = started.elapsed();
+            log(&format!(
+                "ENGINE_HEALTH_WAIT_SECS={:.3}",
+                health_wait.as_secs_f64()
+            ));
+            // The health poll above only succeeds if the engine actually
+            // bound THIS port; a build that ignored the port/argv would fail
+            // here instead of leaving the webview on a dead 8080 page.
+            log(&format!("ENGINE_PORT_VERIFIED port={port}"));
+
+            if let Some(window) = app.get_webview_window("main") {
+                let target = engine_ui_url(port, &ui_token);
+                let url = tauri::Url::parse(&target).expect("valid engine URL");
+                if let Err(e) = window.navigate(url) {
+                    log(&format!("navigate failed, falling back to eval: {e}"));
+                    let _ = window.eval(&format!(
+                        "window.location.replace({})",
+                        serde_json::to_string(&target).unwrap_or_default()
+                    ));
+                }
+                let _ = window.show();
+                let _ = window.set_focus();
+                let total = BOOT_START.get().map_or(health_wait, |s| s.elapsed());
+                log(&format!("BOOT_TO_READY_SECS={:.3}", total.as_secs_f64()));
+
+                // Give the webview a moment to commit the navigation, then
+                // dump its URL to stderr (used by scripts/tauri-smoke.sh as
+                // navigation evidence).
+                std::thread::sleep(Duration::from_secs(2));
+                match window.url() {
+                    Ok(url) => log(&format!("WEBVIEW_URL={}", redact_url(url.as_str()))),
+                    Err(e) => log(&format!("could not read webview url: {e}")),
+                }
+            }
+        }
+        None => {
+            log(&format!(
+                "FATAL: engine did not become healthy on 127.0.0.1:{port} within timeout"
+            ));
+            if let Some(w) = app.get_webview_window("main") {
+                show_engine_error(&w);
+            }
+        }
+    }
+    // NOTE: the drain task is intentionally left running for the whole
+    // session — aborting it here (the old behavior) disabled engine-death
+    // detection and let engine stdout/stderr pipes fill up.
+}
+
+// ---------------------------------------------------------------------------
+// Updates.
+//
+// Two separate concerns, deliberately not mixed:
+//
+// * The PRODUCT path is user-facing and default-on. The UI calls
+//   `updater_check` when it starts (and when the user presses "Check for
+//   updates"), and `updater_install` when the user chooses to install. Nothing
+//   downloads or replaces a binary without that choice.
+// * The E2E path exists so scripts/updater-e2e.sh can prove the whole loop
+//   unattended. It is still opt-in via XPST_UPDATER_CHECK=1; that variable no
+//   longer gates the product check, it only selects the unattended
+//   install-and-relaunch behaviour and the boot-version markers.
+//
+// `XPST_UPDATER_CHECK=0` disables the network check entirely (used by the boot
+// measurement harness and by anyone running offline).
+//
+// Boot-version markers (E2E only, written by the app itself so the proof cannot
+// be forged by the harness):
+//   $WORK/started-<version>.txt — one file per boot
+//   $WORK/current.txt           — overwritten with the latest boot's version
+// The canonical /private/tmp path matters: tauri-plugin-updater refuses to run
+// when current_exe() crosses a symlink, and /tmp is a symlink to /private/tmp.
+const UPDATER_MARKER_DIR: &str = "/private/tmp/xpst-updater-e2e";
+const UPDATER_E2E_ENV: &str = "XPST_UPDATER_CHECK";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UpdaterMode {
+    /// Unattended check -> download -> install -> restart, plus markers.
+    E2e,
+    /// No network check at all.
+    Disabled,
+    /// Product behaviour: the UI asks, the user decides.
+    Interactive,
+}
+
+fn updater_mode_from(value: Option<&str>) -> UpdaterMode {
+    match value.map(str::trim) {
+        Some("1") => UpdaterMode::E2e,
+        Some("0") => UpdaterMode::Disabled,
+        _ => UpdaterMode::Interactive,
+    }
+}
+
+fn updater_mode() -> UpdaterMode {
+    let value = std::env::var(UPDATER_E2E_ENV).ok();
+    updater_mode_from(value.as_deref())
+}
+
+/// What the UI needs to know about an available release.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct UpdateInfo {
+    current_version: String,
+    version: String,
+    notes: Option<String>,
+    date: Option<String>,
+}
+
+/// True when the user asked for an update and we may install it.
+fn install_allowed(mode: UpdaterMode) -> bool {
+    mode != UpdaterMode::Disabled
+}
+
+fn write_version_marker(version: &str) {
+    if std::fs::create_dir_all(UPDATER_MARKER_DIR).is_err() {
+        return;
+    }
+    let stamp = format!(
+        "{} {}",
+        version,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs().to_string())
+            .unwrap_or_default()
+    );
+    std::fs::write(
+        format!("{UPDATER_MARKER_DIR}/started-{version}.txt"),
+        &stamp,
+    )
+    .ok();
+    std::fs::write(format!("{UPDATER_MARKER_DIR}/current.txt"), &stamp).ok();
+}
+
+async fn check_for_update(
+    handle: &tauri::AppHandle,
+) -> Result<Option<tauri_plugin_updater::Update>, String> {
+    let updater = handle
+        .updater()
+        .map_err(|e| format!("updater is unavailable in this build: {e}"))?;
+    updater
+        .check()
+        .await
+        .map_err(|e| format!("update check failed: {e}"))
+}
+
+fn describe(update: &tauri_plugin_updater::Update) -> UpdateInfo {
+    UpdateInfo {
+        current_version: update.current_version.clone(),
+        version: update.version.clone(),
+        notes: update.body.clone(),
+        date: update.date.as_ref().map(|d| d.to_string()),
+    }
+}
+
+/// Product-path check. Returns `None` when this build is up to date.
+#[tauri::command]
+async fn updater_check(handle: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
+    if updater_mode() == UpdaterMode::Disabled {
+        return Ok(None);
+    }
+    match check_for_update(&handle).await? {
+        Some(update) => {
+            println!(
+                "[xpst-updater] update available: {} -> {}",
+                update.current_version, update.version
+            );
+            Ok(Some(describe(&update)))
+        }
+        None => {
+            println!("[xpst-updater] no update available");
+            Ok(None)
+        }
+    }
+}
+
+/// Product-path install. Only ever runs because the user asked for it.
+#[tauri::command]
+async fn updater_install(handle: tauri::AppHandle) -> Result<String, String> {
+    if !install_allowed(updater_mode()) {
+        return Err("updates are disabled in this launch (XPST_UPDATER_CHECK=0)".to_string());
+    }
+    let update = check_for_update(&handle)
+        .await?
+        .ok_or_else(|| "no update is available".to_string())?;
+    let version = update.version.clone();
+    let mut downloaded: usize = 0;
+    update
+        .download_and_install(
+            |chunk, total| {
+                downloaded += chunk;
+                if let Some(t) = total {
+                    println!("[xpst-updater] downloaded {downloaded}/{t} bytes");
+                }
+            },
+            || println!("[xpst-updater] download finished; installing"),
+        )
+        .await
+        .map_err(|e| format!("update could not be installed: {e}"))?;
+    println!("[xpst-updater] installed {version}; restarting");
+    handle.restart();
+    #[allow(unreachable_code)]
+    Ok(version)
+}
+
+/// E2E-only: check -> download -> install -> relaunch, unattended.
+fn run_updater_e2e(handle: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        tauri::async_runtime::block_on(async move {
+            match check_for_update(&handle).await {
+                Ok(Some(update)) => {
+                    println!(
+                        "[xpst-updater] update available: {} -> {}",
+                        update.current_version, update.version
+                    );
+                    let mut downloaded: usize = 0;
+                    match update
+                        .download_and_install(
+                            |chunk, total| {
+                                downloaded += chunk;
+                                if let Some(t) = total {
+                                    println!("[xpst-updater] downloaded {downloaded}/{t} bytes");
+                                }
+                            },
+                            || {
+                                println!("[xpst-updater] download finished; installing");
+                            },
+                        )
+                        .await
+                    {
+                        Ok(()) => {
+                            println!(
+                                "[xpst-updater] installed; restarting into {}",
+                                update.version
+                            );
+                            handle.restart();
+                        }
+                        Err(e) => {
+                            eprintln!("[xpst-updater] download_and_install failed: {e}");
+                        }
+                    }
+                }
+                Ok(None) => println!("[xpst-updater] no update available"),
+                Err(e) => eprintln!("[xpst-updater] {e}"),
+            }
+        });
+    });
+}
+
+#[cfg(unix)]
+fn acquire_single_instance_lock() -> Option<std::fs::File> {
+    use std::os::fd::AsRawFd;
+
+    let lock_path = std::env::temp_dir().join("xpst-shell-single-instance.lock");
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+    {
+        Ok(file) => {
+            let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+            if rc != 0 {
+                // Another instance is booting/booted. Give it a moment to
+                // register its single-instance socket, then exit — never
+                // spawn a second engine.
+                log("SINGLE_INSTANCE_RACE_LOSER exiting");
+                std::thread::sleep(Duration::from_millis(1500));
+                std::process::exit(0);
+            }
+            Some(file)
+        }
+        Err(e) => {
+            log(&format!("SINGLE_INSTANCE_LOCK_ERROR error={e}"));
+            None
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn acquire_single_instance_lock() -> Option<std::fs::File> {
+    // The Tauri single-instance plugin is the Windows source of truth. POSIX
+    // flock is unavailable there, so do not reference Unix-only APIs.
+    log("SINGLE_INSTANCE_PLATFORM_GUARD plugin_only=true");
+    None
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    BOOT_START.get_or_init(Instant::now);
+    install_signal_handlers();
+
+    // Single-instance race guard (QA adversarial 2026-08): two launches in
+    // the same second can both pass tauri-plugin-single-instance before either
+    // socket is bound. Unix uses a stable flock; Windows relies on the
+    // single-instance plugin because flock is not a Windows API.
+    let _instance_lock = if std::env::var("XPST_ALLOW_SECOND_INSTANCE").ok().as_deref() != Some("1")
+    {
+        acquire_single_instance_lock()
+    } else {
+        None
+    };
+
+    let engine = Arc::new(EngineHandle::default());
+
+    // Kill the engine child if the shell panics.
+    let panic_engine = Arc::clone(&engine);
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        mark_shutting_down();
+        panic_engine.kill();
+        default_hook(info);
+    }));
+
+    let app = tauri::Builder::default()
+        // Single-instance MUST be registered first (plugin docs requirement).
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // Second launch: focus the existing window; this process then
+            // exits and LaunchServices never shows a second window.
+            focus_existing(app);
+            // Deep-link forwarding (macOS): when LaunchServices starts a
+            // second instance with the URL as argv instead of Apple-eventing
+            // the running one, the URL arrives HERE via the single-instance
+            // socket. tauri-plugin-deep-link's own handle_cli_arguments()
+            // only parses argv on Windows/Linux, so macOS must do it here.
+            // Note: we must NOT call focus + return — parse args even when
+            // the window already exists.
+            for arg in args.iter() {
+                if let Ok(url) = arg.parse::<Url>() {
+                    if url.scheme() == "xpst" {
+                        handle_deep_link(app, &url);
+                    }
+                }
+            }
+        }))
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_deep_link::init())
+        // App commands the engine-origin page calls over IPC. Registered app
+        // commands are allowed for every window by default (Tauri v2 ACL covers
+        // plugin/core permissions); the loopback origin itself is granted by
+        // capabilities/default.json's `remote.urls`.
+        .invoke_handler(tauri::generate_handler![updater_check, updater_install])
+        // Native OS file picker for the composer. The engine-origin page calls
+        // `plugin:dialog|open` over IPC; the grant (and the loopback origin it
+        // is granted to) lives in capabilities/default.json.
+        .plugin(tauri_plugin_dialog::init())
+        .on_window_event(|window, event| {
+            // Native drag-and-drop: the shell is the only layer that can hand
+            // the page real file paths (a webview drop carries none), so the
+            // event is forwarded into the composer as a JS call.
+            if let tauri::WindowEvent::DragDrop(drop) = event {
+                let app_handle = window.app_handle().clone();
+                forward_drag_drop(&app_handle, drop);
+            }
+            // macOS convention: closing the window must NOT strand the user.
+            // (QA adversarial 2026-08: closing the window left the app
+            // running with no window and no way back — clicking the dock
+            // icon did nothing and quitting via the window was impossible
+            // without orphaning the engine.) Hide instead; the dock icon /
+            // Reopen event brings it back, Cmd+Q quits and reaps the engine.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if cfg!(target_os = "macos") {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    log("WINDOW_CLOSE_REQUESTED hidden=true (macOS keep-alive)");
+                }
+            }
+        })
+        .setup(move |app| {
+            app.manage(Arc::clone(&engine));
+
+            // Runtime + cold-start deep links (desktop: kAEGetURL Apple
+            // events). on_open_url covers both; RunEvent::Opened below is a
+            // fallback for events that arrive outside the plugin's window.
+            let handle = app.handle().clone();
+            handle.clone().deep_link().on_open_url(move |event| {
+                for url in event.urls() {
+                    handle_deep_link(&handle, &url);
+                }
+            });
+            shell_log(&format!("SHELL_STARTED pid={}", std::process::id()));
+
+            // Updates: the product path is driven by the UI (default-on check
+            // at app start, install only when the user asks). These modes are
+            // for unattended harnesses and offline runs.
+            let version = app.package_info().version.to_string();
+            match updater_mode() {
+                UpdaterMode::E2e => {
+                    write_version_marker(&version);
+                    run_updater_e2e(app.handle().clone());
+                }
+                UpdaterMode::Disabled => {
+                    shell_log("UPDATER_DISABLED by XPST_UPDATER_CHECK=0");
+                }
+                UpdaterMode::Interactive => {
+                    shell_log("UPDATER_READY interactive (UI-initiated check)");
+                }
+            }
+
+            // In-process boot-to-visible probe: the window is created
+            // (visible) from config before setup runs, so elapsed time here
+            // is process-start -> window on screen.
+            if let Some(start) = BOOT_START.get() {
+                log(&format!(
+                    "BOOT_TO_VISIBLE_SECS={:.3}",
+                    start.elapsed().as_secs_f64()
+                ));
+            }
+
+            let handle = app.handle().clone();
+            std::thread::spawn(move || boot_engine(handle));
+            Ok(())
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    // Deep links are handled exclusively via on_open_url() above — the
+    // plugin consumes RunEvent::Opened internally, so handling it here as
+    // well would deliver every URL twice (verified in e2e before dedup).
+    app.run(|app, event| match event {
+        RunEvent::ExitRequested { .. } | RunEvent::Exit => {
+            mark_shutting_down();
+            app.state::<Arc<EngineHandle>>().kill();
+        }
+        // macOS dock-icon click while the window is hidden (close-to-dock):
+        // bring the window back instead of ignoring the user.
+        //
+        // `RunEvent::Reopen` only exists on macOS, so the ARM itself must be
+        // cfg-gated. A `cfg!(target_os = "macos")` guard inside the pattern is
+        // evaluated at runtime and still requires the variant to exist at
+        // compile time, which breaks the Windows and Linux builds with
+        // `error[E0599]: no variant named Reopen found for enum RunEvent`.
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } => {
+            log(&format!(
+                "APP_REOPEN has_visible_windows={has_visible_windows}"
+            ));
+            if !has_visible_windows {
+                focus_existing(app);
+            }
+        }
+        _ => {}
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pick_free_port_returns_distinct_usable_ports() {
+        let a = pick_free_port().expect("first port");
+        let b = pick_free_port().expect("second port");
+        assert_ne!(a, b, "two consecutive picks should differ in practice");
+        assert!(a > 0);
+        // The chosen port should accept a listener again in most cases.
+        let relisten = TcpListener::bind(("127.0.0.1", a));
+        assert!(relisten.is_ok(), "port {a} should typically be rebindable");
+    }
+
+    #[test]
+    fn http_responds_rejects_closed_port() {
+        let port = pick_free_port().expect("free port");
+        assert!(!http_responds(&format!("127.0.0.1:{port}"), "/health"));
+    }
+
+    #[test]
+    fn http_responds_accepts_loopback_http_server() {
+        let port = pick_free_port().expect("free port");
+        let listener = TcpListener::bind(("127.0.0.1", port)).expect("bind");
+        std::thread::spawn(move || {
+            if let Ok((mut sock, _)) = listener.accept() {
+                let mut buf = [0u8; 512];
+                let _ = std::io::Read::read(&mut sock, &mut buf);
+                let _ = sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok");
+            }
+        });
+        assert!(http_responds(&format!("127.0.0.1:{port}"), "/health"));
+    }
+
+    #[test]
+    fn wait_for_engine_health_times_out_on_dead_port() {
+        let port = pick_free_port().expect("free port");
+        let started = Instant::now();
+        let res = wait_for_engine_health(port, Duration::from_millis(300));
+        assert!(res.is_none());
+        assert!(started.elapsed() >= Duration::from_millis(250));
+    }
+
+    #[test]
+    fn updater_mode_defaults_to_interactive_and_never_installs_silently() {
+        // The product default must be a user-initiated check: anything that
+        // auto-installs on a normal launch is the defect this replaced.
+        assert_eq!(updater_mode_from(None), UpdaterMode::Interactive);
+        assert_eq!(updater_mode_from(Some("")), UpdaterMode::Interactive);
+        assert_eq!(updater_mode_from(Some("true")), UpdaterMode::Interactive);
+        assert_eq!(updater_mode_from(Some("0")), UpdaterMode::Disabled);
+        assert_eq!(updater_mode_from(Some("1")), UpdaterMode::E2e);
+        // Trimmed, so " 1 " cannot silently fall back to the interactive path.
+        assert_eq!(updater_mode_from(Some(" 1 ")), UpdaterMode::E2e);
+        assert!(install_allowed(UpdaterMode::Interactive));
+        assert!(install_allowed(UpdaterMode::E2e));
+        assert!(!install_allowed(UpdaterMode::Disabled));
+    }
+
+    #[test]
+    fn mint_ui_token_is_hex_and_unique_per_call() {
+        let a = mint_ui_token();
+        let b = mint_ui_token();
+        assert_eq!(a.len(), 64, "4 x 16 hex chars");
+        assert!(
+            a.chars().all(|c| c.is_ascii_hexdigit()),
+            "token must be hex"
+        );
+        assert_ne!(a, b, "each launch must get its own token");
+    }
+
+    #[test]
+    fn engine_ui_url_carries_the_token_in_the_fragment() {
+        let url = engine_ui_url(51234, "deadbeef");
+        assert_eq!(url, "http://127.0.0.1:51234/#xpst_token=deadbeef");
+        // A parseable URL whose query is empty: the token is never sent to the
+        // engine, only read by the SPA.
+        let parsed = tauri::Url::parse(&url).expect("valid url");
+        assert_eq!(parsed.query(), None);
+        assert_eq!(parsed.fragment(), Some("xpst_token=deadbeef"));
+    }
+
+    #[test]
+    fn redact_url_hides_the_session_token_in_logs() {
+        assert_eq!(
+            redact_url("http://127.0.0.1:51234/#xpst_token=secret"),
+            "http://127.0.0.1:51234/#xpst_token=<redacted>"
+        );
+        assert_eq!(
+            redact_url("http://127.0.0.1:51234/#/compose"),
+            "http://127.0.0.1:51234/#/compose"
+        );
+        assert_eq!(
+            redact_url("http://127.0.0.1:51234/"),
+            "http://127.0.0.1:51234/"
+        );
+    }
+    // ── Composer media: native drop forwarding + the picker's ACL grant ──
+
+    #[test]
+    fn drag_payload_script_escapes_hostile_file_names() {
+        let paths = vec![
+            std::path::PathBuf::from("/Users/me/My Videos/take \"1\" & 2.mp4"),
+            std::path::PathBuf::from("/Users/me/back\\slash.mov"),
+        ];
+        let script = drag_payload_script("drop", &paths);
+
+        // The paths survive as JSON: the page receives exactly what was dropped.
+        let payload_start = script.find('[').expect("payload");
+        let payload_end = script.rfind(']').expect("payload end") + 1;
+        let parsed: Vec<String> =
+            serde_json::from_str(&script[payload_start..payload_end]).expect("json");
+        assert_eq!(
+            parsed,
+            vec![paths[0].to_string_lossy(), paths[1].to_string_lossy()]
+        );
+        // A file name can never escape the call and execute as code.
+        assert_eq!(script.matches('"').count() % 2, 0);
+        assert!(!script.contains("take \"1\""));
+    }
+
+    #[test]
+    fn drag_payload_script_never_throws_when_the_page_has_no_hook() {
+        let script = drag_payload_script("leave", &[]);
+        assert!(script.starts_with("window.__xpstMediaDrag &&"));
+        assert!(script.ends_with(";"));
+        assert!(script.contains("\"leave\""));
+        assert!(script.contains("[]"));
+    }
+
+    /// The composer's "Choose file…" control is a single IPC command on a
+    /// remote (engine) origin. If the capability does not grant it — or does
+    /// not allow the loopback port the engine actually listens on — the button
+    /// silently fails at runtime. This test reads the SHIPPED capability file
+    /// and proves both halves, on a random port like the one the shell picks.
+    #[test]
+    fn capability_grants_the_picker_to_any_engine_loopback_port() {
+        use tauri::utils::acl::capability::{Capability, CapabilityFile};
+        use tauri::utils::acl::RemoteUrlPattern;
+
+        let raw = std::fs::read_to_string("capabilities/default.json").expect("capability file");
+        let capability: Capability = match raw.parse::<CapabilityFile>().expect("parse") {
+            CapabilityFile::Capability(capability) => capability,
+            _ => panic!("capabilities/default.json must hold exactly one capability"),
+        };
+
+        let permissions: Vec<String> = capability
+            .permissions
+            .iter()
+            .map(|entry| entry.identifier().get().to_string())
+            .collect();
+        assert!(
+            permissions.iter().any(|p| p == "dialog:default"),
+            "the dialog plugin permission is missing: {permissions:?}"
+        );
+        assert!(
+            capability.windows.iter().any(|w| w == "main"),
+            "the grant must target the main window"
+        );
+
+        let remote = capability
+            .remote
+            .as_ref()
+            .expect("remote urls are required for an engine-served UI");
+        let patterns: Vec<RemoteUrlPattern> = remote
+            .urls
+            .iter()
+            .map(|pattern| pattern.parse().expect("valid url pattern"))
+            .collect();
+
+        // Same shape as a real launch: a free loopback port chosen at boot.
+        let port = pick_free_port().expect("free port");
+        let engine_url = tauri::Url::parse(&format!("http://127.0.0.1:{port}/")).expect("url");
+        assert!(
+            patterns.iter().any(|pattern| pattern.test(&engine_url)),
+            "no remote pattern allows the engine origin {engine_url}"
+        );
+        // A non-loopback host must NOT be granted by those patterns.
+        let remote_host = tauri::Url::parse("http://198.51.100.7:1234/").expect("url");
+        assert!(
+            !patterns.iter().any(|pattern| pattern.test(&remote_host)),
+            "the grant is wider than loopback: {remote_host} was allowed"
+        );
+    }
+}

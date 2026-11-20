@@ -1,0 +1,116 @@
+name: Rust binary size budget
+
+# D-4 ("lightweight is measured, not asserted"): the Rust engine must stay one
+# small binary. This lane builds the workspace release binaries and asserts a
+# *measured* budget against them, then records the cold-start number beside it.
+#
+# Scope: the two binaries the workspace emits (`xpst`, `xpst-mcp`). The desktop
+# installer (.app/.dmg/.msi/.AppImage) budget lives in tauri-release.yml and the
+# shell's BOOT_TO_READY_SECS budget lives in boot-budget.yml; neither is
+# replaced by this lane.
+#
+# The budgets are NOT in this file: they live in perf/rust-binary-budget.json
+# next to the measurement that justified them, so the gate cannot drift from the
+# record (that is the same pattern as perf/boot-budget.json). Changing a budget
+# therefore means changing a file a reviewer sees in the diff, with a number and
+# a reason.
+#
+# Why a separate workflow rather than a step in ci.yml: CI already records the
+# size (report-only) for every Rust change; this lane is the *gate*, scoped to
+# the pull requests that can move it, so a size regression is cheap to diagnose
+# and does not need the whole Python matrix to finish first.
+
+on:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "xtask/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "perf/rust-binary-budget.json"
+      - "scripts/check_rust_binary_size.py"
+      - "scripts/measure_rust_boot.py"
+      - ".github/workflows/rust-binary-size.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "crates/**"
+      - "xtask/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "perf/rust-binary-budget.json"
+      - "scripts/check_rust_binary_size.py"
+      - "scripts/measure_rust_boot.py"
+      - ".github/workflows/rust-binary-size.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The cold-start gate. D-4's 1 s target is stated for the desktop shell on the
+  # Mac mini host class (perf/boot-budget.json owns that measurement); this lane
+  # runs on a shared ubuntu runner whose spawn latency alone has a 100 ms tail,
+  # so a 1 s gate here would be decoration. Measured median for `xpst version
+  # --json` with the file cache dropped is 4.1 ms, so 250 ms is ~60x headroom:
+  # it cannot fail on runner noise, and it does fail if the binary starts
+  # loading a runtime, a database or a model on startup.
+  COLD_START_MAX_MEDIAN_MS: "250"
+
+jobs:
+  binary-size:
+    name: Rust binary size budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
+
+      - uses: Swatinem/rust-cache@v2
+
+      # `xpst-authflow` takes keyring's `sync-secret-service` feature on Linux,
+      # which links libdbus-sys: the workspace cannot build without the dbus
+      # development headers on the runner. Without this the gate fails at
+      # `cargo build --release` with "Package dbus-1 was not found in the
+      # pkg-config search path" — red for every Rust change, and red on main.
+      - name: Install Linux system dependencies (libdbus for keyring)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends pkg-config libdbus-1-dev
+
+      - name: Build release binaries
+        run: cargo build --release --workspace
+
+      - name: Assert binary size budget
+        run: |
+          set -euo pipefail
+          python3 scripts/check_rust_binary_size.py \
+            --binary target/release/xpst \
+            --binary target/release/xpst-mcp \
+            --budget-json "$RUNNER_TEMP/rust-binary-size.json"
+
+      # Reported, not gated on the tail: the measurement is uploaded so a slow
+      # run can be attributed to the host instead of argued about.
+      - name: Record cold start
+        run: |
+          set -euo pipefail
+          python3 scripts/measure_rust_boot.py \
+            --binary target/release/xpst \
+            --runs 20 \
+            --max-median-ms "$COLD_START_MAX_MEDIAN_MS" \
+            --json-out "$RUNNER_TEMP/xpst-cold-start.json"
+
+      - name: Upload size and cold-start report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-binary-size-report
+          path: |
+            ${{ runner.temp }}/rust-binary-size.json
+            ${{ runner.temp }}/xpst-cold-start.json
+          if-no-files-found: warn

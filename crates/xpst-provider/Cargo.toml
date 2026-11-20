@@ -1,0 +1,33 @@
+[package]
+name = "xpst-provider"
+description = "Provider trait, registry and the capability truth table as data (P1)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+default = []
+# The live HTTP client (reqwest + rustls) and the test double that stands in for
+# it. Off by default: a crate that only classifies an answer must not link an
+# HTTP stack, which is what the provider crates' module docs promise.
+live-http = ["dep:reqwest"]
+
+[dependencies]
+# RFC 9110 date parsing for Retry-After (MIT OR Apache-2.0). Pure, no network,
+# so it is not behind the feature.
+httpdate = "1"
+# Approved in docs/technical/licence-policy.md: MIT OR Apache-2.0, rustls only,
+# so there is no OpenSSL anywhere in the graph. MSRV 1.85 — below the
+# workspace's 1.89 floor, so it never constrains the build.
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls",
+    "http2",
+    "blocking",
+], optional = true }
+
+[lints]
+workspace = true
+

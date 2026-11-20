@@ -1,0 +1,63 @@
+name: Platform breakage
+description: Report a provider/API/auth/upload/download behavior change.
+title: "[Platform]: "
+labels: ["platform-breakage", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. Do not paste tokens, cookies, session files, or private creator data.
+        Run `xpst diagnostics --json` and attach the generated bundle only after reviewing it.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - YouTube
+        - Instagram
+        - X
+        - TikTok
+        - Local files
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: workflow
+    attributes:
+      label: Workflow
+      options:
+        - Authentication
+        - Listing/source discovery
+        - Download
+        - Upload
+        - Delete
+        - Analytics
+        - Health check
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Include the command or screen, expected result, and actual result.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Paste redacted logs or attach a reviewed diagnostics bundle. Never include raw credentials.
+  - type: input
+    id: version
+    attributes:
+      label: xPST version
+      placeholder: "xpst version --json"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11, macOS 15, Ubuntu 24.04, etc."
+    validations:
+      required: true

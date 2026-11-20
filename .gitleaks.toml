@@ -1,0 +1,72 @@
+# gitleaks configuration for xPST.
+#
+# Extends the upstream default ruleset and adds an allowlist for values that are
+# deliberately fake or public in this repository. Everything allowlisted here
+# must be verifiably non-secret — the allowlist is not a place to hide findings.
+#
+# The two historical matches this covers (both checked by hand against the raw
+# bytes, not assumed):
+#   * docs/setup-linkedin.md@a499403 line 53 — `Authorization: Bearer ***`,
+#     a three-asterisk documentation placeholder. The file is not in HEAD.
+#   * tests/test_diagnostics.py line 13 — `token="abc123456789abcdef"`, a
+#     synthetic fixture for the log-redaction helper.
+#   * crates/xpst-authflow/src/storage/encrypted_file.rs@5611fcb line 1 — the
+#     module doc reads "Argon2id-derived keys, XChaCha20-Poly1305 entries." and
+#     generic-api-key reads the cipher name after the word "keys," as an API
+#     key. It is a cipher suite name, not a credential: the file holds no
+#     literal secret (keys are derived at runtime from a passphrase or a
+#     per-install secret file), so the match is allowlisted by exact text and
+#     only inside that path — a real secret in the same file still fires.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """Synthetic fixtures, documentation placeholders and public key material.
+
+  * SYNTHETIC_* / do_not_use / notreal — token fixtures used by the redaction,
+    SSRF, path-confinement and secret-scanner tests. None of these are real.
+  * your_* / YOUR_* / *** — placeholder values in docs/ and example configs.
+  * ${{ secrets.X }} — a GitHub Actions secret *reference*, not a value.
+  * 13F290B1316626E2 — a minisign PUBLIC key id (public by definition; it is
+    the identity of the update-signing key, published in tauri.conf.json).
+"""
+regexes = [
+  '''(?i)SYNTHETIC''',
+  '''(?i)do[_-]?not[_-]?use''',
+  '''(?i)not[_-]?real''',
+  '''(?i)your[_-][A-Za-z0-9_]+''',
+  '''(?i)(placeholder|changeme|replace[_-]?me)''',
+  '''\$\{\{\s*secrets\.[A-Z0-9_]+\s*\}\}''',
+  '''13F290B1316626E2''',
+  '''\*\*\*''',
+  '''abc123456789abcdef''',
+]
+paths = [
+  '''^tests/''',
+]
+
+[[allowlists]]
+description = """Prose false positive: the XChaCha20-Poly1305 cipher suite name.
+
+  `crates/xpst-authflow/src/storage/encrypted_file.rs` opens with "Argon2id-derived
+  keys, XChaCha20-Poly1305 entries." and generic-api-key reads the cipher name
+  after "keys," as an API key. It is a cipher suite name, not a credential: that
+  file holds no literal secret (keys are derived at runtime from a passphrase or
+  a per-install secret file), and the matched text is fixed prose, so the entry
+  is allowlisted by that exact matched text.
+
+  Why the regex and not a `paths` or `commits` scope: gitleaks applies the
+  conditions *within one allowlist entry* as alternatives, not as a conjunction
+  — adding `paths` or `commits` here does not narrow the regex, it widens what
+  the entry allows. Measured with the pinned 8.30.1 binary on 2026-11-18 on a
+  fixture repo whose history holds a real-shaped `api_key` token: adding
+  `paths = [that file]` made it stop reporting a token placed in that same
+  file, and adding `commits = [that commit]` made it stop reporting a token in
+  a different file committed in the same commit. The regex is therefore the
+  only thing doing the scoping, and it matches nothing but this prose.
+"""
+regexTarget = "match"
+regexes = [
+  '''keys,\s*XChaCha20-Poly1305''',
+]

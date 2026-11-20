@@ -1,0 +1,151 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+!ui/src/lib/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Logs
+*.log
+logs/
+
+# Credentials & Secrets (NEVER commit these!)
+credentials/
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.keystore
+
+# OAuth tokens and secrets
+*token*.json
+*client_secret*.json
+*credentials*.json
+*cookies*.json
+*session*.json
+!configs/*.example.json
+!tests/fixtures/*.json
+
+# Environment files
+.env
+.env.*
+.env.local
+.env.*.local
+!.env.example
+
+# State files (contain user-specific data)
+state.json
+state_*.json
+quotas.json
+*.state
+
+# Session files
+sessions/
+*.session
+
+# Downloaded videos
+downloads/
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# Distribution
+*.tar.gz
+*.whl
+
+# Coverage & type checking
+.mypy_cache/
+.ruff_cache/
+.pytype/
+
+# XPST runtime data (user-specific, never commit)
+.xpst/
+.crosspstr/
+graphify-out/
+
+# Build artifacts (never commit — use GitHub Releases)
+release/
+*.dmg
+sbom.json
+
+# Cookie files (NEVER commit — may contain live session tokens)
+*.cookies
+cookies.txt
+*cookies*.json
+docs/internal/
+docs/research/
+docs/superpowers/
+
+# Temp QA files
+tmp-manual-qa*
+
+# Tauri shell build artifacts
+src-tauri/target/
+# Tauri shell: built engine sidecar bundle (see src-tauri/binaries/README.md)
+src-tauri/binaries/engine/*
+!src-tauri/binaries/engine/.gitkeep
+src-tauri/binaries/xpst-engine-*
+# Bundled media binaries (yt-dlp only) are fetched by
+# scripts/fetch-media-binaries.sh — never commit multi-MB binaries.
+src-tauri/binaries/ytdlp/*
+!src-tauri/binaries/ytdlp/.gitkeep
+# Provenance record written by fetch-media-binaries.sh (build evidence, never a
+# source artifact - the release lane attaches it to the GitHub release).
+src-tauri/binaries/PROVENANCE.txt
+!src-tauri/binaries/README.md
+
+# Tauri shell generated ACL schemas + E2E throwaway signing key dir
+src-tauri/gen/schemas/
+.tauri/
+
+# Private/internal — never publish (added 08-31 security sweep)
+audit-map/
+archive-qa/
+qa_evidence/
+missions/
+docs/QA-REPORT-*.md
+GOAL-*.md
+*/**/platform-auth-checklist*.md
+tiktok_dev_account.txt
+
+# Rust engine workspace (crates/, xtask) build output. The Tauri shell has its
+# own entry above; this one is the new workspace root.
+/target/
