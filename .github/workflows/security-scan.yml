@@ -72,7 +72,7 @@ jobs:
 
       - name: Upload gitleaks SARIF
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gitleaks-sarif
           path: ${{ runner.temp }}/gitleaks-results.sarif
@@ -128,7 +128,7 @@ jobs:
 
       - name: Upload bandit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bandit-report
           path: ${{ runner.temp }}/bandit.json
