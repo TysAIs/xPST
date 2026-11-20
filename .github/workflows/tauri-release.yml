@@ -474,7 +474,7 @@ jobs:
         # can be diagnosed instead of re-run blindly; nothing is uploaded on a
         # clean build.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tauri-build-logs-${{ matrix.target }}
           path: ${{ runner.temp }}/tauri-build-failed-attempt-*.log
@@ -677,7 +677,7 @@ jobs:
           echo "size budget: PASS (installer ${SIZE_MB}MB <= ${INSTALLER_BUDGET_MB}MB)"
 
       - name: Upload installers (per target)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: xPST-${{ matrix.target }}
           # A --target build lands under target/<triple>/release/bundle, so a
@@ -743,7 +743,7 @@ jobs:
 
       - name: "Upload cold-boot samples (macOS)"
         if: always() && runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: boot-samples-${{ github.run_id }}-${{ matrix.target }}
           path: |

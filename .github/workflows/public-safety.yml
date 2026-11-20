@@ -79,7 +79,7 @@ jobs:
 
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: public-safety-reports
           path: public-safety-*.json
@@ -126,7 +126,7 @@ jobs:
 
       - name: Upload history report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: public-safety-history-report
           path: public-safety-history.json
@@ -161,7 +161,7 @@ jobs:
 
       - name: Upload CI log report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: public-safety-ci-log-report
           path: public-safety-ci-logs.json
