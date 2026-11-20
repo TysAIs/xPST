@@ -89,10 +89,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # uv.lock is generated with this exact uv version. A different uv can
-      # rewrite the lockfile format or re-resolve transitively, which makes
-      # `uv lock --check` fail for reasons unrelated to the change under test.
-      # Bumping this `version` pin means regenerating uv.lock in the same PR.
+      # uv.lock is generated with this exact uv version, so the committed lock
+      # has to be a file this uv agrees with. Bumping this `version` pin means
+      # regenerating uv.lock in the same PR.
+      # Measured 2026-11-20: a lock re-resolved by a different uv (0.11.33, the
+      # line Dependabot's uv updater ships) still passes this gate — the check
+      # compares resolved content, not the file's `revision` line. What fails
+      # here is a lock that no longer describes pyproject.toml, which is why
+      # .github/dependabot.yml uses the `uv` ecosystem and not `pip`.
       # The action major (v7 = node24) is independent of that pin and does not
       # change which uv gets installed.
       - uses: astral-sh/setup-uv@v7
