@@ -905,7 +905,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Publish the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # The asset list was resolved and asserted in the step above: no glob
           # here can quietly match zero files.
