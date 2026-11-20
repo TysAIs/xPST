@@ -392,3 +392,5 @@ sudo systemctl start xpst
 - Read the [Architecture Guide](ARCHITECTURE.md) for technical details
 - Check [Contributing Guide](../CONTRIBUTING.md) to contribute
 - Review [Configuration Reference](../configs/example.yaml) for advanced options
+
+<!-- governance enforcement probe 2026-11-20T18:16:15Z: throwaway line, this PR is closed without merge -->
