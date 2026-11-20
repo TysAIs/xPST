@@ -65,7 +65,11 @@ jobs:
         if: matrix.python-version != '3.10'
         run: pip-audit
 
+      # The personal identifiers that may never be committed are supplied by the
+      # repository secret, never by the tree (see .public-safety-denylist).
       - name: Public safety scan
+        env:
+          XPST_PUBLIC_SAFETY_DENYLIST: ${{ secrets.XPST_PUBLIC_SAFETY_DENYLIST }}
         run: python scripts/scan_public_safety.py --json
 
       - name: Build package

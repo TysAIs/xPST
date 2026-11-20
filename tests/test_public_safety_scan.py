@@ -636,3 +636,45 @@ def test_cli_report_file_written(tmp_path, monkeypatch):
 
     assert code == 0
     assert json.loads(report.read_text(encoding="utf-8"))["ok"] is True
+
+
+# --- CI wiring for the private half of the deny list ----------------------
+CI_SCANNER_WORKFLOWS = ("public-safety.yml", "ci.yml", "security-scan.yml")
+DENYLIST_SECRET_REF = "${{ secrets.XPST_PUBLIC_SAFETY_DENYLIST }}"
+
+
+def _ci_scanner_steps() -> list[tuple[str, str, dict, dict]]:
+    """Return ``(workflow, job id, job env, step)`` for every scanner step."""
+    import yaml  # local import: only this wiring test needs a YAML parser
+
+    found: list[tuple[str, str, dict, dict]] = []
+    workflows = scanner.ROOT / ".github" / "workflows"
+    for name in CI_SCANNER_WORKFLOWS:
+        data = yaml.safe_load((workflows / name).read_text(encoding="utf-8"))
+        for job_id, job in (data.get("jobs") or {}).items():
+            for step in job.get("steps") or []:
+                if "scan_public_safety.py" in (step.get("run") or ""):
+                    found.append((name, job_id, job.get("env") or {}, step))
+    return found
+
+
+def test_every_ci_scanner_step_receives_the_private_denylist_from_the_secret():
+    """The identifiers that may never be committed must reach CI as a secret.
+
+    The deny list has two halves: the checked-in file carries the tokens that
+    are safe to publish, and the personal identifiers arrive through
+    ``XPST_PUBLIC_SAFETY_DENYLIST``. A scanner step that does not receive that
+    variable silently enforces the narrower list -- which is exactly how the
+    recreated repository shipped, with five personal tokens policed nowhere.
+    This asserts the wiring only; CI never prints the secret's value.
+    """
+    steps = _ci_scanner_steps()
+
+    wired_workflows = {name for name, _job_id, _job_env, _step in steps}
+    assert wired_workflows == set(CI_SCANNER_WORKFLOWS), "a workflow no longer runs the scanner"
+    for name, job_id, job_env, step in steps:
+        env = {**job_env, **(step.get("env") or {})}
+        assert env.get("XPST_PUBLIC_SAFETY_DENYLIST") == DENYLIST_SECRET_REF, (
+            f"{name}:{job_id}: {step.get('name')} runs the public-safety scanner "
+            "without the XPST_PUBLIC_SAFETY_DENYLIST repository secret"
+        )

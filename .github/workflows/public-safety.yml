@@ -4,10 +4,14 @@ name: Public Safety
 #
 #  * tree-and-artifacts (every push + PR) fails the build on ANY finding in the
 #    publishable working tree or in the artifacts built from it (sdist, wheel,
-#    and any desktop bundle that happens to be present). The personal-identifier
-#    deny list is checked in at .public-safety-denylist and the scanner loads it
-#    by default in every mode, so no environment plumbing is involved; a step
-#    below fails the job if that file ever resolves to zero tokens.
+#    and any desktop bundle that happens to be present). The deny list has two
+#    halves: product-safe tokens are checked in at .public-safety-denylist, and
+#    the personal identifiers that may never be committed arrive through the
+#    XPST_PUBLIC_SAFETY_DENYLIST repository secret, wired into every job below
+#    that runs the scanner. A step below fails the job if the checked-in file
+#    ever resolves to zero tokens. GitHub withholds repository secrets from
+#    fork pull requests, so there the half that is checked in is what runs --
+#    the scan still gates, it just cannot see the private tokens.
 #  * history-scan (manual, report only) walks every commit and blob reachable
 #    from any ref and reports the categories with their commit SHAs. It never
 #    rewrites history; a full-history rewrite is a human decision.
@@ -32,6 +36,8 @@ jobs:
   tree-and-artifacts:
     name: Tree + artifact scan
     runs-on: ubuntu-latest
+    env:
+      XPST_PUBLIC_SAFETY_DENYLIST: ${{ secrets.XPST_PUBLIC_SAFETY_DENYLIST }}
     steps:
       - uses: actions/checkout@v4
 
@@ -89,6 +95,8 @@ jobs:
     name: Full git history scan (manual, report only)
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    env:
+      XPST_PUBLIC_SAFETY_DENYLIST: ${{ secrets.XPST_PUBLIC_SAFETY_DENYLIST }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -139,6 +147,8 @@ jobs:
     permissions:
       actions: read
       contents: read
+    env:
+      XPST_PUBLIC_SAFETY_DENYLIST: ${{ secrets.XPST_PUBLIC_SAFETY_DENYLIST }}
     steps:
       - uses: actions/checkout@v4
 

@@ -22,9 +22,11 @@ tysn.dev
 tysn_dev
 
 # The maintainer's personal identifiers (name, earlier account names) are
-# NEVER committed to this repository. They are supplied locally through the
-# XPST_PUBLIC_SAFETY_DENYLIST environment variable, which the scanner unions
-# with this file (see scripts/scan_public_safety.py).
+# NEVER committed to this repository. Locally they are exported through the
+# XPST_PUBLIC_SAFETY_DENYLIST environment variable; in CI the same variable is
+# filled from the repository secret of that name by every workflow that runs
+# the scanner (.github/workflows/public-safety.yml, ci.yml, security-scan.yml).
+# scripts/scan_public_safety.py unions it with this file in every mode.
 
 # Account identifiers from earlier personal accounts are likewise supplied
 # only through the environment variable above, never committed.
