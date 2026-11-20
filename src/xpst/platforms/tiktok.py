@@ -217,7 +217,17 @@ class TikTokUploader(PlatformUploader):
         inbox-draft.
         """
         mode = self._publish_mode()
-        if mode in ("browser", "browser_only"):
+        aggregator = (
+            str(getattr(self.config.tiktok, "provider", "local") or "local").strip().lower()
+            == "zernio"
+        )
+        if aggregator:
+            notes = (
+                "Publishes through the rented Zernio aggregator route: the vendor owns the "
+                "audited TikTok app and xPST holds only a vendor API key (no TikTok token, "
+                "no OAuth exchange). Public posts only."
+            )
+        elif mode in ("browser", "browser_only"):
             notes = (
                 "Publishes through the logged-in TikTok Studio web flow "
                 "(browser-native publisher (unofficial); uploads ride TikTok's own "
@@ -226,11 +236,19 @@ class TikTokUploader(PlatformUploader):
             )
         else:
             notes = "Uploads videos through the TikTok Content Posting API (Direct Post endpoint)."
-        return ProviderManifest(
-            name="tiktok",
-            display_name="TikTok",
-            roles=(ProviderRole.VIDEO_DESTINATION, ProviderRole.DESTINATION),
-            capabilities=(
+        if aggregator:
+            capabilities = (
+                ProviderCapability.UPLOAD,
+                ProviderCapability.DELETE,
+                ProviderCapability.HEALTH,
+                ProviderCapability.RATE_LIMITS,
+            )
+            auth_mode = AuthMode.API_KEY
+            is_official_api = False
+            docs_url = "https://docs.zernio.com/platforms/tiktok"
+            routes = ("tiktok_aggregator",)
+        else:
+            capabilities = (
                 ProviderCapability.UPLOAD,
                 ProviderCapability.DELETE,
                 ProviderCapability.HEALTH,
@@ -239,17 +257,27 @@ class TikTokUploader(PlatformUploader):
                 else ProviderCapability.OFFICIAL_API,
                 ProviderCapability.OAUTH,
                 ProviderCapability.RATE_LIMITS,
-            ),
-            auth_mode=AuthMode.SESSION if mode in ("browser", "browser_only") else AuthMode.OAUTH,
-            is_official_api=mode not in ("browser", "browser_only"),
-            docs_url="https://developers.tiktok.com/doc/content-posting-api",
+            )
+            auth_mode = AuthMode.SESSION if mode in ("browser", "browser_only") else AuthMode.OAUTH
+            is_official_api = mode not in ("browser", "browser_only")
+            docs_url = "https://developers.tiktok.com/doc/content-posting-api"
+            routes = ("official-direct-post", "tiktok_browser", "inbox-draft")
+        return ProviderManifest(
+            name="tiktok",
+            display_name="TikTok",
+            roles=(ProviderRole.VIDEO_DESTINATION, ProviderRole.DESTINATION),
+            capabilities=capabilities,
+            auth_mode=auth_mode,
+            is_official_api=is_official_api,
+            docs_url=docs_url,
             notes=notes,
             extra={
                 "content": ("video",),
                 "max_caption_length": self.MAX_CAPTION_LENGTH,
                 "rate_limit_per_min": self.RATE_LIMIT_PER_MIN,
                 "publish_mode": mode,
-                "routes": ("official-direct-post", "tiktok_browser", "inbox-draft"),
+                "provider": "zernio" if aggregator else "local",
+                "routes": routes,
             },
         )
 

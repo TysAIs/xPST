@@ -2316,7 +2316,15 @@ def create_api_router(
         config = _load_ui_config()
 
         def _section(obj: Any) -> dict[str, Any]:
-            return dict(obj.__dict__) if hasattr(obj, "__dict__") else {}
+            # Nested dataclasses (the TikTok aggregator block) must be plain
+            # dicts BEFORE masking: a dataclass object is neither dict nor str,
+            # so the masker would pass it through untouched and FastAPI would
+            # serialise its unmasked fields afterwards.
+            data = dict(obj.__dict__) if hasattr(obj, "__dict__") else {}
+            return {
+                key: (dict(value.__dict__) if hasattr(value, "__dict__") else value)
+                for key, value in data.items()
+            }
 
         return _mask_sensitive_values(
             {

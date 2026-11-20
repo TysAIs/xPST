@@ -619,6 +619,14 @@ class PlatformUploader(ABC):
     xpst/platforms/ directory with the correct class name.
     """
 
+    #: Whether :meth:`PlatformRegistry.auto_discover` may register this class as
+    #: a platform of its own. A *route* adapter (an alternative publishing path
+    #: for a platform that already exists — the TikTok aggregator) sets this
+    #: False: registering it would fork the platform into two identities and
+    #: split its state, quotas and analytics. It is selected by config instead
+    #: (see :func:`xpst.platforms.tiktok_route.build_tiktok_uploader`).
+    auto_register: bool = True
+
     def __init__(self, config: XPSTConfig):
         """
         Initialize the uploader with configuration.
@@ -1056,6 +1064,11 @@ class PlatformRegistry:
                     isinstance(value, type)
                     and issubclass(value, PlatformUploader)
                     and value is not PlatformUploader
+                    # A route-only adapter (auto_register = False) is not a
+                    # platform: it is selected per config under an existing
+                    # platform key, so registering it under the module name
+                    # would invent a second identity for that platform.
+                    and getattr(value, "auto_register", True)
                     # Skip subclasses already explicitly registered (module-level
                     # register() calls are the source of truth).
                     and value not in cls._registry.values()

@@ -48,6 +48,12 @@ class AuthMode(str, Enum):
     SESSION = "session"
     SOURCE_ONLY = "source_only"
     CONTENT_POSTING_API = "content_posting_api"
+    #: A long-lived bearer key handed out by a vendor's dashboard (no consent
+    #: screen, no redirect, no refresh flow). The Zernio aggregator route for
+    #: TikTok is the first user; reusing ``OAUTH`` would mislabel the provider
+    #: in the dashboard, CLI and MCP surfaces, because no OAuth exchange exists
+    #: on this route and xPST never sees a TikTok token.
+    API_KEY = "api_key"
     #: A long-lived app-specific password exchanged for a short-lived API
     #: session (Bluesky's ``com.atproto.server.createSession``). Not OAuth: there
     #: is no consent screen and no redirect, which is why it has its own value

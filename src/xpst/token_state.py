@@ -338,6 +338,22 @@ def token_metadata(config: Any, platform: str) -> TokenMetadata:
         )
 
     if platform == "tiktok":
+        provider = str(getattr(account, "provider", "local") or "local").strip().lower()
+        if provider == "zernio":
+            # The aggregator route's credential is one vendor API key: there is
+            # no OAuth token to refresh and no expiry to report.
+            aggregator = getattr(account, "aggregator", None)
+            account_id = str(getattr(aggregator, "account_id", "") or "")
+            return TokenMetadata(
+                platform=platform,
+                auth_mode="api_key",
+                enabled=enabled,
+                configured=bool(account_id),
+                notes=(
+                    "aggregator publish route: a vendor API key authenticates the post "
+                    "(no TikTok OAuth token on this machine)",
+                ),
+            )
         has_posting = bool(getattr(account, "client_key", "")) and bool(
             getattr(account, "access_token", "") or getattr(account, "refresh_token", "")
         )

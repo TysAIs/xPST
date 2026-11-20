@@ -1081,7 +1081,12 @@ DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
         "TikTok",
         declared_labels=("video",),
         implemented=(ContentType.VIDEO,),
-        note="video path exists but publishing is blocked by TikTok app review; the connection is source-only",
+        note=(
+            "video is implemented on two routes: xPST's own Content Posting API route is blocked "
+            "by TikTok app review, and the rented aggregator route (accounts.tiktok.provider: "
+            "zernio) publishes publicly through the vendor's audited app; there is no carousel "
+            "path on either route"
+        ),
         notes={
             ContentType.CAROUSEL: "no carousel path: a carousel request is refused by name, and nothing is stitched into a video"
         },

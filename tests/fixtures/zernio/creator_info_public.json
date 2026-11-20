@@ -1,0 +1,7 @@
+{
+  "privacyLevels": [
+    "PUBLIC_TO_EVERYONE",
+    "SELF_ONLY"
+  ],
+  "canPublish": true
+}

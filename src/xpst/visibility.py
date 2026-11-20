@@ -56,6 +56,11 @@ ROUTE_TIKTOK_BROWSER = "tiktok_browser"
 #: TikTok's inbox-draft upload — nothing is published by xPST; a human finishes
 #: the post in the app.
 ROUTE_TIKTOK_DRAFT = "inbox_draft"
+#: TikTok video published through a rented aggregator (Zernio), which owns the
+#: audited TikTok app. Still the *tiktok* platform: state, quotas, content
+#: limits and analytics all key on the platform name, so this is a second
+#: publishing route, never a platform called "zernio".
+ROUTE_TIKTOK_AGGREGATOR = "tiktok_aggregator"
 
 # ── Policies ───────────────────────────────────────────────────────────────
 REFUSE = "refuse"
@@ -147,6 +152,22 @@ _TIKTOK_DRAFT = VisibilitySupport(
     ),
 )
 
+_TIKTOK_AGGREGATOR = VisibilitySupport(
+    platform="tiktok",
+    route=ROUTE_TIKTOK_AGGREGATOR,
+    # Business-app connections publish video publicly only. There is deliberately
+    # no private/unlisted level here: a "post it privately" request must be
+    # REFUSED, not silently turned into a public post.
+    levels={PUBLIC: "PUBLIC_TO_EVERYONE"},
+    default_level="PUBLIC_TO_EVERYONE",
+    policy=REFUSE,
+    note=(
+        "The rented aggregator route posts through a TikTok for Business "
+        "connection, which publishes video publicly only "
+        "(PUBLIC_TO_EVERYONE); there is no private or unlisted level on it."
+    ),
+)
+
 
 def _advisory_platform(platform: str, note: str) -> VisibilitySupport:
     """A destination with no upload-time privacy control anywhere (ADVISE)."""
@@ -176,6 +197,7 @@ VISIBILITY_SUPPORT: dict[tuple[str, str], VisibilitySupport] = {
         _TIKTOK_API,
         _TIKTOK_BROWSER,
         _TIKTOK_DRAFT,
+        _TIKTOK_AGGREGATOR,
         _advisory_platform("x", _NO_PRIVATE_MODE),
         _advisory_platform("instagram", _NO_PRIVATE_MODE),
         _advisory_platform("threads", _NO_PRIVATE_MODE),
@@ -255,6 +277,12 @@ def publish_route(
     account = getattr(config, "tiktok", None)
     if account is None:
         return ROUTE_API
+    # A rented aggregator connection is the whole publishing lane for this
+    # destination: every level it accepts must be answered from its own row, so
+    # a private request is refused instead of being routed to a route that
+    # cannot honour it.
+    if str(getattr(account, "provider", "local") or "local").strip().lower() == "zernio":
+        return ROUTE_TIKTOK_AGGREGATOR
     draft = str(getattr(account, "draft_mode", "auto") or "auto").strip().lower()
     if draft == "always":
         return ROUTE_TIKTOK_DRAFT
@@ -425,6 +453,7 @@ __all__ = [
     "PUBLIC",
     "REFUSE",
     "ROUTE_API",
+    "ROUTE_TIKTOK_AGGREGATOR",
     "ROUTE_TIKTOK_BROWSER",
     "ROUTE_TIKTOK_DRAFT",
     "UNLISTED",
