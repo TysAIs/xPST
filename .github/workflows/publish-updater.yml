@@ -104,7 +104,7 @@ jobs:
       # `release` event points at a tag, and the manifest has to be committed on
       # top of `main` or the push would move the branch backwards.
       - name: Check out the served branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0

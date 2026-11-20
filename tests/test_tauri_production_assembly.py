@@ -353,7 +353,11 @@ def test_tauri_workflow_publishes_one_asserted_release_asset_set() -> None:
     assert "action-gh-release" not in build_lane, "a build lane still creates the release itself"
     assert "fail_on_unmatched_files: true" in workflow
     assert "would publish no" in workflow, "no platform-coverage assertion before publishing"
-    assert "upload-artifact@v4" in build_lane and "download-artifact@v4" in workflow
+    # The action family is the contract; its major is not. Pinning `@v4` here
+    # turned every Dependabot major bump into a PR that could never go green,
+    # because the bot cannot edit this test. The version lives in the workflow.
+    assert re.search(r"upload-artifact@v\d+", build_lane), "build lane does not upload its bundle"
+    assert re.search(r"download-artifact@v\d+", workflow), "publish job does not collect the bundles"
     assert "SHA256SUMS" in workflow
 
 

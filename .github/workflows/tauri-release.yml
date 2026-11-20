@@ -113,7 +113,7 @@ jobs:
         shell: bash
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
         with:
@@ -474,7 +474,7 @@ jobs:
         # can be diagnosed instead of re-run blindly; nothing is uploaded on a
         # clean build.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tauri-build-logs-${{ matrix.target }}
           path: ${{ runner.temp }}/tauri-build-failed-attempt-*.log
@@ -677,7 +677,7 @@ jobs:
           echo "size budget: PASS (installer ${SIZE_MB}MB <= ${INSTALLER_BUDGET_MB}MB)"
 
       - name: Upload installers (per target)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: xPST-${{ matrix.target }}
           # A --target build lands under target/<triple>/release/bundle, so a
@@ -743,7 +743,7 @@ jobs:
 
       - name: "Upload cold-boot samples (macOS)"
         if: always() && runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: boot-samples-${{ github.run_id }}-${{ matrix.target }}
           path: |
@@ -850,7 +850,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download the per-lane artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-artifacts
           merge-multiple: true
@@ -905,7 +905,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Publish the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # The asset list was resolved and asserted in the step above: no glob
           # here can quietly match zero files.
@@ -947,7 +947,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
         with:
@@ -956,7 +956,7 @@ jobs:
       # The three lanes upload under `xPST-<target>`; merge them into one flat
       # directory because the selector resolves one signed artifact per target
       # from a directory listing.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: updater-assets
           merge-multiple: true
