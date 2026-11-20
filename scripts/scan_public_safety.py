@@ -37,9 +37,11 @@ reviewable per line instead of exempting a whole directory.
 Personal identifiers that are not machine names or e-mail shapes (account
 handles, a person's name, old account ids) come from the checked-in deny list
 ``.public-safety-denylist`` plus the ``XPST_PUBLIC_SAFETY_DENYLIST`` environment
-variable. The file is loaded in every mode, so the gate enforces it in CI
-without environment plumbing; the file also carries ``allow:`` lines for the
-product-level identifiers D-2 permits (project URLs, the bundle id).
+variable. The file holds the tokens that are safe to publish and is loaded in
+every mode; the environment variable holds the identifiers that must never be
+committed and is filled from a repository secret in CI. The file also carries
+``allow:`` lines for the product-level identifiers D-2 permits (project URLs,
+the bundle id).
 
 Absolute home paths for any OS use a shared placeholder allow-list so that
 documentation like ``/Users/<user>``, ``C:\\Users\\tester`` or ``/home/xpst``
@@ -346,11 +348,14 @@ def _pragma_line_ranges(text: str) -> list[tuple[int, int]]:
 
 # --- Personal-identifier deny list ----------------------------------------
 # D-2 of docs/DIRECTION.md: zero personal data. The deny list is checked in as
-# ``.public-safety-denylist`` (one token per line, ``#`` comments) so every CI
-# run enforces it without environment plumbing; ``XPST_PUBLIC_SAFETY_DENYLIST``
-# is still unioned in for one-off local scans. The file also carries
-# ``allow:`` lines for the product-level identifiers D-2 permits: matching
-# ignores banned tokens that occur inside one of those strings.
+# ``.public-safety-denylist`` (one token per line, ``#`` comments) for the
+# tokens that are safe to publish; the personal identifiers that may never be
+# committed arrive through ``XPST_PUBLIC_SAFETY_DENYLIST`` -- exported by hand
+# for one-off local scans, and filled from the repository secret of that name
+# by every workflow that runs this scanner. Both are unioned in every mode, so
+# the gate cannot be widened by forgetting the environment. The file also
+# carries ``allow:`` lines for the product-level identifiers D-2 permits:
+# matching ignores banned tokens that occur inside one of those strings.
 #
 # The deny list file is exempt from its own scan -- it *is* the list of banned
 # names -- and a finding still never carries the matched value.

@@ -55,10 +55,15 @@ artifacts (sdist, wheel, desktop bundle).
 
 **Enforcement**: `scripts/scan_public_safety.py` plus
 `.github/workflows/public-safety.yml` (tree + artifact scan on every push and
-PR, history scan on demand). The personal-identifier deny list is checked in at
-`.public-safety-denylist` and the scanner loads it in every mode, so the gate
-enforces it in CI with no environment plumbing; `XPST_PUBLIC_SAFETY_DENYLIST`
-is unioned in for one-off local scans. The same file carries the
+PR, history scan on demand). The deny list has two halves and the scanner
+unions them in every mode: the tokens that are safe to publish are checked in
+at `.public-safety-denylist`, and the personal identifiers that may never be
+committed arrive through `XPST_PUBLIC_SAFETY_DENYLIST` — exported by hand for
+a one-off local scan, and filled from the repository secret of the same name by
+every workflow that runs the scanner (`public-safety.yml`, `ci.yml`,
+`security-scan.yml`). A scan without that variable is a narrower scan, never a
+passing one, because the checked-in file alone does not name the maintainer.
+The same file carries the
 product-identifier exemptions as `allow:` lines (project URLs, the bundle id),
 so the permitted identifiers sit next to the banned names and are reviewed
 together. Matching is case-insensitive on word boundaries, a documented
@@ -67,7 +72,12 @@ finding never echoes the matched value.
 
 Measured 2026-11-03 with this gate: the tree scan is clean over 732 publishable
 files with the deny list active, and adding a banned handle to a `src/` file
-fails the same scan. `tests/test_public_safety_scan.py` covers the checked-in
+fails the same scan. Re-measured 2026-11-20 on the recreated repository at
+`bcb5b89`: clean over 1124 publishable files with the checked-in tokens alone
+and with the private identifiers supplied through the environment variable,
+while adding one of those private identifiers to a docs file fails the same
+scan (`user_name`) only in the second case — a scan run without the variable
+cannot see them. `tests/test_public_safety_scan.py` covers the checked-in
 file, the env-var union, comment/blank-line parsing, the placeholder allow-list
 and the deny list's exemption from its own scan.
 
