@@ -1,28 +1,66 @@
 version: 2
 
 updates:
-  # Python dependencies tracked in pyproject.toml
-  - package-ecosystem: "pip"
+  # Python dependencies: pyproject.toml and uv.lock together.
+  #
+  # This must be the `uv` ecosystem, not `pip`. The `pip` ecosystem reads
+  # pyproject.toml and rewrites nothing else, so every PR it opened declared a
+  # new constraint while leaving uv.lock untouched — and the `Lockfile
+  # freshness` job (`uv lock --check`, uv pinned to 0.13.4 in ci.yml) rejects
+  # that by construction. Those PRs could never go green.
+  #
+  # GitHub's Dependabot `uv` updater re-resolves uv.lock in the same PR.
+  # Measured 2026-11-20: a lockfile authored by the updater's uv 0.11.33
+  # (docs: uv support is "v0.11") is accepted unchanged by the pinned 0.13.4
+  # gate, so the PR arrives with a lock the repo's own gate agrees with.
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
     labels:
       - "dependencies"
       - "python"
     commit-message:
-      prefix: "deps(pip)"
+      prefix: "deps(uv)"
+    groups:
+      # Routine bumps arrive as one reviewable PR instead of one per package.
+      # Majors stay out of the group: a major is a behaviour decision (the
+      # under-16 rich / under-6 bcrypt / under-27 structlog updates are exactly
+      # that), so each one keeps its own PR and its own review.
+      python-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+      python-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
 
-  # GitHub Actions used in CI/release workflows
+  # GitHub Actions used in CI/release workflows.
+  #
+  # A cross-major action bump is not a version string: `checkout` v6 moved the
+  # persisted credential out of .git/config, v7 refuses to check out a fork PR
+  # under pull_request_target/workflow_run; `download-artifact` v5 changed the
+  # path of single-by-ID downloads and v8 made a digest mismatch fatal. Those
+  # need the workflows read and the release paths rehearsed, so a major keeps
+  # its own PR and is never bundled with routine bumps.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
     labels:
       - "dependencies"
       - "github-actions"
     commit-message:
       prefix: "deps(ci)"
+    groups:
+      actions-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
