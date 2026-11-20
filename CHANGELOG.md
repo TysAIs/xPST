@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **TikTok publishing through a rented aggregator (Zernio), as a route on `tiktok`.**
+  TikTok's Content Posting API forces unaudited clients to private posts and
+  TikTok's audit rules reject a tool that uploads to accounts its operator
+  manages, so `accounts.tiktok.provider: zernio` publishes through a vendor-owned
+  audited TikTok app while the platform key stays `tiktok` — state, quotas,
+  content limits and analytics are not forked into a second identity
+  (`ROUTE_TIKTOK_AGGREGATOR`, no new registered platform). The adapter reports
+  `AuthMode.API_KEY` (not OAuth: no consent screen, no redirect, and xPST never
+  holds a TikTok token), reads the vendor key from `CredentialStore` under
+  `zernio_api_key` and never from `config.yaml`, refuses to publish when
+  `PUBLIC_TO_EVERYONE` is absent from creator info or when TikTok reports no
+  capacity, treats `207` as failure, reports `published`-with-null-URL as
+  `pending` without fabricating an id, and confirms a post only by reading
+  TikTok's own public page (requiring `itemStruct.id`, `author.uniqueId` and
+  `desc`); TikTok's oEmbed endpoint is deliberately unused because it echoes any
+  id back with HTTP 200. Unit-tested against recorded vendor shapes only: no
+  account was created, no key stored, no money spent and nothing posted.
 - **The provider transports can reach the platforms (`xpst-provider::http`).**
   Every destination published through a `Transport` trait with no live
   implementation, so no part of the Rust engine had ever been proven against a

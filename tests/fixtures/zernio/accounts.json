@@ -1,0 +1,10 @@
+{
+  "accounts": [
+    {
+      "id": "acc_tiktok_1",
+      "platform": "tiktok",
+      "username": "example.creator",
+      "lane": "business"
+    }
+  ]
+}

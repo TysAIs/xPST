@@ -1,0 +1,13 @@
+{
+  "id": "zpost_3",
+  "status": "partial",
+  "platforms": [
+    {
+      "platform": "tiktok",
+      "status": "failed",
+      "code": "",
+      "type": "platform_error",
+      "errorMessage": "TikTok flagged this post as potentially risky (spam_risk)"
+    }
+  ]
+}

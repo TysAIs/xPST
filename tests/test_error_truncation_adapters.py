@@ -20,7 +20,10 @@ def _adapters() -> list[str]:
     return sorted(
         path.stem
         for path in PLATFORMS_DIR.glob("*.py")
-        if path.stem not in {"__init__", "base", "twikit_compat"}
+        # ``tiktok_route`` is adapter *selection* (which TikTok uploader a config
+        # builds), not an adapter: it holds no upload path and therefore no error
+        # text to bound.
+        if path.stem not in {"__init__", "base", "twikit_compat", "tiktok_route"}
     )
 
 

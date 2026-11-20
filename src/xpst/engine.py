@@ -496,8 +496,9 @@ class CrossPostEngine:
         # TikTok (destination via Content Posting API; also a source via sources/)
         if self.config.tiktok.enabled:
             try:
-                from xpst.platforms.tiktok import TikTokUploader
-                self._platforms["tiktok"] = TikTokUploader(self.config)
+                from xpst.platforms.tiktok_route import build_tiktok_uploader
+
+                self._platforms["tiktok"] = build_tiktok_uploader(self.config)
                 logger.info("TikTok uploader initialized")
             except Exception as e:
                 logger.error(f"Failed to initialize TikTok uploader: {e}")

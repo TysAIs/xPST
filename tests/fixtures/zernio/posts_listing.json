@@ -1,0 +1,14 @@
+{
+  "posts": [
+    {
+      "id": "zpost_9",
+      "caption": "hello world test post",
+      "platforms": [
+        {
+          "platform": "tiktok",
+          "platformPostUrl": "https://www.tiktok.com/@example.creator/video/7412345678901234567"
+        }
+      ]
+    }
+  ]
+}

@@ -243,6 +243,14 @@ DEFAULT_CONFIG = {
             "draft_mode": "auto",
             "publish_mode": "auto",
             "browser_headless": True,
+            "provider": "local",
+            "aggregator": {
+                "api_key_ref": "zernio_api_key",
+                "account_id": "",
+                "profile_id": "",
+                "vendor_schedule": False,
+                "scoped_key": True,
+            },
         },
         "youtube": {
             "enabled": True,
@@ -443,11 +451,41 @@ class AccountConfig:
 
 
 @dataclass
+class TikTokAggregatorConfig:
+    """Rented-aggregator settings for the TikTok publishing route.
+
+    The aggregator (Zernio) owns the audited TikTok app, so the secret is one
+    long-lived API key held by :class:`xpst.utils.credentials.CredentialStore`
+    under ``api_key_ref``. Nothing secret is ever written to ``config.yaml``:
+    this block names the credential, it does not carry it.
+    """
+
+    #: CredentialStore key holding the vendor API key (never the key itself).
+    api_key_ref: str = "zernio_api_key"
+    #: Vendor account id for the connected TikTok account (filled at connect).
+    account_id: str = ""
+    #: Vendor profile id used when creating a post (filled at connect).
+    profile_id: str = ""
+    #: Local scheduling stays authoritative. True lets a caller hand the time to
+    #: the vendor instead (only sensible when this machine is offline then).
+    vendor_schedule: bool = False
+    #: Requested scope of the vendor key. Documentation only: a full-scope key
+    #: reaches ads/SMS/WhatsApp, which xPST does not need.
+    scoped_key: bool = True
+
+
+@dataclass
 class TikTokAccountConfig(AccountConfig):
     """TikTok-specific account configuration"""
     username: str = ""
     cookies_from_browser: bool = False
     cookies_file: str | None = None
+    #: Publishing provider for this destination: "local" keeps xPST's own routes
+    #: (Content Posting API / browser / inbox draft). "zernio" publishes through
+    #: the rented aggregator route instead. The platform key stays "tiktok" in
+    #: either case — see :mod:`xpst.platforms.zernio_tiktok`.
+    provider: str = "local"
+    aggregator: TikTokAggregatorConfig = field(default_factory=TikTokAggregatorConfig)
     # Content Posting API (Direct Post) OAuth credentials — destination mode
     client_key: str = ""
     client_secret: str = ""
@@ -1111,6 +1149,24 @@ class XPSTConfig:
                 config.tiktok.browser_headless = tk.get(
                     "browser_headless", config.tiktok.browser_headless
                 )
+                config.tiktok.provider = tk.get("provider", config.tiktok.provider)
+                agg = tk.get("aggregator")
+                if isinstance(agg, dict):
+                    config.tiktok.aggregator.api_key_ref = agg.get(
+                        "api_key_ref", config.tiktok.aggregator.api_key_ref
+                    )
+                    config.tiktok.aggregator.account_id = agg.get(
+                        "account_id", config.tiktok.aggregator.account_id
+                    )
+                    config.tiktok.aggregator.profile_id = agg.get(
+                        "profile_id", config.tiktok.aggregator.profile_id
+                    )
+                    config.tiktok.aggregator.vendor_schedule = bool(
+                        agg.get("vendor_schedule", config.tiktok.aggregator.vendor_schedule)
+                    )
+                    config.tiktok.aggregator.scoped_key = bool(
+                        agg.get("scoped_key", config.tiktok.aggregator.scoped_key)
+                    )
 
         # YouTube
         if "accounts" in file_config and "youtube" in file_config["accounts"]:
@@ -1450,6 +1506,15 @@ class XPSTConfig:
             config.tiktok.cookies_from_browser = v.lower() in ("true", "1", "yes")
         if v := os.getenv("XPST_TIKTOK_PROXY"):
             config.tiktok.proxy = v
+        if v := os.getenv("XPST_TIKTOK_PROVIDER"):
+            # The publishing route choice is configuration, not a secret.
+            config.tiktok.provider = v.strip().lower()
+        if v := os.getenv("XPST_TIKTOK_AGGREGATOR_ACCOUNT_ID"):
+            config.tiktok.aggregator.account_id = v
+        if v := os.getenv("XPST_TIKTOK_AGGREGATOR_PROFILE_ID"):
+            config.tiktok.aggregator.profile_id = v
+        if v := os.getenv("XPST_ZERNIO_API_KEY_REF"):
+            config.tiktok.aggregator.api_key_ref = v
 
         # YouTube
         if v := os.getenv("XPST_YOUTUBE_ENABLED"):
@@ -1759,6 +1824,16 @@ class XPSTConfig:
                     "draft_mode": self.tiktok.draft_mode,
                     "publish_mode": self.tiktok.publish_mode,
                     "browser_headless": self.tiktok.browser_headless,
+                    "provider": self.tiktok.provider,
+                    # Only the credential KEY is persisted; the vendor API key
+                    # itself lives in CredentialStore and never reaches a file.
+                    "aggregator": {
+                        "api_key_ref": self.tiktok.aggregator.api_key_ref,
+                        "account_id": self.tiktok.aggregator.account_id,
+                        "profile_id": self.tiktok.aggregator.profile_id,
+                        "vendor_schedule": self.tiktok.aggregator.vendor_schedule,
+                        "scoped_key": self.tiktok.aggregator.scoped_key,
+                    },
                 },
                 "youtube": {
                     "enabled": self.youtube.enabled,
