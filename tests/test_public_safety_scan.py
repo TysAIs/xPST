@@ -405,7 +405,7 @@ def test_denylist_allow_lines_exempt_product_identifiers(tmp_path):
     assert scan_public_safety(tmp_path, [source])["ok"] is False
 
 
-def test_release_notes_mention_of_the_public_handle_is_not_personal_data(tmp_path):
+def test_release_notes_mention_of_the_public_handle_is_not_personal_data(tmp_path, monkeypatch):
     """`updates/latest.json` carries release notes verbatim, mentions included.
 
     GitHub writes them as "by @TysAIs in https://github.com/TysAIs/xPST/pull/248".
@@ -426,7 +426,10 @@ def test_release_notes_mention_of_the_public_handle_is_not_personal_data(tmp_pat
 
     # The person's name is still a finding outside the allowed identifiers.
     # Written split ("Tyl" + "er"): the scanner scans this test file too, and the
-    # literal name in the source would itself trip the gate.
+    # literal name in the source would itself trip the gate. Supplied through the
+    # environment rather than the checked-in file, because committed personal
+    # identifiers are exactly what the deny list is no longer allowed to contain.
+    monkeypatch.setenv(scanner._DENYLIST_ENV, "Tyl" + "er")
     manifest.write_text('{"notes": "maintained by ' + "Tyl" + 'er"}\n', encoding="utf-8")
     assert scan_public_safety(tmp_path, [manifest])["ok"] is False
 
