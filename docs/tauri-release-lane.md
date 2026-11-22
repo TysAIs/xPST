@@ -134,7 +134,10 @@ Signing is optional and never changes *what* is built:
 - Windows: unsigned unless `WINDOWS_CERTIFICATE_BASE64`/`PASSWORD` exist.
 - Updater artifacts (`*.app.tar.gz` + `.sig`) only exist when
   `TAURI_SIGNING_PRIVATE_KEY` is set; the resolve step tolerates their absence
-  and fails only if a lane produced nothing at all.
+  and fails only if a lane produced nothing at all. The macOS step that names
+  the archive for its architecture is a no-op in that case too - it fails only
+  when a signing key was present and no archive came out, because a build that
+  was never asked for updater artifacts cannot produce one by design.
 
 ## Known gaps (honest list)
 

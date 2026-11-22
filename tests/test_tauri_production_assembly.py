@@ -238,6 +238,121 @@ def test_macos_updater_bundle_is_renamed_not_copied() -> None:
     assert "mv \"$f\"" in step
     assert "cp \"$f\"" not in step
     assert "${{ matrix.updater_platform }}" in step
+    # The archive only exists when the overlay asked for updater artifacts, so
+    # the step reads that decision instead of assuming it.
+    assert "steps.overlay.outputs.updater_artifacts" in step
+
+
+def _step_run(job: str, marker: str) -> dict:
+    for candidate in _workflow_jobs()[job]["steps"]:
+        if marker in (candidate.get("name") or ""):
+            return candidate
+    raise AssertionError(f"no step in {job!r} whose name contains {marker!r}")
+
+
+def _run_step(run: str, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
+    script = cwd / "step.sh"
+    script.write_text(run, encoding="utf-8")
+    merged = {"PATH": f"{cwd / 'bin'}:/usr/bin:/bin:/usr/local/bin", "GITHUB_OUTPUT": str(cwd / "github_output")}
+    merged.update(env)
+    (cwd / "github_output").write_text("", encoding="utf-8")
+    return subprocess.run(["bash", str(script)], cwd=cwd, capture_output=True, text=True, env=merged, timeout=120)
+
+
+def _macos_bundle_dir(root: Path) -> Path:
+    path = root / "src-tauri" / "target" / "x86_64-apple-darwin" / "release" / "bundle" / "macos"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def test_macos_updater_staging_tolerates_the_no_key_build(tmp_path: Path) -> None:
+    """A no-key build cannot produce *.app.tar.gz, so it must not demand one.
+
+    dryrun-tauri-12 (run 44755632565) took the documented no-credentials path -
+    it logged `no credentials: building app,dmg with Tauri's default ad-hoc
+    signing` and finished both bundles - and then died on the unconditional
+    `no *.app.tar.gz` guard. Neither branch of the no-key case could pass, so no
+    tag in this repository could produce a release.
+
+    The step is now driven by the overlay's `updater_artifacts` output: `false`
+    is a no-op, `true` still fails when the archive is missing (the defect the
+    guard exists for), and an unknown value fails closed rather than silently
+    dropping the assertion.
+    """
+    if sys.platform == "win32":
+        pytest.skip("the release lanes run this step under bash")
+
+    step = _step_run("build-tauri", "the macOS updater bundle for its architecture")
+    assert step["env"]["UPDATER_ARTIFACTS"] == "${{ steps.overlay.outputs.updater_artifacts }}"
+    body = step["run"].replace("${{ matrix.updater_platform }}", "darwin-x86_64")
+
+    empty = _macos_bundle_dir(tmp_path)
+    proc = _run_step(body, tmp_path, {"UPDATER_ARTIFACTS": "false"})
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "nothing to stage" in proc.stdout
+    assert list(empty.iterdir()) == []
+
+    archives = _macos_bundle_dir(tmp_path)
+    for name in ("xPST.app.tar.gz", "xPST.app.tar.gz.sig"):
+        (archives / name).write_bytes(b"payload")
+    proc = _run_step(body, tmp_path, {"UPDATER_ARTIFACTS": "true"})
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    staged = sorted(p.name for p in archives.iterdir())
+    assert staged == ["darwin-x86_64-xPST.app.tar.gz", "darwin-x86_64-xPST.app.tar.gz.sig"]
+
+
+def test_macos_updater_staging_still_fails_when_a_requested_archive_is_missing(tmp_path: Path) -> None:
+    """With a signing key the archive is not optional, and an unknown state is fatal."""
+    if sys.platform == "win32":
+        pytest.skip("the release lanes run this step under bash")
+
+    step = _step_run("build-tauri", "the macOS updater bundle for its architecture")
+    body = step["run"].replace("${{ matrix.updater_platform }}", "darwin-x86_64")
+    _macos_bundle_dir(tmp_path)
+
+    proc = _run_step(body, tmp_path, {"UPDATER_ARTIFACTS": "true"})
+    assert proc.returncode == 1
+    assert "requested but not produced" in proc.stdout
+
+    for value in ("", "yes"):
+        proc = _run_step(body, tmp_path, {"UPDATER_ARTIFACTS": value})
+        assert proc.returncode == 1, value
+        assert "expected 'true' or 'false'" in proc.stdout
+
+
+def test_build_overlay_publishes_whether_updater_artifacts_are_requested(tmp_path: Path) -> None:
+    """The staging step's decision must come from the step that decides it.
+
+    The overlay adds `createUpdaterArtifacts` only when TAURI_SIGNING_PRIVATE_KEY
+    exists; that same condition is what the staging step consumes, so the two
+    cannot disagree.
+    """
+    if sys.platform == "win32":
+        pytest.skip("the release lanes run this step under bash")
+
+    step = _step_run("build-tauri", "Assemble the release build overlay")
+    shim_dir = tmp_path / "bin"
+    shim_dir.mkdir()
+    shim = shim_dir / "python"
+    shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+    shim.chmod(0o755)
+
+    lookup = tmp_path
+    proc = _run_step(step["run"], tmp_path, {"RUNNER_TEMP": str(lookup), "PATH": f"{shim_dir}:/usr/bin:/bin"})
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    outputs = (tmp_path / "github_output").read_text(encoding="utf-8")
+    assert "updater_artifacts=false" in outputs
+    assert "path=" not in outputs
+    assert not (tmp_path / "xpst-build-overlay.json").exists()
+
+    keyed = tmp_path / "keyed"
+    keyed.mkdir()
+    proc = _run_step(step["run"], keyed, {"RUNNER_TEMP": str(keyed), "PATH": f"{shim_dir}:/usr/bin:/bin", "UPDATER_KEY": "secret"})
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    outputs = (keyed / "github_output").read_text(encoding="utf-8")
+    assert "updater_artifacts=true" in outputs
+    assert "path=" in outputs
+    assert '"createUpdaterArtifacts": true' in (keyed / "xpst-build-overlay.json").read_text(encoding="utf-8")
 
 
 def test_updater_flatten_keeps_every_signature_sidecar() -> None:

@@ -21,7 +21,11 @@ name: Tauri Shell Release
 #     with `codesign: no identity found`.
 #   - All lanes: when no updater signing key is present the lane still builds
 #     its full configured bundle set (createUpdaterArtifacts is false in
-#     src-tauri/tauri.conf.json), with Tauri's default/ad-hoc signing.
+#     src-tauri/tauri.conf.json), with Tauri's default/ad-hoc signing. Such a
+#     build produces no *.app.tar.gz, so the macOS step that stages that
+#     archive is a no-op there and fails only when a signing key WAS present
+#     and no archive came out (dryrun-tauri-12 died on the unconditional form
+#     of that assertion, which no no-key build could ever pass).
 
 on:
   push:
@@ -350,6 +354,19 @@ jobs:
         run: |
           set -euo pipefail
           overlay="$RUNNER_TEMP/xpst-build-overlay.json"
+          # Whether this run can produce updater artifacts at all is decided in
+          # ONE place and published as an output: createUpdaterArtifacts is
+          # requested only when the signing key exists, so the macOS staging
+          # step must not demand a *.app.tar.gz from a build that was never
+          # asked to make one. Written before the build so a lane that dies
+          # elsewhere still leaves the decision in the log.
+          if [ -n "${UPDATER_KEY:-}" ]; then
+            printf 'updater_artifacts=true\n' >> "$GITHUB_OUTPUT"
+            echo "updater artifacts: requested (TAURI_SIGNING_PRIVATE_KEY is set)"
+          else
+            printf 'updater_artifacts=false\n' >> "$GITHUB_OUTPUT"
+            echo "updater artifacts: not requested (no TAURI_SIGNING_PRIVATE_KEY)"
+          fi
           python - "$overlay" <<'PY'
           import json
           import os
@@ -578,15 +595,39 @@ jobs:
         # v1.2.1 copied the arm64 archive to `darwin-aarch64-…` and left the
         # bare name in the release, and the selector then published that arm64
         # file as darwin-x86_64.
+        #
+        # The archive exists only when the overlay asked for updater artifacts,
+        # which it does only when TAURI_SIGNING_PRIVATE_KEY is set. Demanding
+        # it unconditionally made the no-key path impossible to pass:
+        # dryrun-tauri-12 built app+dmg correctly and then died here, so no tag
+        # in this repository could produce a release. An unknown value (the
+        # output missing entirely) fails closed instead of silently skipping the
+        # assertion: this step is the only thing that gives the archive an
+        # architecture, and "we were not asked for one" must be an explicit
+        # decision, never a default.
         if: runner.os == 'macOS'
+        env:
+          UPDATER_ARTIFACTS: ${{ steps.overlay.outputs.updater_artifacts }}
         run: |
           set -euo pipefail
+          case "${UPDATER_ARTIFACTS:-}" in
+            true) ;;
+            false)
+              echo "no updater signing key: createUpdaterArtifacts stayed false, so this build produces no *.app.tar.gz by design; nothing to stage"
+              echo "::notice::no macOS updater payload in this run (no TAURI_SIGNING_PRIVATE_KEY); the updater manifest job reports the channel as blocked"
+              exit 0
+              ;;
+            *)
+              echo "::error::the build overlay reported updater_artifacts='${UPDATER_ARTIFACTS:-<unset>}' — expected 'true' or 'false'"
+              exit 1
+              ;;
+          esac
           bundle_dir=$(find src-tauri/target -type d -path '*bundle/macos' -print -quit)
           test -n "$bundle_dir" || { echo "::error::no bundle/macos dir"; exit 1; }
           shopt -s nullglob
           archives=("$bundle_dir"/*.app.tar.gz)
           [ "${#archives[@]}" -gt 0 ] || {
-            echo "::error::no *.app.tar.gz in $bundle_dir (updater artifacts were not produced)"
+            echo "::error::no *.app.tar.gz in $bundle_dir (updater artifacts were requested but not produced)"
             ls -la "$bundle_dir"
             exit 1
           }
