@@ -11,6 +11,7 @@ pub mod bootstrap;
 pub mod config;
 pub mod doctor;
 pub mod failures;
+pub mod media;
 pub mod schedule;
 pub mod status;
 pub mod version;

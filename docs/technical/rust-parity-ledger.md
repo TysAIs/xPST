@@ -4,7 +4,7 @@
 
 One row per leaf command of the shipped CLI. `status` is `implemented` when the Rust engine runs the command and `stub` when it answers `not implemented in the Rust engine yet`. The two columns either side are the questions a reader actually has: which crate owns the behaviour, and whether the Python implementation they are comparing against makes an outbound network call.
 
-**9 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
+**10 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
 
 ## Columns
 
@@ -59,7 +59,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `mcp list` | stub | xpst-mcp | none |
 | `mcp start` | stub | xpst-mcp | none |
 | `media fetch` | stub | xpst-media | yes |
-| `media status` | stub | xpst-media | none |
+| `media status` | implemented | xpst-media | none |
 | `messenger check-comments` | stub | xpst-provider | yes |
 | `messenger status` | stub | xpst-provider | none |
 | `onboard` | stub | xpst-auth | yes |
@@ -110,6 +110,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 |---|---|---|
 | `config show` | xpst-config | Masked YAML/JSON document; byte-compared with the Python output. |
 | `config validate` | xpst-config | `{valid, checks}` payload; exit 2 on a blocker. |
+| `media status` | xpst-media | Resolution order (env → PATH → system dirs → fetched) and the `env`/`system`/`fetched`/`missing` vocabulary of `media_binary_status()`; payload byte-compared with the Python CLI. |
 | `doctor` | xpst-cli | Local-only diagnostics; live probes are P1 (the report says so). |
 | `version` | xpst-cli | Version and dependency report; `--version` matches Click's shape. |
 | `status` | xpst-state | Statistics payload field-for-field with `get_statistics()` on captured fixtures. |

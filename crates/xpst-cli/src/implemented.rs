@@ -46,6 +46,12 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         config_validate,
     ),
     implemented(
+        "media status",
+        "xpst-media",
+        "Resolution order (env → PATH → system dirs → fetched) and the `env`/`system`/`fetched`/`missing` vocabulary of `media_binary_status()`; payload byte-compared with the Python CLI.",
+        media_status,
+    ),
+    implemented(
         "doctor",
         "xpst-cli",
         "Local-only diagnostics; live probes are P1 (the report says so).",
@@ -132,6 +138,15 @@ fn config_validate(
     let mut out_ref: &mut dyn Write = out;
     let mut err_ref: &mut dyn Write = err;
     commands::config::validate(global, leaf, &mut out_ref, &mut err_ref)
+}
+
+fn media_status(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::media::status(global, leaf, out, err)
 }
 
 fn doctor(
