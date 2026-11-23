@@ -27,7 +27,7 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 59;
+const EXPECTED_SCENARIOS: usize = 63;
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -380,7 +380,7 @@ fn every_recorded_scenario_matches_the_python_engine() {
                     "scenario `{name}` exit code drifted: {stderr}"
                 );
                 let actual = stdout.replace(&profile.path().display().to_string(), "<PROFILE>");
-                let expected = row["stdout_sha256"]
+                let expected = row["stdout_digest"]
                     .as_str()
                     .expect("digest scenarios record the digest");
                 assert_eq!(

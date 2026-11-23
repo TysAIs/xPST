@@ -22,6 +22,9 @@
 //!   store into the config view. It is the only field Python does that for, and
 //!   neither ported command reads it.
 //! * The OS keyring is not consulted (`XPST_USE_KEYRING` is opt-in in Python).
+//! * `_fix_legacy_paths` rewrites the credential fields this view carries; the
+//!   two non-credential fields it also touches (`video.download_dir`,
+//!   `monitoring.log_file`) are not carried because neither command reads them.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -63,6 +66,11 @@ enum Kind {
     Lower,
     /// `v.strip().lower()`, but only when it names a known publish route.
     PublishMode,
+    /// `json.loads(v)` into a mapping: invalid JSON empties it, a non-object
+    /// leaves the current value alone.
+    JsonMapping,
+    /// `[p.strip() for p in v.split(",") if p.strip()]`.
+    CommaList,
 }
 
 /// One `XPST_*` override, mirroring `XPSTConfig._apply_env_vars`.
@@ -310,10 +318,22 @@ const ENV_RULES: &[EnvRule] = &[
         kind: Kind::Bool,
     },
     EnvRule {
+        var: "XPST_MESSENGER_REPLY_RULES",
+        platform: "messenger",
+        field: "reply_rules",
+        kind: Kind::JsonMapping,
+    },
+    EnvRule {
         var: "XPST_MESSENGER_COMMENT_REPLY_ENABLED",
         platform: "messenger",
         field: "comment_reply_enabled",
         kind: Kind::Bool,
+    },
+    EnvRule {
+        var: "XPST_MESSENGER_COMMENT_PLATFORMS",
+        platform: "messenger",
+        field: "comment_platforms",
+        kind: Kind::CommaList,
     },
     // Local
     EnvRule {
@@ -331,6 +351,18 @@ const REBASABLE: &[(&str, &str)] = &[
     ("x", "cookies_file"),
     ("instagram", "session_file"),
     ("tiktok", "cookies_file"),
+];
+
+/// The credential fields `_fix_legacy_paths` rewrites (`.crosspstr` → `.xpst`).
+///
+/// Python also rewrites `video.download_dir` and `monitoring.log_file`; the
+/// view does not carry those sections because neither ported command reads them.
+const LEGACY_FIXED: &[(&str, &str)] = &[
+    ("tiktok", "cookies_file"),
+    ("instagram", "session_file"),
+    ("x", "cookies_file"),
+    ("youtube", "token_file"),
+    ("youtube", "client_secrets"),
 ];
 
 /// The path fields `_expand_paths` expands.
@@ -402,6 +434,16 @@ impl ConfigView {
                         }
                         continue;
                     }
+                    // `_merge_config` takes these two only when the file value
+                    // has the right shape; a scalar leaves the default in place.
+                    if platform == "messenger" {
+                        if field == "reply_rules" && value.as_mapping().is_none() {
+                            continue;
+                        }
+                        if field == "comment_platforms" && value.as_sequence().is_none() {
+                            continue;
+                        }
+                    }
                     if account.contains_key(field) {
                         account.insert(Value::from(field), value.clone());
                     }
@@ -425,10 +467,27 @@ impl ConfigView {
             view.provider_mode = mode.to_string();
         }
 
+        // Python's order: file merge → `_fix_legacy_paths` → env → rebase →
+        // expand. The legacy fix has to run before the rebase, or a shipped
+        // `.crosspstr` path is neither rewritten nor moved onto the profile.
+        view.fix_legacy_paths();
         view.apply_env(env);
         view.rebase_credential_paths(env);
         view.expand_paths(env);
         Ok(view)
+    }
+
+    /// `_fix_legacy_paths`: `.crosspstr` → `.xpst` in the credential paths.
+    fn fix_legacy_paths(&mut self) {
+        for (platform, field) in LEGACY_FIXED {
+            let Some(raw) = self.text(platform, field).filter(|value| !value.is_empty()) else {
+                continue;
+            };
+            let fixed = fix_legacy(&raw);
+            if fixed != raw {
+                self.set(platform, field, Value::String(fixed));
+            }
+        }
     }
 
     /// `_apply_env_vars`, for the fields this view carries.
@@ -449,6 +508,19 @@ impl ConfigView {
                         continue;
                     }
                 }
+                Kind::JsonMapping => match parse_json_mapping(&value) {
+                    Some(mapping) => Value::Mapping(mapping),
+                    // A valid non-object leaves the current value alone.
+                    None => continue,
+                },
+                Kind::CommaList => Value::Sequence(
+                    value
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|item| !item.is_empty())
+                        .map(|item| Value::String(item.to_string()))
+                        .collect(),
+                ),
             };
             self.set(rule.platform, rule.field, parsed);
         }
@@ -459,14 +531,22 @@ impl ConfigView {
 
     /// `_rebase_credential_paths`: a shipped `~/.xpst/...` path belongs to the
     /// profile when `XPST_CONFIG_DIR` selects one.
+    ///
+    /// The gate is the environment variable (`_config_dir_override()`), but the
+    /// root is `config.config_dir` — the config file's own directory, which
+    /// `load()` sets from `cfg_path.parent`. With `--config` and
+    /// `XPST_CONFIG_DIR` naming different directories the two engines must
+    /// still rebase onto the same one.
     fn rebase_credential_paths(&mut self, env: &dyn Fn(&str) -> Option<String>) {
-        let Some(override_dir) = env("XPST_CONFIG_DIR").filter(|value| !value.trim().is_empty())
-        else {
+        if env("XPST_CONFIG_DIR")
+            .filter(|value| !value.trim().is_empty())
+            .is_none()
+        {
             return;
-        };
+        }
         let home = env("HOME").unwrap_or_default();
         let default_root = PathBuf::from(expand_home("~/.xpst", &home));
-        let active_root = PathBuf::from(expand_home(override_dir.trim(), &home));
+        let active_root = PathBuf::from(expand_home(&self.config_dir.to_string_lossy(), &home));
         if active_root == default_root {
             return;
         }
@@ -592,6 +672,120 @@ impl ConfigView {
 /// `v.lower() in ("true", "1", "yes")`.
 fn is_true(value: &str) -> bool {
     matches!(value.to_lowercase().as_str(), "true" | "1" | "yes")
+}
+
+/// `_fix_legacy_paths`'s rewrite: `.crosspstr` → `.xpst`, then a bare
+/// `crosspstr` → `xpst` (the second pass is Python's, and it is what catches
+/// `~/crosspstr/...` without the leading dot).
+fn fix_legacy(path: &str) -> String {
+    path.replace(".crosspstr", ".xpst")
+        .replace("crosspstr", "xpst")
+}
+
+/// `json.loads` into a mapping, as `_apply_env_vars` uses it.
+///
+/// * invalid JSON → `Some(empty)` (Python assigns `{}`),
+/// * a JSON object → `Some(mapping)`,
+/// * any other valid JSON → `None` (Python leaves the current value alone).
+///
+/// Python's decoder also accepts the bare `NaN`, `Infinity` and `-Infinity`
+/// literals; those are rewritten to `null` before the retry, which keeps the
+/// key set — all either command reads — intact. An out-of-range float literal
+/// (`1e999`) is the one remaining difference: Python reads it as `inf`,
+/// `serde_json` rejects it, so it lands in the invalid-JSON branch.
+fn parse_json_mapping(text: &str) -> Option<Mapping> {
+    let parsed = serde_json::from_str::<serde_json::Value>(text)
+        .or_else(|_| serde_json::from_str::<serde_json::Value>(&python_json_literals(text)));
+    match parsed {
+        Ok(serde_json::Value::Object(map)) => Some(json_object_to_mapping(&map)),
+        Ok(_) => None,
+        Err(_) => Some(Mapping::new()),
+    }
+}
+
+/// A `serde_json` object as the config model's mapping, order preserved.
+fn json_object_to_mapping(map: &serde_json::Map<String, serde_json::Value>) -> Mapping {
+    let mut out = Mapping::new();
+    for (key, value) in map {
+        out.insert(Value::from(key.as_str()), json_to_value(value));
+    }
+    out
+}
+
+/// A `serde_json` value as the config model's value.
+fn json_to_value(value: &serde_json::Value) -> Value {
+    match value {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(flag) => Value::Bool(*flag),
+        serde_json::Value::Number(number) => Value::Number(number.clone()),
+        serde_json::Value::String(text) => Value::String(text.clone()),
+        serde_json::Value::Array(items) => {
+            Value::Sequence(items.iter().map(json_to_value).collect())
+        }
+        serde_json::Value::Object(map) => Value::Mapping(json_object_to_mapping(map)),
+    }
+}
+
+/// Rewrite Python's bare `NaN`/`Infinity`/`-Infinity` literals to `null`,
+/// leaving string contents and longer identifiers untouched.
+fn python_json_literals(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.char_indices().peekable();
+    let mut in_string = false;
+    let mut escaped = false;
+    while let Some((index, character)) = chars.next() {
+        if in_string {
+            out.push(character);
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if character == '"' {
+            in_string = true;
+            out.push(character);
+            continue;
+        }
+        let rest = &text[index..];
+        let token = if rest.starts_with("-Infinity") {
+            Some("-Infinity")
+        } else if rest.starts_with("Infinity") {
+            Some("Infinity")
+        } else if rest.starts_with("NaN") {
+            Some("NaN")
+        } else {
+            None
+        };
+        if let Some(token) = token {
+            let before_ok = text[..index]
+                .chars()
+                .next_back()
+                .is_none_or(|before| !is_ident_char(before));
+            let after_index = index + token.len();
+            let after_ok = text[after_index..]
+                .chars()
+                .next()
+                .is_none_or(|after| !is_ident_char(after));
+            if before_ok && after_ok {
+                out.push_str("null");
+                for _ in 1..token.chars().count() {
+                    chars.next();
+                }
+                continue;
+            }
+        }
+        out.push(character);
+    }
+    out
+}
+
+/// A character that can continue a JSON identifier-like token.
+fn is_ident_char(character: char) -> bool {
+    character.is_ascii_alphanumeric() || character == '_' || character == '.'
 }
 
 /// Python truthiness for a YAML value.
@@ -789,5 +983,152 @@ mod tests {
         assert_eq!(expand_vars("${KNOWN}/x", &env), "value/x");
         assert_eq!(expand_vars("$UNKNOWN/x", &env), "$UNKNOWN/x");
         assert_eq!(expand_vars("no vars", &env), "no vars");
+    }
+
+    #[test]
+    fn the_messenger_env_overrides_are_applied() {
+        let env = |name: &str| match name {
+            "XPST_MESSENGER_REPLY_RULES" => Some(r#"{"hi":"hello","*":"yo"}"#.to_string()),
+            "XPST_MESSENGER_COMMENT_PLATFORMS" => Some(" instagram , ,facebook ".to_string()),
+            _ => None,
+        };
+        let view = ConfigView::load(&document("version: 4\n"), Path::new("/tmp/profile"), &env)
+            .expect("defaults");
+        assert_eq!(
+            view.mapping("messenger", "reply_rules")
+                .and_then(Value::as_mapping)
+                .map(Mapping::len),
+            Some(2)
+        );
+        assert_eq!(
+            view.list("messenger", "comment_platforms"),
+            vec!["instagram", "facebook"]
+        );
+    }
+
+    #[test]
+    fn invalid_reply_rules_json_empties_the_mapping() {
+        let env =
+            |name: &str| (name == "XPST_MESSENGER_REPLY_RULES").then(|| "not json".to_string());
+        let view = ConfigView::load(
+            &document("accounts:\n  messenger:\n    reply_rules:\n      hi: hello\n"),
+            Path::new("/tmp/profile"),
+            &env,
+        )
+        .expect("defaults");
+        assert_eq!(
+            view.mapping("messenger", "reply_rules")
+                .and_then(Value::as_mapping)
+                .map(Mapping::len),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn a_non_object_reply_rules_json_keeps_the_current_value() {
+        let env =
+            |name: &str| (name == "XPST_MESSENGER_REPLY_RULES").then(|| r#"["hi"]"#.to_string());
+        let view = ConfigView::load(
+            &document("accounts:\n  messenger:\n    reply_rules:\n      hi: hello\n"),
+            Path::new("/tmp/profile"),
+            &env,
+        )
+        .expect("defaults");
+        assert_eq!(
+            view.mapping("messenger", "reply_rules")
+                .and_then(Value::as_mapping)
+                .map(Mapping::len),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn python_json_literals_are_accepted_and_strings_are_left_alone() {
+        let env = |name: &str| {
+            (name == "XPST_MESSENGER_REPLY_RULES")
+                .then(|| r#"{"a": NaN, "b": Infinity, "c": -Infinity, "d": "NaN"}"#.to_string())
+        };
+        let view = ConfigView::load(&document("version: 4\n"), Path::new("/tmp/profile"), &env)
+            .expect("defaults");
+        let rules = view
+            .mapping("messenger", "reply_rules")
+            .and_then(Value::as_mapping)
+            .expect("mapping");
+        assert_eq!(rules.len(), 4);
+        assert_eq!(
+            rules.get("d").and_then(Value::as_str),
+            Some("NaN"),
+            "a literal inside a string is not rewritten"
+        );
+        assert_eq!(rules.get("a"), Some(&Value::Null));
+    }
+
+    #[test]
+    fn a_wrongly_typed_messenger_field_keeps_the_default() {
+        let view = ConfigView::load(
+            &document(
+                "accounts:\n  messenger:\n    comment_platforms: instagram\n    reply_rules:\n    - hi\n",
+            ),
+            Path::new("/tmp/profile"),
+            &no_env,
+        )
+        .expect("defaults");
+        // `_merge_config` only takes a list for `comment_platforms` and a
+        // mapping for `reply_rules`; a scalar/sequence leaves the default.
+        assert_eq!(
+            view.list("messenger", "comment_platforms"),
+            vec!["instagram", "facebook"]
+        );
+        assert!(view
+            .mapping("messenger", "reply_rules")
+            .and_then(Value::as_mapping)
+            .is_some_and(Mapping::is_empty));
+    }
+
+    #[test]
+    fn a_legacy_crosspstr_path_is_rewritten_before_the_rebase() {
+        let env = |name: &str| match name {
+            "XPST_CONFIG_DIR" => Some("/tmp/profile".to_string()),
+            "HOME" => Some("/home/someone".to_string()),
+            _ => None,
+        };
+        let view = ConfigView::load(
+            &document(
+                "accounts:\n  x:\n    cookies_file: ~/.crosspstr/credentials/x_cookies.json\n",
+            ),
+            Path::new("/tmp/profile"),
+            &env,
+        )
+        .expect("defaults");
+        assert_eq!(
+            view.text_or_empty("x", "cookies_file"),
+            "/tmp/profile/credentials/x_cookies.json"
+        );
+    }
+
+    #[test]
+    fn the_rebase_root_is_the_config_files_directory_not_the_env_value() {
+        let env = |name: &str| match name {
+            "XPST_CONFIG_DIR" => Some("/tmp/A".to_string()),
+            "HOME" => Some("/home/someone".to_string()),
+            _ => None,
+        };
+        let view = ConfigView::load(&document("version: 4\n"), Path::new("/tmp/B"), &env)
+            .expect("defaults");
+        assert_eq!(
+            view.text_or_empty("x", "cookies_file"),
+            "/tmp/B/credentials/x_cookies.json"
+        );
+    }
+
+    #[test]
+    fn no_config_dir_override_means_no_rebase() {
+        let env = |name: &str| (name == "HOME").then(|| "/home/someone".to_string());
+        let view = ConfigView::load(&document("version: 4\n"), Path::new("/tmp/B"), &env)
+            .expect("defaults");
+        assert_eq!(
+            view.text_or_empty("x", "cookies_file"),
+            "/home/someone/.xpst/credentials/x_cookies.json"
+        );
     }
 }

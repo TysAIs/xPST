@@ -102,13 +102,13 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "messenger status",
         "xpst-provider",
-        "Config + credential-presence payload (masked token preview, reply-rule count, comment platforms) read from the encrypted store with the config fallback; payload byte-compared with the Python CLI.",
+        "Config + credential-presence payload (masked token preview, reply-rule count, comment platforms) read from the encrypted store with the config fallback, including the `XPST_MESSENGER_REPLY_RULES`/`XPST_MESSENGER_COMMENT_PLATFORMS` overrides; payload byte-compared with the Python CLI.",
         messenger_status,
     ),
     implemented(
         "providers",
         "xpst-provider",
-        "Captured registry manifests plus the ported canonical role catalog and per-destination `provider_mode`/`visible`; payload byte-compared with the Python CLI on pristine, configured and community-mode profiles.",
+        "Captured registry manifests plus the ported canonical role catalog and per-destination `provider_mode`/`visible`, with Python's legacy `.crosspstr` path fix and config-directory rebase; payload byte-compared with the Python CLI on pristine, configured, community-mode, legacy-path and `--config` profiles.",
         providers,
     ),
     implemented(

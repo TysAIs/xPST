@@ -603,6 +603,49 @@ SCENARIOS = [
         "compare": "digest",
     },
     {
+        "name": "providers_legacy_crosspstr_path",
+        # `_fix_legacy_paths` rewrites `.crosspstr` → `.xpst` before the rebase,
+        # so the shipped path resolves inside the profile and the credential
+        # file beside it is found.
+        "argv": ["providers", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  x:\n"
+                "    cookies_file: ~/.crosspstr/credentials/x_cookies.json\n"
+            ),
+            "credentials/x_cookies.json": "synthetic\n",
+        },
+        "env": {"HOME": "PROFILE"},
+        "compare": "digest",
+    },
+    {
+        "name": "providers_config_flag_rebases_onto_the_config_directory",
+        # `--config` and `XPST_CONFIG_DIR` name different directories: the
+        # rebase root is the config file's parent, not the env value.
+        "argv": ["--config", "ALT", "providers", "--json"],
+        "substitutions": {"ALT": "alt/config.yaml"},
+        "seed": {
+            "alt/config.yaml": "version: 4\n",
+            "alt/credentials/x_cookies.json": "synthetic\n",
+        },
+        "env": {"HOME": "PROFILE"},
+        "compare": "digest",
+    },
+    {
+        "name": "messenger_status_env_reply_rules",
+        "argv": ["messenger", "status", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "env": {"XPST_MESSENGER_REPLY_RULES": '{"hi": "hello", "*": "yo"}'},
+        "compare": "json",
+    },
+    {
+        "name": "messenger_status_env_comment_platforms",
+        "argv": ["messenger", "status", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "env": {"XPST_MESSENGER_COMMENT_PLATFORMS": "instagram"},
+        "compare": "json",
+    },
+    {
         "name": "messenger_status_unconfigured",
         "argv": ["messenger", "status", "--json"],
         "seed": {"config.yaml": "version: 4\n"},
@@ -833,7 +876,7 @@ def run_scenario(scenario: dict, python: str) -> dict:
                 f"scenario {scenario['name']}: stdout is not JSON:\n"
                 f"{observed['stdout']}\n{observed['stderr']}"
             )
-        record["stdout_sha256"] = digest(observed["stdout_normalized"])
+        record["stdout_digest"] = digest(observed["stdout_normalized"])
         record["stdout_bytes"] = len(observed["stdout_normalized"].encode("utf-8"))
         record["summary"] = providers_summary(observed["payload"])
         return record
