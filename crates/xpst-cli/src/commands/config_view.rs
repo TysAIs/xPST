@@ -25,6 +25,17 @@
 //! * `_fix_legacy_paths` rewrites the credential fields this view carries; the
 //!   two non-credential fields it also touches (`video.download_dir`,
 //!   `monitoring.log_file`) are not carried because neither command reads them.
+//! * A non-string scalar in a field Python treats as a string makes the shipped
+//!   engine fail: `_fix_legacy_paths` calls `.replace` on `video.download_dir`,
+//!   `monitoring.log_file` and the five credential paths, so
+//!   `accounts.x.cookies_file: 12345` prints
+//!   `Failed to load config: 'int' object has no attribute 'replace'` and exits
+//!   2; a non-string `page_access_token` raises in `_mask_token` (exit 1,
+//!   traceback). The Rust engine treats such a value as absent and exits 0.
+//!   Matching a crash is not desirable, so this is accepted.
+//! * `provider_mode` and `auth_mode` reproduce Python's `str()` for scalars
+//!   (`5` → `"5"`, `true` → `"True"`); a container value renders as YAML flow
+//!   style rather than Python's `repr` (`[a, b]` vs `['a', 'b']`).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -462,9 +473,12 @@ impl ConfigView {
             document: document.clone(),
         };
 
-        // `provider_mode` is a top-level key, not an account field.
-        if let Some(mode) = document.get("provider_mode").and_then(Value::as_str) {
-            view.provider_mode = mode.to_string();
+        // `provider_mode` is a top-level key, not an account field. Python's
+        // `_merge_config` stores `str(file_config["provider_mode"])`, so a
+        // numeric value written by `xpst config set` becomes `"5"` rather than
+        // falling back to the default.
+        if let Some(mode) = document.get("provider_mode") {
+            view.provider_mode = python_str(mode);
         }
 
         // Python's order: file merge → `_fix_legacy_paths` → env → rebase →
@@ -622,6 +636,35 @@ impl ConfigView {
         self.text(platform, field).unwrap_or_default()
     }
 
+    /// The raw value of a top-level account field, whatever its type.
+    pub fn raw(&self, platform: &str, field: &str) -> Option<&Value> {
+        self.accounts.get(platform)?.get(field)
+    }
+
+    /// `str(getattr(account, field, "") or "")` — Python's coercion for a field
+    /// the config model types as `str` but the file may hold as a scalar.
+    ///
+    /// `xpst config set` writes an unquoted number as a number, so
+    /// `accounts.x.auth_mode: 2` reaches Python as the int `2` and is reported
+    /// as `"2"`; a Rust `as_str()` would report the enum default instead.
+    pub fn python_text(&self, platform: &str, field: &str) -> String {
+        match self.raw(platform, field) {
+            Some(value) if truthy(value) => python_str(value),
+            _ => String::new(),
+        }
+    }
+
+    /// A list field's elements verbatim (`list(config.<platform>.<field>)`).
+    ///
+    /// Python emits the elements as they are, so a numeric entry written by
+    /// `xpst config set` stays a number in the payload.
+    pub fn raw_list(&self, platform: &str, field: &str) -> Vec<Value> {
+        self.raw(platform, field)
+            .and_then(Value::as_sequence)
+            .map(<[Value]>::to_vec)
+            .unwrap_or_default()
+    }
+
     /// Python truthiness of a field (`None`, `""`, `0`, `[]`, `{}` are false).
     pub fn truthy(&self, platform: &str, field: &str) -> bool {
         let Some(account) = self.accounts.get(platform) else {
@@ -665,7 +708,7 @@ impl ConfigView {
 
     /// A mapping field (Messenger's `reply_rules`).
     pub fn mapping(&self, platform: &str, field: &str) -> Option<&Value> {
-        self.accounts.get(platform)?.get(field)
+        self.raw(platform, field)
     }
 }
 
@@ -798,6 +841,31 @@ pub fn truthy(value: &Value) -> bool {
         Value::Timestamp(text) | Value::String(text) => !text.is_empty(),
         Value::Sequence(items) => !items.is_empty(),
         Value::Mapping(map) => !map.is_empty(),
+    }
+}
+
+/// Python's `str()` for the values a config document holds.
+///
+/// Shared with `config set`'s human-readable half. Scalars are exact
+/// (`None`/`True`/`False`, ints, Python float repr); a container falls back to
+/// YAML flow style, which is the one documented difference from `repr`.
+pub fn python_str(value: &Value) -> String {
+    match value {
+        Value::Null => "None".to_string(),
+        Value::Bool(true) => "True".to_string(),
+        Value::Bool(false) => "False".to_string(),
+        Value::Number(number) => match number.as_i64() {
+            Some(integer) => integer.to_string(),
+            None => number
+                .as_f64()
+                .map(xpst_config::pyyaml::python_float_repr)
+                .unwrap_or_else(|| number.to_string()),
+        },
+        Value::String(text) => text.clone(),
+        // The reader already stores a timestamp the way PyYAML's constructor
+        // renders it (`datetime.isoformat(' ')`), which is Python's `str()`.
+        Value::Timestamp(text) => text.clone(),
+        other => xpst_config::pyyaml::dump(other).trim_end().to_string(),
     }
 }
 
@@ -1083,6 +1151,69 @@ mod tests {
             .mapping("messenger", "reply_rules")
             .and_then(Value::as_mapping)
             .is_some_and(Mapping::is_empty));
+    }
+
+    #[test]
+    fn a_numeric_provider_mode_is_stringified_like_python() {
+        // `_merge_config` stores `str(file_config["provider_mode"])`, so a
+        // number written by `xpst config set` is reported as "5", not the
+        // default "official".
+        let view = ConfigView::load(
+            &document("provider_mode: 5\n"),
+            Path::new("/tmp/profile"),
+            &no_env,
+        )
+        .expect("defaults");
+        assert_eq!(view.provider_mode(), "5");
+    }
+
+    #[test]
+    fn a_timestamp_provider_mode_is_rendered_like_python() {
+        // PyYAML builds a `datetime`; `str()` is `isoformat(' ')`, which the
+        // reader already stores.
+        let view = ConfigView::load(
+            &document("provider_mode: 2026-01-01T00:00:00Z\n"),
+            Path::new("/tmp/profile"),
+            &no_env,
+        )
+        .expect("defaults");
+        assert_eq!(view.provider_mode(), "2026-01-01 00:00:00+00:00");
+    }
+
+    #[test]
+    fn a_numeric_auth_mode_is_stringified_like_python() {
+        let view = ConfigView::load(
+            &document("accounts:\n  x:\n    auth_mode: 2\n"),
+            Path::new("/tmp/profile"),
+            &no_env,
+        )
+        .expect("defaults");
+        assert_eq!(view.python_text("x", "auth_mode"), "2");
+        // `str(getattr(account, "auth_mode", "") or "")`: a falsy value is the
+        // empty string, so the caller falls through to the model default.
+        let zero = ConfigView::load(
+            &document("accounts:\n  x:\n    auth_mode: 0\n"),
+            Path::new("/tmp/profile"),
+            &no_env,
+        )
+        .expect("defaults");
+        assert_eq!(zero.python_text("x", "auth_mode"), "");
+    }
+
+    #[test]
+    fn raw_list_keeps_element_types() {
+        // Python emits `list(config.messenger.comment_platforms)` verbatim, so
+        // a numeric element stays a number in the payload.
+        let view = ConfigView::load(
+            &document("accounts:\n  messenger:\n    comment_platforms: [instagram, 2]\n"),
+            Path::new("/tmp/profile"),
+            &no_env,
+        )
+        .expect("defaults");
+        assert_eq!(
+            view.raw_list("messenger", "comment_platforms"),
+            vec![Value::from("instagram"), Value::from(2_i64)]
+        );
     }
 
     #[test]

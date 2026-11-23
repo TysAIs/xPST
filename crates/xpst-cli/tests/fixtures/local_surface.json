@@ -5,7 +5,7 @@
     "source": "src/xpst/cli.py"
   },
   "note": "Captured by running the shipped Python CLI against scratch profiles. scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent; snapshot modified_at is stripped and its epoch recorded instead.",
-  "scenario_count": 63,
+  "scenario_count": 65,
   "scenarios": [
     {
       "name": "status_empty_profile",
@@ -4018,6 +4018,109 @@
           "messaging": 1,
           "analytics": 5
         }
+      }
+    },
+    {
+      "name": "providers_config_set_numeric_modes",
+      "argv": [
+        "providers",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\nprovider_mode: 5\naccounts:\n  x:\n    auth_mode: 2\n    enabled: true\n"
+      },
+      "compare": "digest",
+      "exit_code": 0,
+      "stdout_digest": "ae87de78dc3c4c03",
+      "stdout_bytes": 54060,
+      "summary": {
+        "provider_mode": "5",
+        "providers": {
+          "youtube": "unconfigured",
+          "x": "unconfigured",
+          "instagram": "unconfigured",
+          "bluesky": "disabled",
+          "tiktok": "unconfigured",
+          "threads": "disabled",
+          "messenger": "disabled",
+          "facebook": "disabled",
+          "rumble": "disabled",
+          "local": "unconfigured"
+        },
+        "destinations": {
+          "bluesky": [
+            "official",
+            true
+          ],
+          "facebook": [
+            "official",
+            true
+          ],
+          "instagram": [
+            "official",
+            true
+          ],
+          "messenger": [
+            "official",
+            true
+          ],
+          "rumble": [
+            "official",
+            true
+          ],
+          "threads": [
+            "official",
+            true
+          ],
+          "tiktok": [
+            "official",
+            true
+          ],
+          "x": [
+            "official",
+            true
+          ],
+          "youtube": [
+            "official",
+            true
+          ]
+        },
+        "counts": {
+          "sources": 5,
+          "destinations": 9,
+          "providers": 10,
+          "video_destinations": 8,
+          "messaging": 1,
+          "analytics": 5
+        }
+      }
+    },
+    {
+      "name": "messenger_status_config_set_numeric_page_id",
+      "argv": [
+        "messenger",
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\naccounts:\n  messenger:\n    enabled: true\n    page_id: 1234567890\n    webhook_path: 12345\n    comment_platforms: [instagram, 2]\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "enabled": true,
+        "page_configured": true,
+        "page_id": 1234567890,
+        "token_configured": false,
+        "token_preview": null,
+        "auto_reply": false,
+        "comment_reply_enabled": false,
+        "comment_platforms": [
+          "instagram",
+          2
+        ],
+        "reply_rules": 0,
+        "webhook_path": 12345
       }
     },
     {

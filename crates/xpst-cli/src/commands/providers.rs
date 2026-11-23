@@ -358,8 +358,12 @@ fn configured(view: &ConfigView, store: &CredentialStore, name: &str, role: &str
 }
 
 /// `_auth_mode()`: the mode the provider actually runs in for this config.
+///
+/// Python reads `str(getattr(account, "auth_mode", "") or "")`, so a numeric
+/// value written by `xpst config set` is reported as its `str()` (`2` → `"2"`)
+/// instead of falling through to the definition's default.
 fn auth_mode(view: &ConfigView, name: &str, definition: &Definition) -> String {
-    let configured = view.text_or_empty(name, "auth_mode");
+    let configured = view.python_text(name, "auth_mode");
     if !configured.is_empty() {
         return configured;
     }
@@ -454,7 +458,7 @@ fn is_community_platform(view: &ConfigView, name: &str) -> bool {
         "x" => "cookies",
         _ => return false,
     };
-    view.text_or_empty(name, "auth_mode").trim().to_lowercase() == unofficial
+    view.python_text(name, "auth_mode").trim().to_lowercase() == unofficial
 }
 
 /// `should_show_platform()`.

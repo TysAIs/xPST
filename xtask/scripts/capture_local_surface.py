@@ -632,6 +632,37 @@ SCENARIOS = [
         "compare": "digest",
     },
     {
+        "name": "providers_config_set_numeric_modes",
+        # `xpst config set provider_mode 5` and `... accounts.x.auth_mode 2`
+        # write unquoted numbers. Python's `_merge_config` stores
+        # `str(provider_mode)` and `_auth_mode()` stores `str(auth_mode)`, so the
+        # payload carries "5"/"2" rather than the enum defaults.
+        "argv": ["providers", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\nprovider_mode: 5\naccounts:\n  x:\n"
+                "    auth_mode: 2\n    enabled: true\n"
+            )
+        },
+        "compare": "digest",
+    },
+    {
+        "name": "messenger_status_config_set_numeric_page_id",
+        # `xpst config set accounts.messenger.page_id 1234567890` writes an int.
+        # Python's payload is `page_id or None` (raw), so the page reports
+        # configured; `webhook_path` and the `comment_platforms` elements are
+        # emitted verbatim too.
+        "argv": ["messenger", "status", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  messenger:\n    enabled: true\n"
+                "    page_id: 1234567890\n    webhook_path: 12345\n"
+                "    comment_platforms: [instagram, 2]\n"
+            )
+        },
+        "compare": "json",
+    },
+    {
         "name": "messenger_status_env_reply_rules",
         "argv": ["messenger", "status", "--json"],
         "seed": {"config.yaml": "version: 4\n"},

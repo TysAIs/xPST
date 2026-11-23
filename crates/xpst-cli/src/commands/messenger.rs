@@ -10,7 +10,9 @@
 //! leaves the process.
 //!
 //! **Divergence, recorded in the ledger note:** text mode is plain rather than
-//! Rich; `--json` is the parity surface.
+//! Rich; `--json` is the parity surface. A non-string `page_access_token`
+//! crashes Python in `_mask_token`; the Rust engine treats it as absent (see
+//! `config_view`'s divergence list).
 
 use std::io::Write;
 use std::path::Path;
@@ -20,7 +22,7 @@ use xpst_auth::credentials::CredentialStore;
 use xpst_config::Value as YamlValue;
 
 use crate::commands::bootstrap;
-use crate::commands::config_view::ConfigView;
+use crate::commands::config_view::{python_str, truthy, ConfigView};
 use crate::output::{array, boolean, integer, null, object, string, write_python_json, write_text};
 use crate::{exit, flag, GlobalOptions};
 
@@ -84,23 +86,32 @@ pub fn status(
             (!configured.is_empty()).then_some(configured)
         });
 
-    let page_id = view.text_or_empty("messenger", "page_id");
+    // Python's payload carries the raw config values: `page_id or None`,
+    // `webhook_path`, and `list(comment_platforms)` verbatim. `xpst config set`
+    // writes an unquoted Page ID as a number, so a `text_or_empty()` here would
+    // report the page unconfigured where Python reports it configured.
+    let page_id = view.raw("messenger", "page_id").cloned();
+    let page_configured = page_id.as_ref().is_some_and(truthy);
     let reply_rules = view
         .mapping("messenger", "reply_rules")
         .and_then(YamlValue::as_mapping)
         .map(|rules| rules.len())
         .unwrap_or(0);
-    let comment_platforms = view.list("messenger", "comment_platforms");
+    let comment_platforms = view.raw_list("messenger", "comment_platforms");
+    let webhook_path = view
+        .raw("messenger", "webhook_path")
+        .cloned()
+        .unwrap_or_else(null);
 
     let payload = object(vec![
         ("enabled", boolean(view.truthy("messenger", "enabled"))),
-        ("page_configured", boolean(!page_id.is_empty())),
+        ("page_configured", boolean(page_configured)),
         (
             "page_id",
-            if page_id.is_empty() {
-                null()
+            if page_configured {
+                page_id.clone().unwrap_or_else(null)
             } else {
-                string(page_id.clone())
+                null()
             },
         ),
         ("token_configured", boolean(token.is_some())),
@@ -118,20 +129,9 @@ pub fn status(
             "comment_reply_enabled",
             boolean(view.truthy("messenger", "comment_reply_enabled")),
         ),
-        (
-            "comment_platforms",
-            array(
-                comment_platforms
-                    .iter()
-                    .map(|platform| string(platform.clone()))
-                    .collect(),
-            ),
-        ),
+        ("comment_platforms", array(comment_platforms.clone())),
         ("reply_rules", integer(reply_rules as i64)),
-        (
-            "webhook_path",
-            string(view.text_or_empty("messenger", "webhook_path")),
-        ),
+        ("webhook_path", webhook_path.clone()),
     ]);
 
     if json_mode {
@@ -140,19 +140,26 @@ pub fn status(
     }
 
     let yesno = |flag: bool| if flag { "yes" } else { "no" };
+    let page_id_text = if page_configured {
+        page_id.as_ref().map(python_str).unwrap_or_default()
+    } else {
+        "missing".to_string()
+    };
+    let platforms_text = if comment_platforms.is_empty() {
+        "none".to_string()
+    } else {
+        comment_platforms
+            .iter()
+            .map(python_str)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
     let mut text = String::from("Messenger status\n");
     text.push_str(&format!(
         "  Enabled:        {}\n",
         yesno(view.truthy("messenger", "enabled"))
     ));
-    text.push_str(&format!(
-        "  Page ID:        {}\n",
-        if page_id.is_empty() {
-            "missing"
-        } else {
-            &page_id
-        }
-    ));
+    text.push_str(&format!("  Page ID:        {page_id_text}\n"));
     text.push_str(&format!(
         "  Page token:     {}\n",
         match mask_token(token.as_deref()) {
@@ -165,19 +172,14 @@ pub fn status(
         yesno(view.truthy("messenger", "auto_reply"))
     ));
     text.push_str(&format!(
-        "  Comment reply:  {} (platforms: {})\n",
+        "  Comment reply:  {} (platforms: {platforms_text})\n",
         yesno(view.truthy("messenger", "comment_reply_enabled")),
-        if comment_platforms.is_empty() {
-            "none".to_string()
-        } else {
-            comment_platforms.join(", ")
-        }
     ));
     text.push_str(&format!(
         "  Webhook path:   {}\n",
-        view.text_or_empty("messenger", "webhook_path")
+        python_str(&webhook_path)
     ));
-    if token.is_none() || page_id.is_empty() {
+    if token.is_none() || !page_configured {
         text.push_str("Connect with: xpst auth messenger");
     }
     let _ = write_text(out, &text);
