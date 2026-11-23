@@ -865,6 +865,13 @@ pub fn python_str(value: &Value) -> String {
         // The reader already stores a timestamp the way PyYAML's constructor
         // renders it (`datetime.isoformat(' ')`), which is Python's `str()`.
         Value::Timestamp(text) => text.clone(),
+        // `str(float("nan"))` / `str(float("inf"))` / `str(float("-inf"))`.
+        Value::NonFinite(kind) => match kind {
+            xpst_config::NonFinite::Nan => "nan",
+            xpst_config::NonFinite::Infinity => "inf",
+            xpst_config::NonFinite::NegInfinity => "-inf",
+        }
+        .to_string(),
         other => xpst_config::pyyaml::dump(other).trim_end().to_string(),
     }
 }
@@ -1178,6 +1185,25 @@ mod tests {
         )
         .expect("defaults");
         assert_eq!(view.provider_mode(), "2026-01-01 00:00:00+00:00");
+    }
+
+    #[test]
+    fn a_non_finite_provider_mode_is_rendered_like_python() {
+        // `str(float("nan"))` / `str(float("-inf"))`.
+        let nan = ConfigView::load(
+            &document("provider_mode: .nan\n"),
+            Path::new("/tmp/profile"),
+            &no_env,
+        )
+        .expect("defaults");
+        assert_eq!(nan.provider_mode(), "nan");
+        let inf = ConfigView::load(
+            &document("provider_mode: -.inf\n"),
+            Path::new("/tmp/profile"),
+            &no_env,
+        )
+        .expect("defaults");
+        assert_eq!(inf.provider_mode(), "-inf");
     }
 
     #[test]
