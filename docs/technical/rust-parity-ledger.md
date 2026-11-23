@@ -4,7 +4,7 @@
 
 One row per leaf command of the shipped CLI. `status` is `implemented` when the Rust engine runs the command and `stub` when it answers `not implemented in the Rust engine yet`. The two columns either side are the questions a reader actually has: which crate owns the behaviour, and whether the Python implementation they are comparing against makes an outbound network call.
 
-**7 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
+**9 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
 
 ## Columns
 
@@ -76,9 +76,9 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `schedule add` | stub | xpst-state | none |
 | `schedule install` | stub | xpst-state | none |
 | `schedule list` | implemented | xpst-state | none |
-| `schedule pause` | stub | xpst-state | none |
+| `schedule pause` | implemented | xpst-state | none |
 | `schedule remove` | stub | xpst-state | none |
-| `schedule resume` | stub | xpst-state | none |
+| `schedule resume` | implemented | xpst-state | none |
 | `schedule run` | stub | xpst-core | yes |
 | `search` | stub | xpst-store | none |
 | `security-audit` | stub | xpst-cli | none |
@@ -114,6 +114,8 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `version` | xpst-cli | Version and dependency report; `--version` matches Click's shape. |
 | `status` | xpst-state | Statistics payload field-for-field with `get_statistics()` on captured fixtures. |
 | `schedule list` | xpst-state | Entries, pause marker and paused snapshots, as `schedule_list --json` reports them. |
+| `schedule pause` | xpst-state | Writes the same `schedule.paused.json` marker (0600, `json.dumps(indent=2)`) under the same `.schedule.lock`; payload byte-compared with the Python CLI. |
+| `schedule resume` | xpst-state | Removes only the pause marker (snapshots survive) and reports `was_paused`; payload byte-compared with the Python CLI. |
 | `failures list` | xpst-state | Dead-letter rows with status/resolved/age_hours, as `failures_list --json` reports them. |
 
 ## Known deviations from the Python engine

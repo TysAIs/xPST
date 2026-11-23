@@ -70,6 +70,18 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         schedule_list,
     ),
     implemented(
+        "schedule pause",
+        "xpst-state",
+        "Writes the same `schedule.paused.json` marker (0600, `json.dumps(indent=2)`) under the same `.schedule.lock`; payload byte-compared with the Python CLI.",
+        schedule_pause,
+    ),
+    implemented(
+        "schedule resume",
+        "xpst-state",
+        "Removes only the pause marker (snapshots survive) and reports `was_paused`; payload byte-compared with the Python CLI.",
+        schedule_resume,
+    ),
+    implemented(
         "failures list",
         "xpst-state",
         "Dead-letter rows with status/resolved/age_hours, as `failures_list --json` reports them.",
@@ -160,6 +172,24 @@ fn schedule_list(
     err: &mut dyn Write,
 ) -> i32 {
     commands::schedule::run(global, leaf, out, err)
+}
+
+fn schedule_pause(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::schedule::pause(global, leaf, out, err)
+}
+
+fn schedule_resume(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::schedule::resume(global, leaf, out, err)
 }
 
 fn failures_list(
