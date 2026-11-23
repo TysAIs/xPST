@@ -108,6 +108,9 @@ pub fn log_error(err: &mut dyn Write, message: &str) -> io::Result<()> {
 }
 
 /// `Text.expand_tabs`: advance to the next multiple of `tab_size`.
+///
+/// Rich counts tab stops in *cells* (`cell_position += part.cell_len`), not in
+/// characters, so a wide character before a tab advances the stop by two.
 fn expand_tabs(chars: &mut Vec<char>, tab_size: usize) {
     let mut column = 0;
     let mut expanded = Vec::with_capacity(chars.len());
@@ -158,7 +161,10 @@ fn divide_line(chars: &[char], width: usize, fold: bool) -> Vec<usize> {
             }
         } else if cell_offset > 0 && start > 0 {
             breaks.push(start);
-            cell_offset = word_length;
+            // `_cell_len(word)`, not the rstripped length: the trailing
+            // whitespace moves to the next line with the word, and Rich counts
+            // it against that line's budget.
+            cell_offset = cell_len_chars(word);
         }
     }
 
@@ -223,18 +229,22 @@ fn render_line(chars: &[char], width: usize) -> String {
         let crop = trailing.min(excess);
         line.truncate(line.len() - crop);
     }
+    // `truncate(width, overflow="fold")` → `set_cell_size`: a wide character
+    // that straddles the boundary becomes a single space rather than vanishing.
     let mut cells = 0usize;
-    let mut end = 0usize;
-    for (index, ch) in line.iter().enumerate() {
-        let advance = cell_width(*ch);
+    let mut out = String::with_capacity(line.len());
+    for ch in line {
+        let advance = cell_width(ch);
         if cells + advance > width {
+            if cells + 1 == width && advance == 2 {
+                out.push(' ');
+            }
             break;
         }
         cells += advance;
-        end = index + 1;
+        out.push(ch);
     }
-    line.truncate(end);
-    line.into_iter().collect()
+    out
 }
 
 /// Cells occupied by `text` (Rich's `cell_len`).
@@ -378,6 +388,15 @@ mod tests {
     #[test]
     fn blank_lines_are_preserved() {
         assert_eq!(wrap("a\n\nb", 10), vec!["a", "", "b"]);
+    }
+
+    #[test]
+    fn a_wide_character_that_straddles_the_boundary_becomes_a_space() {
+        // `set_cell_size("漢", 1)` returns " ": Rich pads the half cell rather
+        // than dropping the character, so a one-column console still shows a
+        // placeholder.
+        assert_eq!(wrap("漢", 1), vec![" "]);
+        assert_eq!(wrap("a漢", 1), vec!["a", " "]);
     }
 
     #[test]
