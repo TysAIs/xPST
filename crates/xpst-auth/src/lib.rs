@@ -24,6 +24,7 @@
 //! captured from it (`tests/fixtures/auth_truth_table.json`, produced by
 //! `scripts/capture_auth_truth_table.py`) is reproduced exactly.
 
+pub mod credentials;
 mod facts;
 mod state;
 mod table;

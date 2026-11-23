@@ -97,6 +97,38 @@ pub fn null() -> xpst_config::Value {
     xpst_config::Value::Null
 }
 
+/// Greedy word wrap at `width` columns, the way Rich wraps a plain message.
+///
+/// Only used where the Python command prints through `console.print` and the
+/// console is not a TTY (so Rich uses its default 80-column width). A message
+/// that fits stays on one line; a longer one breaks at a space and keeps the
+/// trailing space, which is what Rich emits.
+pub fn wrap_at(text: &str, width: usize) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for word in text.split(' ') {
+        let candidate_len = if current.is_empty() {
+            word.chars().count()
+        } else {
+            current.chars().count() + 1 + word.chars().count()
+        };
+        if candidate_len > width && !current.is_empty() {
+            current.push(' ');
+            lines.push(std::mem::take(&mut current));
+            current.push_str(word);
+        } else {
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(word);
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines.join("\n")
+}
+
 /// Write a payload the way `json_output()` does: one line, Python separators,
 /// insertion order, trailing newline.
 pub fn write_python_json(out: &mut dyn Write, value: &xpst_config::Value) -> std::io::Result<()> {

@@ -5,7 +5,7 @@
     "source": "src/xpst/cli.py"
   },
   "note": "Captured by running the shipped Python CLI against scratch profiles. scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent; snapshot modified_at is stripped and its epoch recorded instead.",
-  "scenario_count": 19,
+  "scenario_count": 45,
   "scenarios": [
     {
       "name": "status_empty_profile",
@@ -672,6 +672,2332 @@
           }
         },
         "platform_health_note": "platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness."
+      }
+    },
+    {
+      "name": "config_export_masked",
+      "argv": [
+        "config",
+        "export",
+        "PROFILE/.xpst/out.yaml",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "files": {
+        ".xpst/out.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: '***'\nmonitoring:\n  log_level: INFO\n"
+      },
+      "stdout_json": {
+        "ok": true,
+        "exported": "<PROFILE>/.xpst/out.yaml",
+        "masked": true
+      }
+    },
+    {
+      "name": "config_export_raw",
+      "argv": [
+        "config",
+        "export",
+        "PROFILE/.xpst/raw.yaml",
+        "--raw",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "files": {
+        ".xpst/raw.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n"
+      },
+      "stdout_json": {
+        "ok": true,
+        "exported": "<PROFILE>/.xpst/raw.yaml",
+        "masked": false
+      }
+    },
+    {
+      "name": "config_export_missing_source",
+      "argv": [
+        "config",
+        "export",
+        "PROFILE/.xpst/out.yaml",
+        "--file",
+        "MISSING",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "json",
+      "exit_code": 2,
+      "config_dir": ".xpst",
+      "allow_nonzero": true,
+      "stdout_json": {
+        "ok": false,
+        "error": "Config file not found: <PROFILE>/does-not-exist.yaml"
+      }
+    },
+    {
+      "name": "config_set_bool",
+      "argv": [
+        "config",
+        "set",
+        "accounts.youtube.enabled",
+        "false",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "files": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: false\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n"
+      },
+      "stdout_json": {
+        "key": "accounts.youtube.enabled",
+        "value": false,
+        "saved": true
+      }
+    },
+    {
+      "name": "config_set_int",
+      "argv": [
+        "config",
+        "set",
+        "rate_limits.youtube",
+        "10",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "files": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\nrate_limits:\n  youtube: 10\n"
+      },
+      "stdout_json": {
+        "key": "rate_limits.youtube",
+        "value": 10,
+        "saved": true
+      }
+    },
+    {
+      "name": "config_set_float_new_section",
+      "argv": [
+        "config",
+        "set",
+        "anti_bot.min_delay",
+        "1.5",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "files": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\nanti_bot:\n  min_delay: 1.5\n"
+      },
+      "stdout_json": {
+        "key": "anti_bot.min_delay",
+        "value": 1.5,
+        "saved": true
+      }
+    },
+    {
+      "name": "config_set_string",
+      "argv": [
+        "config",
+        "set",
+        "monitoring.log_level",
+        "DEBUG",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "files": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: DEBUG\n"
+      },
+      "stdout_json": {
+        "key": "monitoring.log_level",
+        "value": "DEBUG",
+        "saved": true
+      }
+    },
+    {
+      "name": "config_import_merge",
+      "argv": [
+        "config",
+        "import",
+        "PROFILE/in.yaml",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n",
+        "in.yaml": "rate_limits:\n  youtube: 12\nnew_section:\n  a: 1\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "files": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\nrate_limits:\n  youtube: 12\nnew_section:\n  a: 1\n"
+      },
+      "stdout_json": {
+        "ok": true,
+        "imported": "<PROFILE>/in.yaml",
+        "mode": "merge",
+        "added": [
+          "new_section.a",
+          "rate_limits.youtube"
+        ],
+        "removed": [],
+        "changed": [],
+        "warnings": [
+          "Unknown top-level key: 'new_section'"
+        ]
+      }
+    },
+    {
+      "name": "config_import_replace",
+      "argv": [
+        "config",
+        "import",
+        "PROFILE/in.yaml",
+        "--replace",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n",
+        "in.yaml": "version: 4\nmonitoring:\n  log_level: WARNING\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "files": {
+        ".xpst/config.yaml": "version: 4\nmonitoring:\n  log_level: WARNING\n"
+      },
+      "stdout_json": {
+        "ok": true,
+        "imported": "<PROFILE>/in.yaml",
+        "mode": "replace",
+        "added": [
+          "monitoring.log_level",
+          "version"
+        ],
+        "removed": [],
+        "changed": [],
+        "warnings": [
+          "Unknown top-level key: 'version'"
+        ]
+      }
+    },
+    {
+      "name": "config_import_no_changes",
+      "argv": [
+        "config",
+        "import",
+        "PROFILE/in.yaml",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n",
+        "in.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "stdout_json": {
+        "ok": true,
+        "message": "No changes detected",
+        "imported": "<PROFILE>/in.yaml"
+      }
+    },
+    {
+      "name": "config_import_invalid_structure",
+      "argv": [
+        "config",
+        "import",
+        "PROFILE/in.yaml",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n",
+        "in.yaml": "rate_limits: 5\n"
+      },
+      "compare": "json",
+      "exit_code": 2,
+      "config_dir": ".xpst",
+      "allow_nonzero": true,
+      "stdout_json": {
+        "ok": false,
+        "errors": [
+          "'rate_limits' must be a mapping, got int"
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "config_import_strict_warning",
+      "argv": [
+        "config",
+        "import",
+        "PROFILE/in.yaml",
+        "--strict",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n",
+        "in.yaml": "unknown_key: 1\n"
+      },
+      "compare": "json",
+      "exit_code": 2,
+      "config_dir": ".xpst",
+      "allow_nonzero": true,
+      "stdout_json": {
+        "ok": false,
+        "errors": [],
+        "warnings": [
+          "Unknown top-level key: 'unknown_key'"
+        ]
+      }
+    },
+    {
+      "name": "config_fix_clean",
+      "argv": [
+        "config",
+        "fix",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "HOME": "PROFILE"
+      },
+      "config_dir": ".xpst",
+      "stdout_json": {
+        "ok": true,
+        "fixes_applied": 1,
+        "details": [
+          "Create missing credentials directory: <PROFILE>/.xpst/credentials"
+        ]
+      }
+    },
+    {
+      "name": "config_fix_stale_path",
+      "argv": [
+        "config",
+        "fix",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/config.yaml": "version: 4\nvideo:\n  download_dir: ~/.crosspstr/downloads\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "stdout_json": {
+        "ok": true,
+        "fixes_applied": 2,
+        "details": [
+          "Create missing credentials directory: <PROFILE>/.xpst/credentials",
+          "Replace stale .crosspstr paths with .xpst"
+        ]
+      }
+    },
+    {
+      "name": "byo_status_no_app",
+      "argv": [
+        "byo",
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "platforms": {
+          "instagram": {
+            "platform": "instagram",
+            "display_name": "Instagram Reels",
+            "configurable": true,
+            "configured": false,
+            "half_configured": false,
+            "app_id_masked": "",
+            "source": "",
+            "id_label": "Meta App ID",
+            "secret_label": "Meta App Secret",
+            "redirect_uri": "http://localhost:8888/callback",
+            "scopes": [
+              "instagram_basic",
+              "instagram_content_publish",
+              "pages_show_list",
+              "pages_read_engagement"
+            ],
+            "create_url": "https://developers.facebook.com/apps",
+            "docs_url": "https://developers.facebook.com/docs/graph-api/get-started/getting-access-tokens/about-user-access-tokens#standard-access",
+            "enables": "Publishing Reels to your own account through the official Instagram Platform API. As the app owner you stay in Meta's Standard Access: no App Review and no Business Verification.",
+            "sign_in_available": false,
+            "env_vars": [
+              "XPST_INSTAGRAM_APP_ID",
+              "XPST_INSTAGRAM_APP_SECRET"
+            ]
+          },
+          "threads": {
+            "platform": "threads",
+            "display_name": "Threads",
+            "configurable": true,
+            "configured": false,
+            "half_configured": false,
+            "app_id_masked": "",
+            "source": "",
+            "id_label": "Meta App ID",
+            "secret_label": "Meta App Secret",
+            "redirect_uri": "http://localhost:8888/callback",
+            "scopes": [
+              "threads_basic",
+              "threads_content_publish"
+            ],
+            "create_url": "https://developers.facebook.com/apps",
+            "docs_url": "https://developers.facebook.com/docs/threads/get-started/getting-started#auth",
+            "enables": "Publishing posts to your own Threads account through the official Threads API. Same Meta app as Instagram; owner use is Standard Access: no App Review, no Business Verification.",
+            "sign_in_available": false,
+            "env_vars": [
+              "XPST_THREADS_APP_ID",
+              "XPST_THREADS_APP_SECRET"
+            ]
+          },
+          "messenger": {
+            "platform": "messenger",
+            "display_name": "Messenger",
+            "configurable": false,
+            "configured": false,
+            "half_configured": false,
+            "app_id_masked": "",
+            "source": "",
+            "id_label": "Meta App ID",
+            "secret_label": "Meta App Secret",
+            "redirect_uri": "",
+            "scopes": [],
+            "create_url": "https://developers.facebook.com/apps",
+            "docs_url": "https://developers.facebook.com/docs/messenger-platform/get-started",
+            "enables": "Messenger auto-reply and DM features on your Page. Messenger keeps its own connect flow; this status line shows the same Meta app.",
+            "sign_in_available": false,
+            "env_vars": [
+              "XPST_MESSENGER_APP_ID",
+              "XPST_MESSENGER_APP_SECRET"
+            ]
+          },
+          "facebook": {
+            "platform": "facebook",
+            "display_name": "Facebook Page",
+            "configurable": false,
+            "configured": false,
+            "half_configured": false,
+            "app_id_masked": "",
+            "source": "",
+            "id_label": "Meta App ID",
+            "secret_label": "Meta App Secret",
+            "redirect_uri": "https://localhost/",
+            "scopes": [
+              "pages_show_list",
+              "pages_read_engagement",
+              "pages_manage_posts"
+            ],
+            "create_url": "https://developers.facebook.com/apps",
+            "docs_url": "https://developers.facebook.com/docs/facebook-login",
+            "enables": "Page-scoped publishing through the Graph API. Facebook keeps its own ``xpst auth facebook`` flow; this status line shows its stored app.",
+            "sign_in_available": false,
+            "env_vars": [
+              "XPST_FACEBOOK_APP_ID",
+              "XPST_FACEBOOK_APP_SECRET"
+            ]
+          },
+          "tiktok": {
+            "platform": "tiktok",
+            "display_name": "TikTok",
+            "configurable": true,
+            "configured": false,
+            "half_configured": false,
+            "app_id_masked": "",
+            "source": "",
+            "id_label": "Client Key",
+            "secret_label": "Client Secret",
+            "redirect_uri": "http://localhost:8085/callback",
+            "scopes": [
+              "video.publish",
+              "video.upload",
+              "user.info.stats"
+            ],
+            "create_url": "https://developers.tiktok.com/manage/apps",
+            "docs_url": "https://developers.tiktok.com/doc/content-posting-api-get-started",
+            "enables": "Direct-posting to your own TikTok account through the official Content Posting API. Unaudited apps post SELF_ONLY (private) until TikTok audits the app \u2014 xPST never claims public reach it does not have.",
+            "sign_in_available": false,
+            "env_vars": [
+              "XPST_TIKTOK_CLIENT_KEY",
+              "XPST_TIKTOK_CLIENT_SECRET"
+            ]
+          }
+        },
+        "meta_redirect_uri": "http://localhost:8888/callback",
+        "note": "One Meta app covers Instagram, Threads and Messenger: enter it once and both platforms pick it up. Secrets live only in the encrypted store under the xPST config dir and are never echoed back."
+      }
+    },
+    {
+      "name": "byo_status_config_app_id",
+      "argv": [
+        "byo",
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\naccounts:\n  instagram:\n    app_id: '1234567890123456'\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "platforms": {
+          "instagram": {
+            "platform": "instagram",
+            "display_name": "Instagram Reels",
+            "configurable": true,
+            "configured": false,
+            "half_configured": true,
+            "app_id_masked": "\u20263456",
+            "source": "config-incomplete",
+            "id_label": "Meta App ID",
+            "secret_label": "Meta App Secret",
+            "redirect_uri": "http://localhost:8888/callback",
+            "scopes": [
+              "instagram_basic",
+              "instagram_content_publish",
+              "pages_show_list",
+              "pages_read_engagement"
+            ],
+            "create_url": "https://developers.facebook.com/apps",
+            "docs_url": "https://developers.facebook.com/docs/graph-api/get-started/getting-access-tokens/about-user-access-tokens#standard-access",
+            "enables": "Publishing Reels to your own account through the official Instagram Platform API. As the app owner you stay in Meta's Standard Access: no App Review and no Business Verification.",
+            "sign_in_available": false,
+            "env_vars": [
+              "XPST_INSTAGRAM_APP_ID",
+              "XPST_INSTAGRAM_APP_SECRET"
+            ]
+          },
+          "threads": {
+            "platform": "threads",
+            "display_name": "Threads",
+            "configurable": true,
+            "configured": false,
+            "half_configured": false,
+            "app_id_masked": "",
+            "source": "",
+            "id_label": "Meta App ID",
+            "secret_label": "Meta App Secret",
+            "redirect_uri": "http://localhost:8888/callback",
+            "scopes": [
+              "threads_basic",
+              "threads_content_publish"
+            ],
+            "create_url": "https://developers.facebook.com/apps",
+            "docs_url": "https://developers.facebook.com/docs/threads/get-started/getting-started#auth",
+            "enables": "Publishing posts to your own Threads account through the official Threads API. Same Meta app as Instagram; owner use is Standard Access: no App Review, no Business Verification.",
+            "sign_in_available": false,
+            "env_vars": [
+              "XPST_THREADS_APP_ID",
+              "XPST_THREADS_APP_SECRET"
+            ]
+          },
+          "messenger": {
+            "platform": "messenger",
+            "display_name": "Messenger",
+            "configurable": false,
+            "configured": false,
+            "half_configured": false,
+            "app_id_masked": "",
+            "source": "",
+            "id_label": "Meta App ID",
+            "secret_label": "Meta App Secret",
+            "redirect_uri": "",
+            "scopes": [],
+            "create_url": "https://developers.facebook.com/apps",
+            "docs_url": "https://developers.facebook.com/docs/messenger-platform/get-started",
+            "enables": "Messenger auto-reply and DM features on your Page. Messenger keeps its own connect flow; this status line shows the same Meta app.",
+            "sign_in_available": false,
+            "env_vars": [
+              "XPST_MESSENGER_APP_ID",
+              "XPST_MESSENGER_APP_SECRET"
+            ]
+          },
+          "facebook": {
+            "platform": "facebook",
+            "display_name": "Facebook Page",
+            "configurable": false,
+            "configured": false,
+            "half_configured": false,
+            "app_id_masked": "",
+            "source": "",
+            "id_label": "Meta App ID",
+            "secret_label": "Meta App Secret",
+            "redirect_uri": "https://localhost/",
+            "scopes": [
+              "pages_show_list",
+              "pages_read_engagement",
+              "pages_manage_posts"
+            ],
+            "create_url": "https://developers.facebook.com/apps",
+            "docs_url": "https://developers.facebook.com/docs/facebook-login",
+            "enables": "Page-scoped publishing through the Graph API. Facebook keeps its own ``xpst auth facebook`` flow; this status line shows its stored app.",
+            "sign_in_available": false,
+            "env_vars": [
+              "XPST_FACEBOOK_APP_ID",
+              "XPST_FACEBOOK_APP_SECRET"
+            ]
+          },
+          "tiktok": {
+            "platform": "tiktok",
+            "display_name": "TikTok",
+            "configurable": true,
+            "configured": false,
+            "half_configured": false,
+            "app_id_masked": "",
+            "source": "",
+            "id_label": "Client Key",
+            "secret_label": "Client Secret",
+            "redirect_uri": "http://localhost:8085/callback",
+            "scopes": [
+              "video.publish",
+              "video.upload",
+              "user.info.stats"
+            ],
+            "create_url": "https://developers.tiktok.com/manage/apps",
+            "docs_url": "https://developers.tiktok.com/doc/content-posting-api-get-started",
+            "enables": "Direct-posting to your own TikTok account through the official Content Posting API. Unaudited apps post SELF_ONLY (private) until TikTok audits the app \u2014 xPST never claims public reach it does not have.",
+            "sign_in_available": false,
+            "env_vars": [
+              "XPST_TIKTOK_CLIENT_KEY",
+              "XPST_TIKTOK_CLIENT_SECRET"
+            ]
+          }
+        },
+        "meta_redirect_uri": "http://localhost:8888/callback",
+        "note": "One Meta app covers Instagram, Threads and Messenger: enter it once and both platforms pick it up. Secrets live only in the encrypted store under the xPST config dir and are never echoed back."
+      }
+    },
+    {
+      "name": "byo_status_config_pair",
+      "argv": [
+        "byo",
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\naccounts:\n  instagram:\n    app_id: '1234567890123456'\n    app_secret: 'synthetic-secret-0123456789'\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "platforms": {
+          "instagram": {
+            "platform": "instagram",
+            "display_name": "Instagram Reels",
+            "configurable": true,
+            "configured": true,
+            "half_configured": false,
+            "app_id_masked": "\u20263456",
+            "source": "config",
+            "id_label": "Meta App ID",
+            "secret_label": "Meta App Secret",
+            "redirect_uri": "http://localhost:8888/callback",
+            "scopes": [
+              "instagram_basic",
+              "instagram_content_publish",
+              "pages_show_list",
+              "pages_read_engagement"
+            ],
+            "create_url": "https://developers.facebook.com/apps",
+            "docs_url": "https://developers.facebook.com/docs/graph-api/get-started/getting-access-tokens/about-user-access-tokens#standard-access",
+            "enables": "Publishing Reels to your own account through the official Instagram Platform API. As the app owner you stay in Meta's Standard Access: no App Review and no Business Verification.",
+            "sign_in_available": true,
+            "env_vars": [
+              "XPST_INSTAGRAM_APP_ID",
+              "XPST_INSTAGRAM_APP_SECRET"
+            ]
+          },
+          "threads": {
+            "platform": "threads",
+            "display_name": "Threads",
+            "configurable": true,
+            "configured": false,
+            "half_configured": false,
+            "app_id_masked": "",
+            "source": "",
+            "id_label": "Meta App ID",
+            "secret_label": "Meta App Secret",
+            "redirect_uri": "http://localhost:8888/callback",
+            "scopes": [
+              "threads_basic",
+              "threads_content_publish"
+            ],
+            "create_url": "https://developers.facebook.com/apps",
+            "docs_url": "https://developers.facebook.com/docs/threads/get-started/getting-started#auth",
+            "enables": "Publishing posts to your own Threads account through the official Threads API. Same Meta app as Instagram; owner use is Standard Access: no App Review, no Business Verification.",
+            "sign_in_available": false,
+            "env_vars": [
+              "XPST_THREADS_APP_ID",
+              "XPST_THREADS_APP_SECRET"
+            ]
+          },
+          "messenger": {
+            "platform": "messenger",
+            "display_name": "Messenger",
+            "configurable": false,
+            "configured": false,
+            "half_configured": false,
+            "app_id_masked": "",
+            "source": "",
+            "id_label": "Meta App ID",
+            "secret_label": "Meta App Secret",
+            "redirect_uri": "",
+            "scopes": [],
+            "create_url": "https://developers.facebook.com/apps",
+            "docs_url": "https://developers.facebook.com/docs/messenger-platform/get-started",
+            "enables": "Messenger auto-reply and DM features on your Page. Messenger keeps its own connect flow; this status line shows the same Meta app.",
+            "sign_in_available": false,
+            "env_vars": [
+              "XPST_MESSENGER_APP_ID",
+              "XPST_MESSENGER_APP_SECRET"
+            ]
+          },
+          "facebook": {
+            "platform": "facebook",
+            "display_name": "Facebook Page",
+            "configurable": false,
+            "configured": false,
+            "half_configured": false,
+            "app_id_masked": "",
+            "source": "",
+            "id_label": "Meta App ID",
+            "secret_label": "Meta App Secret",
+            "redirect_uri": "https://localhost/",
+            "scopes": [
+              "pages_show_list",
+              "pages_read_engagement",
+              "pages_manage_posts"
+            ],
+            "create_url": "https://developers.facebook.com/apps",
+            "docs_url": "https://developers.facebook.com/docs/facebook-login",
+            "enables": "Page-scoped publishing through the Graph API. Facebook keeps its own ``xpst auth facebook`` flow; this status line shows its stored app.",
+            "sign_in_available": false,
+            "env_vars": [
+              "XPST_FACEBOOK_APP_ID",
+              "XPST_FACEBOOK_APP_SECRET"
+            ]
+          },
+          "tiktok": {
+            "platform": "tiktok",
+            "display_name": "TikTok",
+            "configurable": true,
+            "configured": false,
+            "half_configured": false,
+            "app_id_masked": "",
+            "source": "",
+            "id_label": "Client Key",
+            "secret_label": "Client Secret",
+            "redirect_uri": "http://localhost:8085/callback",
+            "scopes": [
+              "video.publish",
+              "video.upload",
+              "user.info.stats"
+            ],
+            "create_url": "https://developers.tiktok.com/manage/apps",
+            "docs_url": "https://developers.tiktok.com/doc/content-posting-api-get-started",
+            "enables": "Direct-posting to your own TikTok account through the official Content Posting API. Unaudited apps post SELF_ONLY (private) until TikTok audits the app \u2014 xPST never claims public reach it does not have.",
+            "sign_in_available": false,
+            "env_vars": [
+              "XPST_TIKTOK_CLIENT_KEY",
+              "XPST_TIKTOK_CLIENT_SECRET"
+            ]
+          }
+        },
+        "meta_redirect_uri": "http://localhost:8888/callback",
+        "note": "One Meta app covers Instagram, Threads and Messenger: enter it once and both platforms pick it up. Secrets live only in the encrypted store under the xPST config dir and are never echoed back."
+      }
+    },
+    {
+      "name": "byo_clear_unknown_platform",
+      "argv": [
+        "byo",
+        "clear",
+        "nope",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "stdout",
+      "exit_code": 2,
+      "allow_nonzero": true,
+      "stdout": "Unknown platform for BYO setup: nope (options: facebook, instagram, messenger, \nthreads, tiktok)\n"
+    },
+    {
+      "name": "capabilities",
+      "argv": [
+        "capabilities",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "contract_version": 2,
+        "content_types": [
+          "video",
+          "image",
+          "carousel",
+          "text",
+          "thread"
+        ],
+        "publish_destinations": [
+          "youtube",
+          "x",
+          "instagram",
+          "tiktok",
+          "threads",
+          "facebook",
+          "rumble",
+          "bluesky"
+        ],
+        "platforms": {
+          "youtube": {
+            "platform": "youtube",
+            "display_name": "YouTube",
+            "role": "video_destination",
+            "publishing": true,
+            "declared": [
+              "video"
+            ],
+            "declared_labels": [
+              "video"
+            ],
+            "implemented": [
+              "video"
+            ],
+            "declared_but_unimplemented": [],
+            "implemented_but_undeclared": [],
+            "media_transport": "local_upload",
+            "accepts_local_media": true,
+            "media_transport_requirement": "",
+            "media_transport_error_code": null,
+            "video_envelope": {
+              "platform": "youtube",
+              "display_name": "YouTube",
+              "max_duration_seconds": 43200,
+              "shorts_max_duration_seconds": 60,
+              "max_bytes": 274877906944,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "video_codec": "h264",
+              "aspect_min": null,
+              "aspect_max": null,
+              "shorts_max_aspect_ratio": 1.0,
+              "modes": [
+                "shorts",
+                "long"
+              ],
+              "long_form": true,
+              "source": "YouTube Data API v3 videos.insert (resumable upload); YouTube upload limits: 12 hours / 256 GB; Shorts: \u2264 60 s, square or taller than wide",
+              "note": "Both modes use the same resumable videos.insert call; the mode decides the title tag, the returned URL, and which ceiling is enforced."
+            },
+            "integration": "ready",
+            "content": [
+              {
+                "content_type": "video",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": "two real modes: short-form (Shorts, \u2264 60 s, square-or-vertical, '#Shorts' tag, /shorts/ URL) and long-form (resumable videos.insert, watch URL, up to 12 h / 256 GB). The mode is explicit (--shorts/--long) or derived from the media probe; a video that fits neither is refused with both ceilings in the message."
+              },
+              {
+                "content_type": "image",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              },
+              {
+                "content_type": "carousel",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": "no carousel path: a carousel request is refused by name, and nothing is stitched into a video"
+              },
+              {
+                "content_type": "text",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              }
+            ],
+            "note": ""
+          },
+          "x": {
+            "platform": "x",
+            "display_name": "X",
+            "role": "video_destination",
+            "publishing": true,
+            "declared": [
+              "carousel",
+              "image",
+              "text",
+              "video"
+            ],
+            "declared_labels": [
+              "video",
+              "carousel",
+              "text",
+              "image"
+            ],
+            "implemented": [
+              "carousel",
+              "image",
+              "text",
+              "video"
+            ],
+            "declared_but_unimplemented": [],
+            "implemented_but_undeclared": [],
+            "media_transport": "local_upload",
+            "accepts_local_media": true,
+            "media_transport_requirement": "",
+            "media_transport_error_code": null,
+            "video_envelope": {
+              "platform": "x",
+              "display_name": "X",
+              "max_duration_seconds": 140,
+              "shorts_max_duration_seconds": null,
+              "max_bytes": 536870912,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "video_codec": "h264",
+              "aspect_min": 0.41841004184100417,
+              "aspect_max": 2.39,
+              "shorts_max_aspect_ratio": null,
+              "modes": [
+                "shorts"
+              ],
+              "long_form": false,
+              "source": "X media upload limits: 140 s of video for standard accounts, 512 MB, 1:2.39-2.39:1; Premium accounts allow longer videos (raise it with x.max_video_duration_seconds)",
+              "note": "No long-form path until the account's real cap is raised; over 140 s is refused, never truncated."
+            },
+            "integration": "ready",
+            "content": [
+              {
+                "content_type": "video",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": ""
+              },
+              {
+                "content_type": "image",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": "single image post (upload_image): JPG/PNG/WEBP, \u2264 5 MB, aspect 1:3\u20133:1"
+              },
+              {
+                "content_type": "carousel",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": "published as a tweet thread, one media item per tweet (upload_carousel), in the given order; image items are checked against X's image contract before upload"
+              },
+              {
+                "content_type": "text",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": "one text post (280 characters max); no media, published via post_text"
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": "not declared: a text-only thread has no sender. Multi-media posting works as a tweet thread and is reported as carousel."
+              }
+            ],
+            "note": ""
+          },
+          "instagram": {
+            "platform": "instagram",
+            "display_name": "Instagram Reels",
+            "role": "video_destination",
+            "publishing": true,
+            "declared": [
+              "carousel",
+              "image",
+              "video"
+            ],
+            "declared_labels": [
+              "video",
+              "image",
+              "carousel"
+            ],
+            "implemented": [
+              "carousel",
+              "image",
+              "video"
+            ],
+            "declared_but_unimplemented": [],
+            "implemented_but_undeclared": [],
+            "media_transport": "local_upload",
+            "accepts_local_media": true,
+            "media_transport_requirement": "",
+            "media_transport_error_code": null,
+            "video_envelope": {
+              "platform": "instagram",
+              "display_name": "Instagram Reels",
+              "max_duration_seconds": 900,
+              "shorts_max_duration_seconds": null,
+              "max_bytes": 4294967296,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "video_codec": "h264",
+              "aspect_min": null,
+              "aspect_max": null,
+              "shorts_max_aspect_ratio": null,
+              "modes": [
+                "shorts"
+              ],
+              "long_form": false,
+              "source": "Meta Reels API: Reels up to 15 minutes, 4 GB",
+              "note": ""
+            },
+            "integration": "ready",
+            "content": [
+              {
+                "content_type": "video",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": ""
+              },
+              {
+                "content_type": "image",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": "feed photo (upload_image): JPEG only, \u2264 8 MB, aspect within 4:5\u20131.91:1; the Graph API path needs a public image URL and refuses a local file explicitly"
+              },
+              {
+                "content_type": "carousel",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": "native album upload (2-10 items, order preserved); image items are checked against Instagram's image contract before the album call; over 10 items or under 2 is refused, never truncated"
+              },
+              {
+                "content_type": "text",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              }
+            ],
+            "note": ""
+          },
+          "tiktok": {
+            "platform": "tiktok",
+            "display_name": "TikTok",
+            "role": "video_destination",
+            "publishing": true,
+            "declared": [
+              "video"
+            ],
+            "declared_labels": [
+              "video"
+            ],
+            "implemented": [
+              "video"
+            ],
+            "declared_but_unimplemented": [],
+            "implemented_but_undeclared": [],
+            "media_transport": "local_upload",
+            "accepts_local_media": true,
+            "media_transport_requirement": "",
+            "media_transport_error_code": null,
+            "video_envelope": {
+              "platform": "tiktok",
+              "display_name": "TikTok",
+              "max_duration_seconds": 600,
+              "shorts_max_duration_seconds": null,
+              "max_bytes": 1073741824,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "video_codec": "h264",
+              "aspect_min": null,
+              "aspect_max": null,
+              "shorts_max_aspect_ratio": null,
+              "modes": [
+                "shorts"
+              ],
+              "long_form": false,
+              "source": "TikTok Content Posting API: video up to 10 minutes, 1 GB",
+              "note": ""
+            },
+            "integration": "ready",
+            "content": [
+              {
+                "content_type": "video",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": ""
+              },
+              {
+                "content_type": "image",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              },
+              {
+                "content_type": "carousel",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": "no carousel path: a carousel request is refused by name, and nothing is stitched into a video"
+              },
+              {
+                "content_type": "text",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              }
+            ],
+            "note": "video is implemented on two routes: xPST's own Content Posting API route is blocked by TikTok app review, and the rented aggregator route (accounts.tiktok.provider: zernio) publishes publicly through the vendor's audited app; there is no carousel path on either route"
+          },
+          "threads": {
+            "platform": "threads",
+            "display_name": "Threads",
+            "role": "video_destination",
+            "publishing": true,
+            "declared": [
+              "text",
+              "video"
+            ],
+            "declared_labels": [
+              "video",
+              "text"
+            ],
+            "implemented": [
+              "text",
+              "video"
+            ],
+            "declared_but_unimplemented": [],
+            "implemented_but_undeclared": [],
+            "media_transport": "public_url",
+            "accepts_local_media": false,
+            "media_transport_requirement": "Threads has no upload endpoint: its API fetches your media from a public server, and xPST is a local tool with no server to host a file for it. A local file cannot be published to Threads, and xPST cannot deliver a media URL either yet \u2014 post this content from the Threads app instead.",
+            "media_transport_error_code": "THREADS_NEEDS_URL",
+            "video_envelope": {
+              "platform": "threads",
+              "display_name": "Threads",
+              "max_duration_seconds": 300,
+              "shorts_max_duration_seconds": null,
+              "max_bytes": 1073741824,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "video_codec": "h264",
+              "aspect_min": null,
+              "aspect_max": null,
+              "shorts_max_aspect_ratio": null,
+              "modes": [
+                "shorts"
+              ],
+              "long_form": false,
+              "source": "Threads API: video up to 5 minutes (the container fetches it from a public URL)",
+              "note": ""
+            },
+            "integration": "ready",
+            "content": [
+              {
+                "content_type": "video",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": "published only from media that is already hosted at a public URL: the Threads API retrieves the URL itself and has no binary upload, so a local file is refused before any network call (see media_transport). xPST cannot deliver a media URL to any uploader yet either, so no media publishing path reaches Threads today"
+              },
+              {
+                "content_type": "image",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              },
+              {
+                "content_type": "carousel",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": "no carousel path: a carousel request is refused by name, and nothing is stitched into a video"
+              },
+              {
+                "content_type": "text",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": "one text post (500 characters max) via the TEXT container, no media needed"
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              }
+            ],
+            "note": "Threads is a URL-fetch destination for media: it publishes what it can download from a public URL, never a local file \u2014 and xPST cannot hand it a URL yet, so media publishing is refused today. Text posts need no URL and are published verbatim through a media_type TEXT container."
+          },
+          "facebook": {
+            "platform": "facebook",
+            "display_name": "Facebook Page",
+            "role": "video_destination",
+            "publishing": true,
+            "declared": [
+              "video"
+            ],
+            "declared_labels": [
+              "video"
+            ],
+            "implemented": [
+              "video"
+            ],
+            "declared_but_unimplemented": [],
+            "implemented_but_undeclared": [],
+            "media_transport": "local_upload",
+            "accepts_local_media": true,
+            "media_transport_requirement": "",
+            "media_transport_error_code": null,
+            "video_envelope": {
+              "platform": "facebook",
+              "display_name": "Facebook Page",
+              "max_duration_seconds": 14400,
+              "shorts_max_duration_seconds": null,
+              "max_bytes": 10737418240,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "video_codec": "h264",
+              "aspect_min": null,
+              "aspect_max": null,
+              "shorts_max_aspect_ratio": null,
+              "modes": [
+                "shorts"
+              ],
+              "long_form": false,
+              "source": "Graph API /{page-id}/videos: up to 4 hours, 10 GB",
+              "note": ""
+            },
+            "integration": "ready",
+            "content": [
+              {
+                "content_type": "video",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": ""
+              },
+              {
+                "content_type": "image",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              },
+              {
+                "content_type": "carousel",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              },
+              {
+                "content_type": "text",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              }
+            ],
+            "note": "Page-scoped: publishes as a Facebook Page, never as a personal profile (there is no API for that). Feed video today; Reels / photo / text are the follow-up that extends this row."
+          },
+          "rumble": {
+            "platform": "rumble",
+            "display_name": "Rumble",
+            "role": "video_destination",
+            "publishing": true,
+            "declared": [
+              "video"
+            ],
+            "declared_labels": [
+              "video"
+            ],
+            "implemented": [
+              "video"
+            ],
+            "declared_but_unimplemented": [],
+            "implemented_but_undeclared": [],
+            "media_transport": "local_upload",
+            "accepts_local_media": true,
+            "media_transport_requirement": "",
+            "media_transport_error_code": null,
+            "video_envelope": {
+              "platform": "rumble",
+              "display_name": "Rumble",
+              "max_duration_seconds": null,
+              "shorts_max_duration_seconds": null,
+              "max_bytes": null,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "video_codec": "h264",
+              "aspect_min": null,
+              "aspect_max": null,
+              "shorts_max_aspect_ratio": null,
+              "modes": [
+                "long"
+              ],
+              "long_form": true,
+              "source": "Rumble video upload API is partner-gated; limits are reported by the service per plan",
+              "note": "Integration-uncertain: no self-serve developer console, so the manual handoff is the reliable path."
+            },
+            "integration": "integration_uncertain",
+            "content": [
+              {
+                "content_type": "video",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": "long-form only (Rumble is a video platform, not a Shorts surface). Two paths: the partner upload API when an API key is configured, and a MANUAL HANDOFF otherwise \u2014 the rendition and a caption file are written to a directory you choose, and the adapter reports the handoff instead of pretending it uploaded."
+              },
+              {
+                "content_type": "image",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              },
+              {
+                "content_type": "carousel",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              },
+              {
+                "content_type": "text",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              }
+            ],
+            "note": "integration-uncertain: Rumble's upload API is partner-gated with no self-serve developer console comparable to Meta/Google. xPST declares the capability and both paths, but does not advertise Rumble as ready until one live upload succeeds."
+          },
+          "bluesky": {
+            "platform": "bluesky",
+            "display_name": "Bluesky",
+            "role": "video_destination",
+            "publishing": true,
+            "declared": [
+              "carousel",
+              "image",
+              "text"
+            ],
+            "declared_labels": [
+              "text",
+              "image",
+              "carousel"
+            ],
+            "implemented": [
+              "carousel",
+              "image",
+              "text"
+            ],
+            "declared_but_unimplemented": [],
+            "implemented_but_undeclared": [],
+            "media_transport": "local_upload",
+            "accepts_local_media": true,
+            "media_transport_requirement": "",
+            "media_transport_error_code": null,
+            "video_envelope": null,
+            "integration": "ready",
+            "content": [
+              {
+                "content_type": "video",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": "no video path: Bluesky serves video from a separate service (video.bsky.app) with an asynchronous upload job, and xPST will not claim it until a live upload proves it \u2014 a video request is refused by name"
+              },
+              {
+                "content_type": "image",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": "single image post (upload_image): JPG/PNG/WEBP/GIF, \u2264 2,000,000 bytes, uploaded as a PDS blob and embedded in the post record"
+              },
+              {
+                "content_type": "carousel",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": "native multi-image post (upload_carousel): 2-4 images in one app.bsky.embed.images embed, order preserved; over 4 is refused with the number, never cut down"
+              },
+              {
+                "content_type": "text",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": "one post (300 characters max) via post_text; links are faceted so they are clickable"
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              }
+            ],
+            "note": "Open posting API (AT Protocol): an app password or OAuth session is the whole gate \u2014 no review, no fee, no developer console. Text, image and multi-image posts only."
+          },
+          "messenger": {
+            "platform": "messenger",
+            "display_name": "Messenger",
+            "role": "messaging",
+            "publishing": false,
+            "declared": [
+              "text"
+            ],
+            "declared_labels": [
+              "text"
+            ],
+            "implemented": [
+              "text"
+            ],
+            "declared_but_unimplemented": [],
+            "implemented_but_undeclared": [],
+            "media_transport": "local_upload",
+            "accepts_local_media": true,
+            "media_transport_requirement": "",
+            "media_transport_error_code": null,
+            "video_envelope": null,
+            "integration": "ready",
+            "content": [
+              {
+                "content_type": "video",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              },
+              {
+                "content_type": "image",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              },
+              {
+                "content_type": "carousel",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              },
+              {
+                "content_type": "text",
+                "declared": true,
+                "implemented": true,
+                "supported": true,
+                "status": "supported",
+                "note": "send_text delivers a direct message, not a public post"
+              },
+              {
+                "content_type": "thread",
+                "declared": false,
+                "implemented": false,
+                "supported": false,
+                "status": "undeclared",
+                "note": ""
+              }
+            ],
+            "note": "messaging destination: DMs only, never a publishing target. Its upload() is a text-DM shim (the abstract upload contract reused to deliver a message), not a video publish."
+          }
+        },
+        "format_routes": {
+          "video": [
+            "youtube",
+            "x",
+            "instagram",
+            "tiktok",
+            "threads",
+            "facebook",
+            "rumble"
+          ],
+          "image": [
+            "x",
+            "instagram",
+            "bluesky"
+          ],
+          "carousel": [
+            "x",
+            "instagram",
+            "bluesky"
+          ],
+          "text": [
+            "x",
+            "threads",
+            "bluesky"
+          ],
+          "thread": []
+        },
+        "envelopes": {
+          "youtube": {
+            "platform": "youtube",
+            "display_name": "YouTube",
+            "publishing": true,
+            "content_types": {
+              "implemented": [
+                "video"
+              ],
+              "declared": [
+                "video"
+              ]
+            },
+            "caption": {
+              "max_characters": null
+            },
+            "media_transport": "local_upload",
+            "media_transport_requirement": null,
+            "video": {
+              "max_duration_seconds": 43200,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "video_codec": "h264",
+              "pix_fmt": "yuv420p",
+              "max_bytes": 274877906944,
+              "max_long_edge": 1920,
+              "fps_cap": 60,
+              "audio_codec": "aac"
+            },
+            "image": null
+          },
+          "x": {
+            "platform": "x",
+            "display_name": "X",
+            "publishing": true,
+            "content_types": {
+              "implemented": [
+                "carousel",
+                "image",
+                "text",
+                "video"
+              ],
+              "declared": [
+                "carousel",
+                "image",
+                "text",
+                "video"
+              ]
+            },
+            "caption": {
+              "max_characters": 280
+            },
+            "media_transport": "local_upload",
+            "media_transport_requirement": null,
+            "video": {
+              "max_duration_seconds": 140,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "video_codec": "h264",
+              "pix_fmt": "yuv420p",
+              "max_bytes": 536870912,
+              "max_long_edge": 1920,
+              "fps_cap": 60,
+              "audio_codec": "aac"
+            },
+            "image": {
+              "containers": [
+                ".jpg",
+                ".jpeg",
+                ".png",
+                ".webp"
+              ],
+              "max_bytes": 5242880,
+              "aspect_min": 0.3333333333333333,
+              "aspect_max": 3.0
+            }
+          },
+          "instagram": {
+            "platform": "instagram",
+            "display_name": "Instagram Reels",
+            "publishing": true,
+            "content_types": {
+              "implemented": [
+                "carousel",
+                "image",
+                "video"
+              ],
+              "declared": [
+                "carousel",
+                "image",
+                "video"
+              ]
+            },
+            "caption": {
+              "max_characters": 2200
+            },
+            "media_transport": "local_upload",
+            "media_transport_requirement": null,
+            "video": {
+              "max_duration_seconds": 900,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "video_codec": "h264",
+              "pix_fmt": "yuv420p",
+              "max_bytes": 4294967296,
+              "max_long_edge": 1920,
+              "fps_cap": 60,
+              "audio_codec": "aac"
+            },
+            "image": {
+              "containers": [
+                ".jpg",
+                ".jpeg"
+              ],
+              "max_bytes": 8388608,
+              "aspect_min": 0.8,
+              "aspect_max": 1.91
+            }
+          },
+          "tiktok": {
+            "platform": "tiktok",
+            "display_name": "TikTok",
+            "publishing": true,
+            "content_types": {
+              "implemented": [
+                "video"
+              ],
+              "declared": [
+                "video"
+              ]
+            },
+            "caption": {
+              "max_characters": 2200
+            },
+            "media_transport": "local_upload",
+            "media_transport_requirement": null,
+            "video": {
+              "max_duration_seconds": 600,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "video_codec": "h264",
+              "pix_fmt": "yuv420p",
+              "max_bytes": 1073741824,
+              "max_long_edge": 1920,
+              "fps_cap": 60,
+              "audio_codec": "aac"
+            },
+            "image": null
+          },
+          "threads": {
+            "platform": "threads",
+            "display_name": "Threads",
+            "publishing": true,
+            "content_types": {
+              "implemented": [
+                "text",
+                "video"
+              ],
+              "declared": [
+                "text",
+                "video"
+              ]
+            },
+            "caption": {
+              "max_characters": 500
+            },
+            "media_transport": "public_url",
+            "media_transport_requirement": "Threads has no upload endpoint: its API fetches your media from a public server, and xPST is a local tool with no server to host a file for it. A local file cannot be published to Threads, and xPST cannot deliver a media URL either yet \u2014 post this content from the Threads app instead.",
+            "video": {
+              "max_duration_seconds": 300,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "video_codec": "h264",
+              "pix_fmt": "yuv420p",
+              "max_bytes": 4294967296,
+              "max_long_edge": 1920,
+              "fps_cap": 60,
+              "audio_codec": "aac"
+            },
+            "image": null
+          },
+          "facebook": {
+            "platform": "facebook",
+            "display_name": "Facebook Page",
+            "publishing": true,
+            "content_types": {
+              "implemented": [
+                "video"
+              ],
+              "declared": [
+                "video"
+              ]
+            },
+            "caption": {
+              "max_characters": null
+            },
+            "media_transport": "local_upload",
+            "media_transport_requirement": null,
+            "video": {
+              "max_duration_seconds": 14400,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "video_codec": "h264",
+              "pix_fmt": "yuv420p",
+              "max_bytes": 10737418240,
+              "max_long_edge": 1920,
+              "fps_cap": 60,
+              "audio_codec": "aac"
+            },
+            "image": null
+          },
+          "rumble": {
+            "platform": "rumble",
+            "display_name": "Rumble",
+            "publishing": true,
+            "content_types": {
+              "implemented": [
+                "video"
+              ],
+              "declared": [
+                "video"
+              ]
+            },
+            "caption": {
+              "max_characters": null
+            },
+            "media_transport": "local_upload",
+            "media_transport_requirement": null,
+            "video": {
+              "max_duration_seconds": null,
+              "containers": [
+                ".mp4",
+                ".mov"
+              ],
+              "video_codec": "h264",
+              "pix_fmt": "yuv420p",
+              "max_bytes": null,
+              "max_long_edge": 1920,
+              "fps_cap": 60,
+              "audio_codec": "aac"
+            },
+            "image": null
+          },
+          "bluesky": {
+            "platform": "bluesky",
+            "display_name": "Bluesky",
+            "publishing": true,
+            "content_types": {
+              "implemented": [
+                "carousel",
+                "image",
+                "text"
+              ],
+              "declared": [
+                "carousel",
+                "image",
+                "text"
+              ]
+            },
+            "caption": {
+              "max_characters": 300
+            },
+            "media_transport": "local_upload",
+            "media_transport_requirement": null,
+            "video": null,
+            "image": {
+              "containers": [
+                ".jpg",
+                ".jpeg",
+                ".png",
+                ".webp",
+                ".gif"
+              ],
+              "max_bytes": 2000000.0,
+              "aspect_min": null,
+              "aspect_max": null
+            }
+          },
+          "messenger": {
+            "platform": "messenger",
+            "display_name": "Messenger",
+            "publishing": false,
+            "content_types": {
+              "implemented": [
+                "text"
+              ],
+              "declared": [
+                "text"
+              ]
+            },
+            "caption": {
+              "max_characters": 640
+            },
+            "media_transport": "local_upload",
+            "media_transport_requirement": null,
+            "video": null,
+            "image": null
+          }
+        },
+        "publish_routes": {
+          "video": "video",
+          "image": "image",
+          "carousel": "carousel",
+          "text": "text",
+          "thread": "unimplemented"
+        },
+        "declared_but_unimplemented": {}
+      }
+    },
+    {
+      "name": "chat_platforms_no_channels",
+      "argv": [
+        "chat",
+        "platforms",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "mask": [
+        "checked_at"
+      ],
+      "stdout_json": {
+        "ok": true,
+        "contract_version": 1,
+        "read_only": true,
+        "checked_at": "<TS>",
+        "platforms": [
+          {
+            "platform": "twitch",
+            "display_name": "Twitch",
+            "transport": "irc_tls",
+            "endpoint": "irc://irc.chat.twitch.tv:6697 (TLS; wss://irc-ws.chat.twitch.tv:443 is the same protocol)",
+            "verified": true,
+            "read_only": true,
+            "source_url": "https://dev.twitch.tv/docs/chat/irc/",
+            "note": "Anonymous connections cannot send, moderate or whisper; xPST never asks for a chat token, so the connection is read-only by construction rather than by policy.",
+            "channels": [],
+            "credentials_present": false,
+            "missing": [
+              "channel"
+            ],
+            "action": "name a channel: `--twitch-channel <login>` or chat.twitch_channels in config",
+            "status": "unavailable",
+            "unavailable": {
+              "platform": "twitch",
+              "code": "no_channel",
+              "message": "twitch: no channel is configured, so there is no chat to read",
+              "action": "name a channel: `--twitch-channel <login>` or chat.twitch_channels in config",
+              "docs_url": "https://dev.twitch.tv/docs/chat/irc/",
+              "status": null
+            }
+          },
+          {
+            "platform": "youtube",
+            "display_name": "YouTube Live",
+            "transport": "http_api",
+            "endpoint": "GET https://www.googleapis.com/youtube/v3/liveChatMessages?liveChatId=<id>",
+            "verified": false,
+            "read_only": true,
+            "source_url": "https://developers.google.com/youtube/v3/live/docs/liveChatMessages/list",
+            "note": "5 quota units per poll against a 10,000-unit daily default, so 2,000 polls is the whole day. Never exercised live from this repository: the connected channel answers 403 'not enabled for live streaming', which is why a read refuses with live_not_enabled rather than an empty feed.",
+            "channels": [],
+            "credentials_present": false,
+            "missing": [
+              "oauth_token"
+            ],
+            "action": "Connect the destination channel with `xpst auth youtube` (OAuth scopes youtube.upload, youtube.readonly, youtube.force-ssl).",
+            "status": "unavailable",
+            "unavailable": {
+              "platform": "youtube",
+              "code": "credentials_missing",
+              "message": "youtube: missing oauth_token",
+              "action": "Connect the destination channel with `xpst auth youtube` (OAuth scopes youtube.upload, youtube.readonly, youtube.force-ssl).",
+              "docs_url": "https://developers.google.com/youtube/v3/live/docs/liveChatMessages/list",
+              "status": null
+            }
+          },
+          {
+            "platform": "kick",
+            "display_name": "Kick",
+            "transport": "realtime_ws",
+            "endpoint": "wss://realtime.<region>.platform.kick.com/connection/websocket (channel chatrooms.<id>.v2)",
+            "verified": false,
+            "read_only": true,
+            "source_url": "https://docs.kick.com/apis/chat",
+            "note": "UNDOCUMENTED PATH. Kick publishes no chat read endpoint: /public/v1/chat is send and delete only, and the documented alternative is the chat.message.sent webhook event, which needs a registered app and a public callback. Community libraries still point at a public Pusher app key that Kick has retired (Pusher answers 4001 on every cluster); kick.com's own page now mints an anonymous guest token at web.kick.com/api/v1/realtime/auth/connection and connects to its own Centrifugo service. Connection, subscription and heartbeat are proven from this repository; no chat publication has been observed yet, so the row stays unverified.",
+            "channels": [],
+            "credentials_present": false,
+            "missing": [
+              "channel"
+            ],
+            "action": "name a channel: `--kick-channel <slug>` or chat.kick_channels in config",
+            "status": "unavailable",
+            "unavailable": {
+              "platform": "kick",
+              "code": "no_channel",
+              "message": "kick: no channel is configured, so there is no chat to read",
+              "action": "name a channel: `--kick-channel <slug>` or chat.kick_channels in config",
+              "docs_url": "https://docs.kick.com/apis/chat",
+              "status": null
+            }
+          }
+        ],
+        "unavailable": [
+          {
+            "platform": "twitch",
+            "code": "no_channel",
+            "message": "twitch: no channel is configured, so there is no chat to read",
+            "action": "name a channel: `--twitch-channel <login>` or chat.twitch_channels in config",
+            "docs_url": "https://dev.twitch.tv/docs/chat/irc/",
+            "status": null
+          },
+          {
+            "platform": "youtube",
+            "code": "credentials_missing",
+            "message": "youtube: missing oauth_token",
+            "action": "Connect the destination channel with `xpst auth youtube` (OAuth scopes youtube.upload, youtube.readonly, youtube.force-ssl).",
+            "docs_url": "https://developers.google.com/youtube/v3/live/docs/liveChatMessages/list",
+            "status": null
+          },
+          {
+            "platform": "kick",
+            "code": "no_channel",
+            "message": "kick: no channel is configured, so there is no chat to read",
+            "action": "name a channel: `--kick-channel <slug>` or chat.kick_channels in config",
+            "docs_url": "https://docs.kick.com/apis/chat",
+            "status": null
+          }
+        ],
+        "registry": [
+          {
+            "platform": "twitch",
+            "display_name": "Twitch",
+            "transport": "irc_tls",
+            "endpoint": "irc://irc.chat.twitch.tv:6697 (TLS; wss://irc-ws.chat.twitch.tv:443 is the same protocol)",
+            "requires": "nothing \u2014 an anonymous justinfan connection reads public chat",
+            "operator_action": "name a channel: `--twitch-channel <login>` or chat.twitch_channels in config",
+            "source_url": "https://dev.twitch.tv/docs/chat/irc/",
+            "verified": true,
+            "read_only": true,
+            "note": "Anonymous connections cannot send, moderate or whisper; xPST never asks for a chat token, so the connection is read-only by construction rather than by policy."
+          },
+          {
+            "platform": "youtube",
+            "display_name": "YouTube Live",
+            "transport": "http_api",
+            "endpoint": "GET https://www.googleapis.com/youtube/v3/liveChatMessages?liveChatId=<id>",
+            "requires": "OAuth token with youtube.readonly or youtube.force-ssl, and a broadcast that is live now (the activeLiveChatId only exists while a video is live)",
+            "operator_action": "connect the channel with `xpst auth youtube`, then go live once",
+            "source_url": "https://developers.google.com/youtube/v3/live/docs/liveChatMessages/list",
+            "verified": false,
+            "read_only": true,
+            "note": "5 quota units per poll against a 10,000-unit daily default, so 2,000 polls is the whole day. Never exercised live from this repository: the connected channel answers 403 'not enabled for live streaming', which is why a read refuses with live_not_enabled rather than an empty feed."
+          },
+          {
+            "platform": "kick",
+            "display_name": "Kick",
+            "transport": "realtime_ws",
+            "endpoint": "wss://realtime.<region>.platform.kick.com/connection/websocket (channel chatrooms.<id>.v2)",
+            "requires": "nothing \u2014 an anonymous guest token and a public channel subscription",
+            "operator_action": "name a channel: `--kick-channel <slug>` or chat.kick_channels in config",
+            "source_url": "https://docs.kick.com/apis/chat",
+            "verified": false,
+            "read_only": true,
+            "note": "UNDOCUMENTED PATH. Kick publishes no chat read endpoint: /public/v1/chat is send and delete only, and the documented alternative is the chat.message.sent webhook event, which needs a registered app and a public callback. Community libraries still point at a public Pusher app key that Kick has retired (Pusher answers 4001 on every cluster); kick.com's own page now mints an anonymous guest token at web.kick.com/api/v1/realtime/auth/connection and connects to its own Centrifugo service. Connection, subscription and heartbeat are proven from this repository; no chat publication has been observed yet, so the row stays unverified."
+          }
+        ]
+      }
+    },
+    {
+      "name": "chat_platforms_channels",
+      "argv": [
+        "chat",
+        "platforms",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\nchat:\n  twitch_channels:\n  - somechannel\n  kick_channels:\n  - somekick\n  youtube_video_id: abc123\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "mask": [
+        "checked_at"
+      ],
+      "stdout_json": {
+        "ok": true,
+        "contract_version": 1,
+        "read_only": true,
+        "checked_at": "<TS>",
+        "platforms": [
+          {
+            "platform": "twitch",
+            "display_name": "Twitch",
+            "transport": "irc_tls",
+            "endpoint": "irc://irc.chat.twitch.tv:6697 (TLS; wss://irc-ws.chat.twitch.tv:443 is the same protocol)",
+            "verified": true,
+            "read_only": true,
+            "source_url": "https://dev.twitch.tv/docs/chat/irc/",
+            "note": "Anonymous connections cannot send, moderate or whisper; xPST never asks for a chat token, so the connection is read-only by construction rather than by policy.",
+            "channels": [
+              "somechannel"
+            ],
+            "credentials_present": true,
+            "missing": [],
+            "action": "name a channel: `--twitch-channel <login>` or chat.twitch_channels in config",
+            "status": "ready"
+          },
+          {
+            "platform": "youtube",
+            "display_name": "YouTube Live",
+            "transport": "http_api",
+            "endpoint": "GET https://www.googleapis.com/youtube/v3/liveChatMessages?liveChatId=<id>",
+            "verified": false,
+            "read_only": true,
+            "source_url": "https://developers.google.com/youtube/v3/live/docs/liveChatMessages/list",
+            "note": "5 quota units per poll against a 10,000-unit daily default, so 2,000 polls is the whole day. Never exercised live from this repository: the connected channel answers 403 'not enabled for live streaming', which is why a read refuses with live_not_enabled rather than an empty feed.",
+            "channels": [
+              "abc123"
+            ],
+            "credentials_present": false,
+            "missing": [
+              "oauth_token"
+            ],
+            "action": "Connect the destination channel with `xpst auth youtube` (OAuth scopes youtube.upload, youtube.readonly, youtube.force-ssl).",
+            "status": "unavailable",
+            "unavailable": {
+              "platform": "youtube",
+              "code": "credentials_missing",
+              "message": "youtube: missing oauth_token",
+              "action": "Connect the destination channel with `xpst auth youtube` (OAuth scopes youtube.upload, youtube.readonly, youtube.force-ssl).",
+              "docs_url": "https://developers.google.com/youtube/v3/live/docs/liveChatMessages/list",
+              "status": null
+            }
+          },
+          {
+            "platform": "kick",
+            "display_name": "Kick",
+            "transport": "realtime_ws",
+            "endpoint": "wss://realtime.<region>.platform.kick.com/connection/websocket (channel chatrooms.<id>.v2)",
+            "verified": false,
+            "read_only": true,
+            "source_url": "https://docs.kick.com/apis/chat",
+            "note": "UNDOCUMENTED PATH. Kick publishes no chat read endpoint: /public/v1/chat is send and delete only, and the documented alternative is the chat.message.sent webhook event, which needs a registered app and a public callback. Community libraries still point at a public Pusher app key that Kick has retired (Pusher answers 4001 on every cluster); kick.com's own page now mints an anonymous guest token at web.kick.com/api/v1/realtime/auth/connection and connects to its own Centrifugo service. Connection, subscription and heartbeat are proven from this repository; no chat publication has been observed yet, so the row stays unverified.",
+            "channels": [
+              "somekick"
+            ],
+            "credentials_present": true,
+            "missing": [],
+            "action": "name a channel: `--kick-channel <slug>` or chat.kick_channels in config",
+            "status": "ready"
+          }
+        ],
+        "unavailable": [
+          {
+            "platform": "youtube",
+            "code": "credentials_missing",
+            "message": "youtube: missing oauth_token",
+            "action": "Connect the destination channel with `xpst auth youtube` (OAuth scopes youtube.upload, youtube.readonly, youtube.force-ssl).",
+            "docs_url": "https://developers.google.com/youtube/v3/live/docs/liveChatMessages/list",
+            "status": null
+          }
+        ],
+        "registry": [
+          {
+            "platform": "twitch",
+            "display_name": "Twitch",
+            "transport": "irc_tls",
+            "endpoint": "irc://irc.chat.twitch.tv:6697 (TLS; wss://irc-ws.chat.twitch.tv:443 is the same protocol)",
+            "requires": "nothing \u2014 an anonymous justinfan connection reads public chat",
+            "operator_action": "name a channel: `--twitch-channel <login>` or chat.twitch_channels in config",
+            "source_url": "https://dev.twitch.tv/docs/chat/irc/",
+            "verified": true,
+            "read_only": true,
+            "note": "Anonymous connections cannot send, moderate or whisper; xPST never asks for a chat token, so the connection is read-only by construction rather than by policy."
+          },
+          {
+            "platform": "youtube",
+            "display_name": "YouTube Live",
+            "transport": "http_api",
+            "endpoint": "GET https://www.googleapis.com/youtube/v3/liveChatMessages?liveChatId=<id>",
+            "requires": "OAuth token with youtube.readonly or youtube.force-ssl, and a broadcast that is live now (the activeLiveChatId only exists while a video is live)",
+            "operator_action": "connect the channel with `xpst auth youtube`, then go live once",
+            "source_url": "https://developers.google.com/youtube/v3/live/docs/liveChatMessages/list",
+            "verified": false,
+            "read_only": true,
+            "note": "5 quota units per poll against a 10,000-unit daily default, so 2,000 polls is the whole day. Never exercised live from this repository: the connected channel answers 403 'not enabled for live streaming', which is why a read refuses with live_not_enabled rather than an empty feed."
+          },
+          {
+            "platform": "kick",
+            "display_name": "Kick",
+            "transport": "realtime_ws",
+            "endpoint": "wss://realtime.<region>.platform.kick.com/connection/websocket (channel chatrooms.<id>.v2)",
+            "requires": "nothing \u2014 an anonymous guest token and a public channel subscription",
+            "operator_action": "name a channel: `--kick-channel <slug>` or chat.kick_channels in config",
+            "source_url": "https://docs.kick.com/apis/chat",
+            "verified": false,
+            "read_only": true,
+            "note": "UNDOCUMENTED PATH. Kick publishes no chat read endpoint: /public/v1/chat is send and delete only, and the documented alternative is the chat.message.sent webhook event, which needs a registered app and a public callback. Community libraries still point at a public Pusher app key that Kick has retired (Pusher answers 4001 on every cluster); kick.com's own page now mints an anonymous guest token at web.kick.com/api/v1/realtime/auth/connection and connects to its own Centrifugo service. Connection, subscription and heartbeat are proven from this repository; no chat publication has been observed yet, so the row stays unverified."
+          }
+        ]
+      }
+    },
+    {
+      "name": "media_status_env_override",
+      "argv": [
+        "media",
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "bin/ffmpeg": "#!/bin/sh\n",
+        "bin/ffprobe": "#!/bin/sh\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+        "XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe"
+      },
+      "stdout_json": {
+        "bin_dir": "<PROFILE>/bin",
+        "binaries": {
+          "ffmpeg": {
+            "name": "ffmpeg",
+            "ok": true,
+            "path": "<PROFILE>/bin/ffmpeg",
+            "source": "env"
+          },
+          "ffprobe": {
+            "name": "ffprobe",
+            "ok": true,
+            "path": "<PROFILE>/bin/ffprobe",
+            "source": "env"
+          }
+        },
+        "ok": true
+      }
+    },
+    {
+      "name": "schedule_pause",
+      "argv": [
+        "schedule",
+        "pause",
+        "--reason",
+        "operator pause",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "json",
+      "exit_code": 0,
+      "mask": [
+        "paused_at"
+      ],
+      "stdout_json": {
+        "paused": true,
+        "already_paused": false,
+        "paused_at": "<TS>",
+        "reason": "operator pause"
+      }
+    },
+    {
+      "name": "schedule_pause_already_paused",
+      "argv": [
+        "schedule",
+        "pause",
+        "--reason",
+        "again",
+        "--json"
+      ],
+      "seed": {
+        "schedule.paused.json": "{\"paused_at\": \"2026-01-01T00:00:00+00:00\", \"reason\": \"operator pause\"}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "paused": true,
+        "already_paused": true,
+        "paused_at": "2026-01-01T00:00:00+00:00",
+        "reason": "operator pause"
+      }
+    },
+    {
+      "name": "schedule_resume",
+      "argv": [
+        "schedule",
+        "resume",
+        "--json"
+      ],
+      "seed": {
+        "schedule.paused.json": "{\"paused_at\": \"2026-01-01T00:00:00+00:00\", \"reason\": \"operator pause\"}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "paused": false,
+        "was_paused": true
+      }
+    },
+    {
+      "name": "schedule_resume_not_paused",
+      "argv": [
+        "schedule",
+        "resume",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "paused": false,
+        "was_paused": false
       }
     },
     {

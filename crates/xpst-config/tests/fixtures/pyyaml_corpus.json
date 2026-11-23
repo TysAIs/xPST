@@ -223,8 +223,8 @@
       "yaml": "/abs/path/to/file.mp4\n...\n"
     },
     {
-      "value": "C:\\Users\\x\\file.mp4",
-      "yaml": "C:\\Users\\x\\file.mp4\n...\n"
+      "value": "C:\\Users\\tester\\file.mp4",
+      "yaml": "C:\\Users\\tester\\file.mp4\n...\n"
     },
     {
       "value": "word word word word word word word word word word word word word word word word word word word word ",

@@ -289,12 +289,12 @@ impl Emitter {
                     self.write_indent(indent);
                     start = end;
                 }
-            } else if ch.is_none() || ch == Some(' ') || ch == Some('\n') || ch == Some('\'') {
-                if start < end {
-                    let data: String = chars[start..end].iter().collect();
-                    self.write(&data);
-                    start = end;
-                }
+            } else if (ch.is_none() || ch == Some(' ') || ch == Some('\n') || ch == Some('\''))
+                && start < end
+            {
+                let data: String = chars[start..end].iter().collect();
+                self.write(&data);
+                start = end;
             }
             if ch == Some('\'') {
                 self.write("''");
@@ -348,16 +348,15 @@ impl Emitter {
                     self.write_indent(indent);
                     start = end;
                 }
-            } else if ch.is_none()
+            } else if (ch.is_none()
                 || ch == Some(' ')
                 || ch == Some('\n')
-                || ch.is_some_and(needs_escape)
+                || ch.is_some_and(needs_escape))
+                && start < end
             {
-                if start < end {
-                    let data: String = chars[start..end].iter().collect();
-                    self.write(&data);
-                    start = end;
-                }
+                let data: String = chars[start..end].iter().collect();
+                self.write(&data);
+                start = end;
             }
             if let Some(ch) = ch {
                 if let Some(escaped) = escape(ch) {
@@ -546,19 +545,15 @@ fn analyze(text: &str) -> Analysis {
             ) {
                 block_indicators = true;
             }
-            if matches!(ch, '?' | ':') {
-                if followed_by_whitespace {
-                    block_indicators = true;
-                }
+            if matches!(ch, '?' | ':') && followed_by_whitespace {
+                block_indicators = true;
             }
             if ch == '-' && followed_by_whitespace {
                 block_indicators = true;
             }
         } else {
-            if ch == ':' {
-                if followed_by_whitespace {
-                    block_indicators = true;
-                }
+            if ch == ':' && followed_by_whitespace {
+                block_indicators = true;
             }
             if ch == '#' && preceded_by_whitespace {
                 block_indicators = true;

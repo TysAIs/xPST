@@ -85,7 +85,7 @@ SCALARS = [
     "https://example.invalid/a?b=1&c=2",
     "~/.xpst/credentials/youtube_token.json",
     "/abs/path/to/file.mp4",
-    "C:\\Users\\x\\file.mp4",
+    "C:\\Users\\tester\\file.mp4",
     "word " * 20,
     "a" * 120,
     "x " * 45 + "end",

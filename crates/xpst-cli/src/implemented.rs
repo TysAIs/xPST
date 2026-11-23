@@ -40,6 +40,30 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         config_show,
     ),
     implemented(
+        "byo clear",
+        "xpst-auth",
+        "Deletes the stored app pair and clears the config mirror; payload byte-compared with the Python CLI (the config file is edited in place, not rewritten from the model).",
+        byo_clear,
+    ),
+    implemented(
+        "byo status",
+        "xpst-auth",
+        "Reads the Fernet credential store the Python engine writes (scrypt + AES-128-CBC + HMAC-SHA256) and the config/env fallbacks; payload byte-compared with the Python CLI.",
+        byo_status,
+    ),
+    implemented(
+        "capabilities",
+        "xpst-provider",
+        "Serves the capability document captured from `xpst.content.capability_document()`; the payload is diffed against a live `python -m xpst capabilities --json` by the local-surface check.",
+        capabilities,
+    ),
+    implemented(
+        "chat platforms",
+        "xpst-provider",
+        "Readiness rows from the captured chat read-path registry plus the config channels and the YouTube token check; payload byte-compared with the Python CLI (checked_at masked).",
+        chat_platforms,
+    ),
+    implemented(
         "config export",
         "xpst-config",
         "Writes the masked (or `--raw`) document with a PyYAML-identical emitter; payload and file byte-compared with the Python CLI.",
@@ -171,6 +195,42 @@ fn media_status(
     err: &mut dyn Write,
 ) -> i32 {
     commands::media::status(global, leaf, out, err)
+}
+
+fn byo_clear(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::byo::clear(global, leaf, out, err)
+}
+
+fn byo_status(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::byo::status(global, leaf, out, err)
+}
+
+fn capabilities(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::capabilities::run(global, leaf, out, err)
+}
+
+fn chat_platforms(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::chat::platforms(global, leaf, out, err)
 }
 
 fn config_export(

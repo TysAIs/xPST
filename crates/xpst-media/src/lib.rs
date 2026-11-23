@@ -109,20 +109,8 @@ pub fn status() -> Vec<BinaryStatus> {
         .map(|name| {
             let env_var = env_var_for(name);
             let resolved = resolve(name, env_var);
-            let mut source = "missing";
-            if let Some(path) = &resolved {
-                let env_value = std::env::var(env_var).unwrap_or_default();
-                if !env_value.is_empty() && expand_home(&env_value) == Path::new(path) {
-                    source = "env";
-                } else if fetched_dir
-                    .as_deref()
-                    .is_some_and(|dir| Path::new(path).parent() == Some(dir))
-                {
-                    source = "fetched";
-                } else {
-                    source = "system";
-                }
-            }
+            let env_value = std::env::var(env_var).unwrap_or_default();
+            let source = classify_source(resolved.as_deref(), &env_value, fetched_dir.as_deref());
             BinaryStatus {
                 name,
                 ok: resolved.is_some(),
@@ -148,6 +136,25 @@ pub fn discover() -> MediaTools {
         ffmpeg: tool("ffmpeg"),
         ffprobe: tool("ffprobe"),
     }
+}
+
+/// `media_binary_status()`'s source classification, split out so it can be
+/// tested without depending on what is installed on the host.
+fn classify_source(
+    resolved: Option<&str>,
+    env_value: &str,
+    fetched_dir: Option<&Path>,
+) -> &'static str {
+    let Some(path) = resolved else {
+        return "missing";
+    };
+    if !env_value.is_empty() && expand_home(env_value) == Path::new(path) {
+        return "env";
+    }
+    if fetched_dir.is_some_and(|dir| Path::new(path).parent() == Some(dir)) {
+        return "fetched";
+    }
+    "system"
 }
 
 fn env_var_for(name: &str) -> &'static str {
@@ -266,6 +273,16 @@ fn is_executable_file(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    /// Serializes the tests that mutate process-global environment variables
+    /// (`XPST_FFMPEG_PATH`, `XPST_MEDIA_BIN_DIR`, `PATH`): cargo runs tests in
+    /// one process, so two of them racing on `PATH` makes both flaky.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn env_guard() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|poison| poison.into_inner())
+    }
 
     #[test]
     fn finds_a_binary_that_exists_on_path() {
@@ -293,13 +310,25 @@ mod tests {
 
     #[test]
     fn media_bin_dir_is_under_xpst_home() {
+        let _guard = env_guard();
+        let saved_bin = std::env::var_os("XPST_MEDIA_BIN_DIR");
+        let saved_config = std::env::var_os("XPST_CONFIG_DIR");
+        std::env::remove_var("XPST_MEDIA_BIN_DIR");
+        std::env::remove_var("XPST_CONFIG_DIR");
         if let Some(dir) = media_bin_dir() {
             assert!(dir.ends_with(".xpst/bin"), "{dir:?}");
+        }
+        if let Some(value) = saved_bin {
+            std::env::set_var("XPST_MEDIA_BIN_DIR", value);
+        }
+        if let Some(value) = saved_config {
+            std::env::set_var("XPST_CONFIG_DIR", value);
         }
     }
 
     #[test]
     fn the_env_override_is_reported_as_the_env_source() {
+        let _guard = env_guard();
         let dir = std::env::temp_dir().join(format!("xpst-media-env-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -325,27 +354,48 @@ mod tests {
 
     #[test]
     fn a_fetched_binary_is_reported_as_fetched() {
+        // The classification is what `media status` prints; assert it directly
+        // rather than depending on which binaries this host happens to have.
         let dir = std::env::temp_dir().join(format!("xpst-media-fetched-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let binary = dir.join("ffprobe");
+        std::fs::write(&binary, "#!/bin/sh\n").unwrap();
+        let path = binary.to_string_lossy().to_string();
+        assert_eq!(classify_source(Some(&path), "", Some(&dir)), "fetched");
+        assert_eq!(classify_source(Some(&path), "", None), "system");
+        assert_eq!(classify_source(Some(&path), &path, Some(&dir)), "env");
+        assert_eq!(classify_source(None, "", Some(&dir)), "missing");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_fetched_copy_is_found_when_nothing_else_resolves() {
+        let _guard = env_guard();
+        let dir = std::env::temp_dir().join(format!("xpst-media-fetchdir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let binary = dir.join("xpst-test-binary");
         std::fs::write(&binary, "#!/bin/sh\n").unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
+        let saved_bin = std::env::var_os("XPST_MEDIA_BIN_DIR");
+        let saved_path = std::env::var_os("PATH");
         std::env::set_var("XPST_MEDIA_BIN_DIR", &dir);
-        // A PATH with no ffprobe in it, so the fetched copy is what resolves.
-        let saved = std::env::var_os("PATH");
         std::env::set_var("PATH", "");
-        let rows = status();
-        let ffprobe = rows.iter().find(|row| row.name == "ffprobe").unwrap();
-        assert_eq!(ffprobe.source, "fetched");
-        if let Some(saved) = saved {
-            std::env::set_var("PATH", saved);
+        let found = resolve("xpst-test-binary", "XPST_TEST_BINARY_PATH");
+        assert_eq!(found.as_deref(), Some(binary.to_string_lossy().as_ref()));
+        if let Some(value) = saved_bin {
+            std::env::set_var("XPST_MEDIA_BIN_DIR", value);
+        } else {
+            std::env::remove_var("XPST_MEDIA_BIN_DIR");
         }
-        std::env::remove_var("XPST_MEDIA_BIN_DIR");
+        if let Some(value) = saved_path {
+            std::env::set_var("PATH", value);
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -8,6 +8,9 @@
 //! `not implemented in the Rust engine yet` (see `crate::not_implemented`).
 
 pub mod bootstrap;
+pub mod byo;
+pub mod capabilities;
+pub mod chat;
 pub mod config;
 pub mod doctor;
 pub mod failures;

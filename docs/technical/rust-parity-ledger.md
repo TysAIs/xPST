@@ -4,7 +4,7 @@
 
 One row per leaf command of the shipped CLI. `status` is `implemented` when the Rust engine runs the command and `stub` when it answers `not implemented in the Rust engine yet`. The two columns either side are the questions a reader actually has: which crate owns the behaviour, and whether the Python implementation they are comparing against makes an outbound network call.
 
-**14 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
+**18 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
 
 ## Columns
 
@@ -21,11 +21,11 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `backfill` | stub | xpst-core | yes |
 | `best-time` | stub | xpst-store | none |
 | `bio` | stub | xpst-cli | none |
-| `byo clear` | stub | xpst-auth | none |
+| `byo clear` | implemented | xpst-auth | none |
 | `byo set` | stub | xpst-auth | possible |
-| `byo status` | stub | xpst-auth | none |
-| `capabilities` | stub | xpst-provider | none |
-| `chat platforms` | stub | xpst-provider | none |
+| `byo status` | implemented | xpst-auth | none |
+| `capabilities` | implemented | xpst-provider | none |
+| `chat platforms` | implemented | xpst-provider | none |
 | `chat timeline` | stub | xpst-provider | yes |
 | `config export` | implemented | xpst-config | none |
 | `config fix` | implemented | xpst-config | none |
@@ -109,6 +109,10 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | Command | Owner crate | What was verified |
 |---|---|---|
 | `config show` | xpst-config | Masked YAML/JSON document; byte-compared with the Python output. |
+| `byo clear` | xpst-auth | Deletes the stored app pair and clears the config mirror; payload byte-compared with the Python CLI (the config file is edited in place, not rewritten from the model). |
+| `byo status` | xpst-auth | Reads the Fernet credential store the Python engine writes (scrypt + AES-128-CBC + HMAC-SHA256) and the config/env fallbacks; payload byte-compared with the Python CLI. |
+| `capabilities` | xpst-provider | Serves the capability document captured from `xpst.content.capability_document()`; the payload is diffed against a live `python -m xpst capabilities --json` by the local-surface check. |
+| `chat platforms` | xpst-provider | Readiness rows from the captured chat read-path registry plus the config channels and the YouTube token check; payload byte-compared with the Python CLI (checked_at masked). |
 | `config export` | xpst-config | Writes the masked (or `--raw`) document with a PyYAML-identical emitter; payload and file byte-compared with the Python CLI. |
 | `config fix` | xpst-config | Detects the same five defects and reports `fixes_applied`/`details`; payload byte-compared with the Python CLI. |
 | `config import` | xpst-config | Merge/replace with the same deep-merge, diff and validation rules; payload byte-compared with the Python CLI. |
