@@ -345,6 +345,17 @@ fn python_eq(left: &YamlValue, right: &YamlValue) -> bool {
             (Some(a), Some(b)) => a == b,
             _ => a.as_f64() == b.as_f64(),
         },
+        // Python's `nan != nan`, so a `.nan` in the config is always reported as
+        // changed by `_compute_config_diff`. Matching that is what keeps the
+        // `changed` list byte-identical.
+        (YamlValue::NonFinite(a), YamlValue::NonFinite(b)) => {
+            a == b && !matches!(a, xpst_config::NonFinite::Nan)
+        }
+        // `True == 1` and `False == 0` in Python.
+        (YamlValue::Bool(flag), YamlValue::Number(number))
+        | (YamlValue::Number(number), YamlValue::Bool(flag)) => {
+            number.as_f64() == Some(if *flag { 1.0 } else { 0.0 })
+        }
         (YamlValue::Sequence(a), YamlValue::Sequence(b)) => {
             a.len() == b.len() && a.iter().zip(b).all(|(a, b)| python_eq(a, b))
         }
@@ -528,6 +539,17 @@ fn python_type_name(value: &YamlValue) -> &'static str {
                 "int"
             } else {
                 "float"
+            }
+        }
+        // `type(float('inf')).__name__` is `float`.
+        YamlValue::NonFinite(_) => "float",
+        // `yaml.safe_load` gives `datetime.date` for a bare date and
+        // `datetime.datetime` when a clock is present.
+        YamlValue::Timestamp(text) => {
+            if text.contains(' ') {
+                "datetime"
+            } else {
+                "date"
             }
         }
         YamlValue::String(_) => "str",

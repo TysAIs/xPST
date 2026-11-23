@@ -4,7 +4,7 @@
     "library": "PyYAML 6.0.3",
     "call": "yaml.dump(value, default_flow_style=False, sort_keys=False)"
   },
-  "row_count": 92,
+  "row_count": 94,
   "rows": [
     {
       "value": "",
@@ -517,6 +517,41 @@
         ]
       },
       "yaml": "ints:\n- 0\n- 1\n- -1\n- 9223372036854775807\n"
+    },
+    {
+      "value": {
+        "non_finite": {
+          "inf": {
+            "$non-finite": "inf"
+          },
+          "neg_inf": {
+            "$non-finite": "-inf"
+          },
+          "nan": {
+            "$non-finite": "nan"
+          }
+        }
+      },
+      "yaml": "non_finite:\n  inf: .inf\n  neg_inf: -.inf\n  nan: .nan\n"
+    },
+    {
+      "value": {
+        "stamps": {
+          "date": {
+            "$timestamp": "2026-01-01"
+          },
+          "utc": {
+            "$timestamp": "2026-01-01 00:00:00+00:00"
+          },
+          "offset": {
+            "$timestamp": "2026-01-01 00:00:00+02:00"
+          },
+          "fraction": {
+            "$timestamp": "2026-01-01 00:00:00.500000"
+          }
+        }
+      },
+      "yaml": "stamps:\n  date: 2026-01-01\n  utc: 2026-01-01 00:00:00+00:00\n  offset: 2026-01-01 00:00:00+02:00\n  fraction: 2026-01-01 00:00:00.500000\n"
     }
   ]
 }

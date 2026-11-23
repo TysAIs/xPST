@@ -1,20 +1,27 @@
-//! The YAML parser swap must not change what a config document *means*.
+//! The YAML reader must mean what PyYAML means.
 //!
 //! `serde_yaml` (deprecated, and the only route to the unmaintained
-//! `unsafe-libyaml`) was replaced by `serde_saphyr`. That is a parser change in
-//! the one place where a silent difference is worst: the user's config file.
+//! `unsafe-libyaml`) was replaced by `serde_saphyr`, and the reader now walks
+//! that parser's event stream directly so it can apply PyYAML's resolver to
+//! every plain scalar. That is a change in the one place where a silent
+//! difference is worst: the user's config file, which the four write commands
+//! (`config export`, `set`, `import`, `fix`) read and write back.
 //!
-//! So the corpus below was captured from the **old** parser — every row's
-//! `json_raw` / `json_masked` is byte-for-byte what `serde_yaml` produced for
-//! that document, recorded by running the previous implementation — and this
-//! test holds the new parser to it. Rows whose `outcome` is `error` must still
-//! be refused. Nothing here is a hand-written expectation.
+//! So the corpus below was captured from the **real PyYAML** — every row's
+//! `json_raw` / `json_masked` is byte-for-byte what `json.dumps(...,
+//! default=str, ensure_ascii=False)` produced for `yaml.safe_load` of that
+//! document, recorded by `xtask/scripts/capture_yaml_compat.py` — and this test
+//! holds the Rust reader to it. Rows whose `outcome` is `error` must still be
+//! refused. Nothing here is a hand-written expectation.
+//!
+//! Two refusals are the Rust reader's own, and the capture script records them
+//! as `error` with a `note`: a document that is not a mapping, and a duplicate
+//! key (PyYAML keeps the last value).
 //!
 //! What is deliberately *not* pinned: the error text (a different parser names
-//! the same problem differently) and the rendered YAML bytes (the new emitter
-//! quotes more conservatively). Both are covered instead by the round-trip and
-//! by `yaml_emission_round_trips_through_the_parser` below, which is the
-//! property the file format actually needs.
+//! the same problem differently). The rendered YAML bytes are pinned instead by
+//! `tests/pyyaml_parity.rs`, and the round-trip property by
+//! `yaml_emission_round_trips_through_the_parser` below.
 
 use xpst_config::{ConfigDocument, Value};
 
@@ -64,7 +71,7 @@ fn the_corpus_is_not_empty_and_every_row_is_usable() {
     let rows = rows();
     assert_eq!(
         rows.len(),
-        21,
+        28,
         "the compatibility corpus changed size: {:?}",
         rows.iter().map(|r| &r.id).collect::<Vec<_>>()
     );
@@ -218,17 +225,34 @@ fn a_byte_order_mark_is_accepted() {
 }
 
 #[test]
-fn scalar_inference_still_refuses_yaml11_booleans() {
-    // The single riskiest knob: the new parser's default reads on/yes/off/no as
-    // booleans, which would turn `enabled: no` into `false` and an unrelated
-    // `mode: on` into `true`.
+fn scalar_inference_is_yaml11_like_pyyaml() {
+    // The riskiest knob, and the one the write path depends on: PyYAML reads
+    // `on`/`yes`/`off`/`no` as booleans, `007` as octal 7 and `1_000` as 1000.
+    // A reader that keeps them as strings turns `enabled: yes` into the string
+    // `"yes"` on every `config set`/`export`/`import`/`fix`.
     let document = ConfigDocument::from_yaml_str(
-        "mode_on: on\nmode_yes: yes\nmode_off: off\nmode_no: no\nleading: 007\nunderscored: 1_000\n",
+        "mode_on: on\nmode_yes: yes\nmode_off: off\nmode_no: no\nleading: 007\nunderscored: 1_000\nsingle_y: y\n",
         "scalars.yaml",
     )
     .expect("parse");
     assert_eq!(
         document.to_json_string(false).expect("json"),
-        r#"{"mode_on": "on", "mode_yes": "yes", "mode_off": "off", "mode_no": "no", "leading": "007", "underscored": "1_000"}"#
+        r#"{"mode_on": true, "mode_yes": true, "mode_off": false, "mode_no": false, "leading": 7, "underscored": 1000, "single_y": "y"}"#
+    );
+}
+
+#[test]
+fn a_yaml11_scalar_survives_the_write_path() {
+    // The review's reproducer, end to end: read the document, write it back
+    // with the PyYAML emitter, and check the values — not just the bytes.
+    let source = "accounts:\n  youtube:\n    enabled: yes\nvideo:\n  crf: 1_000\n  ratio: .inf\n";
+    let document = ConfigDocument::from_yaml_str(source, "config.yaml").expect("parse");
+    assert_eq!(
+        document.to_json_string(false).expect("json"),
+        r#"{"accounts": {"youtube": {"enabled": true}}, "video": {"crf": 1000, "ratio": Infinity}}"#
+    );
+    assert_eq!(
+        document.to_yaml_string(false).expect("render"),
+        "accounts:\n  youtube:\n    enabled: true\nvideo:\n  crf: 1000\n  ratio: .inf\n"
     );
 }

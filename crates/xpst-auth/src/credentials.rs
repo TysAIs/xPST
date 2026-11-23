@@ -39,7 +39,10 @@ const SCRYPT_P: u32 = 1;
 const KEY_LEN: usize = 32;
 
 /// Characters a credential key may not contain: the key becomes a file name.
-const UNSAFE_KEY_CHARS: [char; 8] = ['<', '>', ':', '"', '/', '\\', '|', '?'];
+///
+/// Rule-for-rule Python's `_UNSAFE_KEY_CHARS` (`<>:"/\|?*`), so a key the
+/// Python engine refuses is refused here too.
+const UNSAFE_KEY_CHARS: [char; 9] = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
 
 type Aes128CbcDec = cbc::Decryptor<aes::Aes128>;
 

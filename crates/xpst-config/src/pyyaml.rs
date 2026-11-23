@@ -198,6 +198,9 @@ impl Emitter {
                 let text = render_number(number);
                 self.write(&text);
             }
+            // PyYAML writes these back in their own spelling, unquoted.
+            Value::NonFinite(kind) => self.write(kind.as_yaml()),
+            Value::Timestamp(text) => self.write(text),
             Value::String(text) => self.string(text, indent),
             Value::Mapping(_) => self.write("{}"),
             Value::Sequence(_) => self.write("[]"),
@@ -436,7 +439,20 @@ pub fn python_float_repr(value: f64) -> String {
     render_float(value)
 }
 
+/// Python's `repr(float)` without PyYAML's `.0` insertion.
+///
+/// `yaml.dump` writes `1.0e+20` (it inserts `.0` so the scalar still reads as a
+/// float), while `json.dumps` writes `1e+20`. Both are `repr()` plus a tweak, so
+/// they share the digit logic here.
+pub fn python_json_float(value: f64) -> String {
+    render_float_with(value, false)
+}
+
 fn render_float(value: f64) -> String {
+    render_float_with(value, true)
+}
+
+fn render_float_with(value: f64, yaml_style: bool) -> String {
     if value.is_nan() {
         return ".nan".to_string();
     }
@@ -482,11 +498,11 @@ fn render_float(value: f64) -> String {
     let mut text = String::new();
     text.push_str(sign);
     text.push_str(&digits[..1]);
-    text.push('.');
     if digits.len() > 1 {
+        text.push('.');
         text.push_str(&digits[1..]);
-    } else {
-        text.push('0');
+    } else if yaml_style {
+        text.push_str(".0");
     }
     text.push('e');
     text.push(if exponent < 0 { '-' } else { '+' });
@@ -600,141 +616,12 @@ fn analyze(text: &str) -> Analysis {
 
 /// True when a YAML 1.1 reader would resolve this plain scalar to something
 /// other than a string, which is why PyYAML quotes it.
+///
+/// The resolver is shared with the reader ([`crate::schema`]) so the two
+/// directions cannot drift: a string the writer leaves plain is exactly a
+/// string the reader will read back as a string.
 fn resolves_to_non_string(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    if text.is_empty() || text == "~" || lower == "null" {
-        return true;
-    }
-    if matches!(
-        lower.as_str(),
-        "yes" | "no" | "true" | "false" | "on" | "off"
-    ) {
-        return true;
-    }
-    if text == "=" || text == "<<" {
-        return true;
-    }
-    if is_int(text) || is_float(text) || is_timestamp(text) {
-        return true;
-    }
-    false
-}
-
-fn is_int(text: &str) -> bool {
-    let body = text.strip_prefix(['-', '+']).unwrap_or(text);
-    if body.is_empty() {
-        return false;
-    }
-    if let Some(rest) = body.strip_prefix("0b") {
-        return !rest.is_empty() && rest.chars().all(|ch| matches!(ch, '0' | '1' | '_'));
-    }
-    if let Some(rest) = body.strip_prefix("0x") {
-        return !rest.is_empty() && rest.chars().all(|ch| ch.is_ascii_hexdigit() || ch == '_');
-    }
-    if body.len() > 1
-        && body.starts_with('0')
-        && body
-            .chars()
-            .all(|ch| ('0'..='7').contains(&ch) || ch == '_')
-    {
-        return true;
-    }
-    if body.chars().all(|ch| ch.is_ascii_digit() || ch == '_') {
-        return true;
-    }
-    // Sexagesimal: `1:30`, `1:30:00`.
-    if body.contains(':') {
-        let parts: Vec<&str> = body.split(':').collect();
-        if parts.len() >= 2
-            && parts[0].chars().all(|ch| ch.is_ascii_digit())
-            && !parts[0].is_empty()
-            && parts[1..]
-                .iter()
-                .all(|part| part.len() == 2 && part.chars().all(|ch| ch.is_ascii_digit()))
-        {
-            return true;
-        }
-    }
-    false
-}
-
-fn is_float(text: &str) -> bool {
-    let body = text.strip_prefix(['-', '+']).unwrap_or(text);
-    let lower = body.to_ascii_lowercase();
-    if lower == ".inf" || lower == ".nan" {
-        return true;
-    }
-    // PyYAML's float pattern requires a `.` and, when an exponent is present,
-    // a signed one — which is why `1e5` stays a string.
-    let (mantissa, exponent) = match body.split_once(['e', 'E']) {
-        Some((mantissa, exponent)) => (mantissa, Some(exponent)),
-        None => (body, None),
-    };
-    if let Some(exponent) = exponent {
-        let digits = exponent.strip_prefix(['-', '+']).unwrap_or(exponent);
-        if digits.is_empty() || !digits.chars().all(|ch| ch.is_ascii_digit()) {
-            return false;
-        }
-        if !exponent.starts_with(['-', '+']) {
-            return false;
-        }
-    }
-    if !mantissa.contains('.') {
-        return false;
-    }
-    let digits: String = mantissa.chars().filter(|ch| *ch != '.').collect();
-    !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit() || ch == '_')
-}
-
-fn is_timestamp(text: &str) -> bool {
-    // `YYYY-MM-DD`, optionally followed by a time and a zone.
-    let bytes: Vec<char> = text.chars().collect();
-    if bytes.len() < 8 {
-        return false;
-    }
-    let digits = |slice: &[char]| slice.iter().all(|ch| ch.is_ascii_digit());
-    if !(digits(&bytes[0..4]) && bytes[4] == '-') {
-        return false;
-    }
-    let rest: String = bytes[5..].iter().collect();
-    let (date, time) = match rest.find(['T', 't', ' ']) {
-        Some(index) => (&rest[..index], Some(&rest[index + 1..])),
-        None => (rest.as_str(), None),
-    };
-    let parts: Vec<&str> = date.split('-').collect();
-    if parts.len() != 2
-        || parts[0].is_empty()
-        || parts[0].len() > 2
-        || !parts[0].chars().all(|ch| ch.is_ascii_digit())
-        || parts[1].is_empty()
-        || parts[1].len() > 2
-        || !parts[1].chars().all(|ch| ch.is_ascii_digit())
-    {
-        return false;
-    }
-    let Some(time) = time else {
-        return true;
-    };
-    let time = time.trim();
-    let clock = time
-        .split(['Z', 'z', '+'])
-        .next()
-        .unwrap_or(time)
-        .split('-')
-        .next()
-        .unwrap_or(time);
-    let fields: Vec<&str> = clock.split(':').collect();
-    if fields.len() != 3 {
-        return false;
-    }
-    let seconds = fields[2].split('.').next().unwrap_or("");
-    fields[0].chars().all(|ch| ch.is_ascii_digit())
-        && !fields[0].is_empty()
-        && fields[0].len() <= 2
-        && fields[1].len() == 2
-        && fields[1].chars().all(|ch| ch.is_ascii_digit())
-        && seconds.len() == 2
-        && seconds.chars().all(|ch| ch.is_ascii_digit())
+    crate::schema::resolve_plain(text).is_some()
 }
 
 #[cfg(test)]

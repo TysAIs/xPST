@@ -14,13 +14,45 @@
 //! ```
 
 use xpst_config::pyyaml;
-use xpst_config::Value;
+use xpst_config::{NonFinite, Value};
 
 const FIXTURE: &str = include_str!("fixtures/pyyaml_corpus.json");
 
 /// The corpus size. A loop over an emptied array asserts nothing, so the count
 /// is pinned here as well as in the capture script.
-const EXPECTED_ROWS: usize = 92;
+const EXPECTED_ROWS: usize = 94;
+
+/// Decode the capture script's markers for the two values JSON cannot carry.
+///
+/// `json.dumps` writes `Infinity`/`NaN` (invalid JSON) for a non-finite float
+/// and raises for a date, so the script records them as `{"$non-finite": ...}`
+/// and `{"$timestamp": ...}`. Everything else is a plain JSON value.
+fn decode(value: &Value) -> Value {
+    match value {
+        Value::Mapping(map) => {
+            if map.len() == 1 {
+                if let Some(kind) = map.get("$non-finite").and_then(Value::as_str) {
+                    return Value::NonFinite(match kind {
+                        "inf" => NonFinite::Infinity,
+                        "-inf" => NonFinite::NegInfinity,
+                        "nan" => NonFinite::Nan,
+                        other => panic!("unknown non-finite marker {other:?}"),
+                    });
+                }
+                if let Some(text) = map.get("$timestamp").and_then(Value::as_str) {
+                    return Value::Timestamp(text.to_string());
+                }
+            }
+            let mut decoded = xpst_config::Mapping::new();
+            for (key, item) in map {
+                decoded.insert(key.clone(), decode(item));
+            }
+            Value::Mapping(decoded)
+        }
+        Value::Sequence(items) => Value::Sequence(items.iter().map(decode).collect()),
+        other => other.clone(),
+    }
+}
 
 #[test]
 fn every_captured_row_renders_byte_identically() {
@@ -50,12 +82,12 @@ fn every_captured_row_renders_byte_identically() {
 
     let mut failures = Vec::new();
     for row in rows {
-        let value = row.get("value").expect("row has a value");
+        let value = decode(row.get("value").expect("row has a value"));
         let expected = row
             .get("yaml")
             .and_then(Value::as_str)
             .expect("yaml is text");
-        let actual = pyyaml::dump(value);
+        let actual = pyyaml::dump(&value);
         if actual != expected {
             failures.push(format!(
                 "value {:?}\n  expected {:?}\n  actual   {:?}",

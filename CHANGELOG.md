@@ -109,6 +109,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consent-gated; pausing deliberately is not.
 
 ### Fixed
+- **The Rust config write path reads `config.yaml` the way PyYAML does, so a
+  YAML 1.1 scalar survives a save (`xpst-config`).** `config export`, `set`,
+  `import` and `fix` read the document and write it back; the reader resolved
+  scalars with the YAML 1.2 core schema, so `enabled: yes` came back as the
+  string `'yes'`, `crf: 1_000` as `'1_000'`, and `ratio: .inf` as `null` —
+  silent data loss on every save. The reader now walks the parser's event
+  stream and applies PyYAML's own resolver (`yes`/`on`/`no`/`off` are booleans,
+  `007` is octal 7, `1_000` is 1000, `1:30` is 90, `.inf`/`.nan` are floats,
+  `2026-01-01` is a date), and the writer asks the same resolver which strings
+  need quoting. Pinned by a corpus captured from the real PyYAML
+  (`xtask/scripts/capture_yaml_compat.py`) and by a two-engine byte diff over
+  the four write commands.
 - **The config parser and the time rendering no longer depend on unmaintained
   crates (`xpst-config`, `xpst-mcp`, `xpst-verify`, `xpst-provider-bluesky`).**
   Three RustSec notices could not be cleared by any upgrade because they affect

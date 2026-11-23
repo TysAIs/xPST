@@ -342,3 +342,115 @@ fn fix_reports_nothing_to_do_on_a_clean_config() {
     assert_eq!(payload["fixes_applied"], 0, "{payload}");
     assert_eq!(payload["details"], serde_json::json!([]));
 }
+
+/// A document whose scalars are YAML 1.1 spellings PyYAML types differently
+/// from the YAML 1.2 core schema. Every one of these changed value on the write
+/// path before the reader was made PyYAML-compatible: `yes` became the string
+/// `"yes"`, `1_000` the string `"1_000"`, and `.inf` became `null`.
+const YAML11_CONFIG: &str = "\
+version: 4
+accounts:
+  youtube:
+    enabled: yes
+video:
+  crf: 1_000
+  ratio: .inf
+  mode: 007
+  dur: 1:30
+  when: 2026-01-01
+  stamp: 2026-01-01T00:00:00Z
+  nan: .nan
+  not_octal: 08
+  no_0o: 0o17
+  expo: 1e3
+";
+
+/// What `yaml.dump(yaml.safe_load(YAML11_CONFIG), default_flow_style=False,
+/// sort_keys=False)` writes — captured from the real PyYAML, not hand-written.
+const YAML11_EXPECTED: &str = "\
+version: 4
+accounts:
+  youtube:
+    enabled: true
+video:
+  crf: 1000
+  ratio: .inf
+  mode: 7
+  dur: 90
+  when: 2026-01-01
+  stamp: 2026-01-01 00:00:00+00:00
+  nan: .nan
+  not_octal: 08
+  no_0o: 0o17
+  expo: 1e3
+";
+
+#[test]
+fn yaml11_scalars_survive_export() {
+    // `config export --raw` reads the document and writes it back.
+    let fixture = Fixture::new("yaml11-export");
+    fixture.write("config.yaml", YAML11_CONFIG);
+    let target = fixture.dir.join("exported.yaml");
+    let (code, out, err) = run(&[
+        "config",
+        "export",
+        target.to_str().unwrap(),
+        "--raw",
+        "--json",
+    ]);
+    assert_eq!(code, 0, "{out} {err}");
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        YAML11_EXPECTED,
+        "config export rewrote a YAML 1.1 scalar"
+    );
+}
+
+#[test]
+fn yaml11_scalars_survive_set() {
+    // `config set` reads the document, changes one key, writes it back.
+    let fixture = Fixture::new("yaml11-set");
+    fixture.write("config.yaml", YAML11_CONFIG);
+    let (code, out, err) = run(&["config", "set", "video.crf", "30", "--json"]);
+    assert_eq!(code, 0, "{out} {err}");
+    assert_eq!(
+        fixture.config(),
+        YAML11_EXPECTED.replace("crf: 1000", "crf: 30"),
+        "config set rewrote a YAML 1.1 scalar"
+    );
+}
+
+#[test]
+fn yaml11_scalars_survive_import() {
+    // `config import --replace` takes the document as its input.
+    let fixture = Fixture::new("yaml11-import");
+    fixture.write("config.yaml", "version: 4\n");
+    let incoming = fixture.external("in.yaml", YAML11_CONFIG);
+    let (code, out, err) = run(&["config", "import", &incoming, "--replace", "--json"]);
+    assert_eq!(code, 0, "{out} {err}");
+    assert_eq!(
+        fixture.config(),
+        YAML11_EXPECTED,
+        "config import rewrote a YAML 1.1 scalar"
+    );
+}
+
+#[test]
+fn fix_leaves_a_yaml11_document_alone_when_it_has_nothing_to_do() {
+    // `config fix` only writes when it applies a fix. With the credentials
+    // directory present and no stale paths, the file must come back untouched —
+    // which is the property that matters for a document full of YAML 1.1
+    // spellings.
+    let fixture = Fixture::new("yaml11-fix");
+    std::fs::create_dir_all(fixture.dir.join(".xpst").join("credentials")).unwrap();
+    fixture.write("config.yaml", YAML11_CONFIG);
+    let (code, out, err) = run(&["config", "fix", "--json"]);
+    assert_eq!(code, 0, "{out} {err}");
+    let payload: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(payload["fixes_applied"], 0, "{payload}");
+    assert_eq!(
+        fixture.config(),
+        YAML11_CONFIG,
+        "config fix rewrote a document it had no fix for"
+    );
+}

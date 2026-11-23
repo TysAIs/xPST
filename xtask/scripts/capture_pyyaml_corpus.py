@@ -21,7 +21,9 @@ the one failure mode worth spending rows on.
 
 from __future__ import annotations
 
+import datetime
 import json
+import math
 from pathlib import Path
 
 import yaml
@@ -127,7 +129,42 @@ DOCUMENTS = [
     {"bools": [True, False]},
     {"floats": [1.5, 2.0, -0.5, 1e20, 1e-7]},
     {"ints": [0, 1, -1, 9223372036854775807]},
+    # Values PyYAML produces that JSON cannot carry. They are encoded with a
+    # `$`-prefixed marker (see `encode`) so the fixture stays valid JSON.
+    {"non_finite": {"inf": float("inf"), "neg_inf": float("-inf"), "nan": float("nan")}},
+    {
+        "stamps": {
+            "date": datetime.date(2026, 1, 1),
+            "utc": datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc),
+            "offset": datetime.datetime(
+                2026, 1, 1, tzinfo=datetime.timezone(datetime.timedelta(hours=2))
+            ),
+            "fraction": datetime.datetime(2026, 1, 1, 0, 0, 0, 500000),
+        }
+    },
 ]
+
+
+def encode(value):
+    """Encode a value as JSON, marking the two shapes JSON cannot carry.
+
+    `json.dumps` writes `Infinity`/`NaN` for a non-finite float (invalid JSON)
+    and raises for a date, so both become a one-key marker object that the Rust
+    test decodes back into `Value::NonFinite` / `Value::Timestamp`.
+    """
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        if math.isnan(value):
+            return {"$non-finite": "nan"}
+        return {"$non-finite": "inf" if value > 0 else "-inf"}
+    if isinstance(value, datetime.datetime):
+        return {"$timestamp": value.isoformat(" ")}
+    if isinstance(value, datetime.date):
+        return {"$timestamp": value.isoformat()}
+    if isinstance(value, dict):
+        return {key: encode(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [encode(item) for item in value]
+    return value
 
 
 def main() -> None:
@@ -136,7 +173,10 @@ def main() -> None:
         rows.append({"value": value, "yaml": yaml.dump(value, default_flow_style=False, sort_keys=False)})
     for document in DOCUMENTS:
         rows.append(
-            {"value": document, "yaml": yaml.dump(document, default_flow_style=False, sort_keys=False)}
+            {
+                "value": encode(document),
+                "yaml": yaml.dump(document, default_flow_style=False, sort_keys=False),
+            }
         )
     if not rows:
         raise SystemExit("refusing to write an empty corpus")
