@@ -12,6 +12,13 @@ accounts:
     draft_mode: auto
     publish_mode: auto
     browser_headless: true
+    provider: local
+    aggregator:
+      api_key_ref: zernio_api_key
+      account_id: ''
+      profile_id: ''
+      vendor_schedule: false
+      scoped_key: true
   youtube:
     enabled: true
     client_secrets: ~/.xpst/credentials/youtube_client_secrets.json
