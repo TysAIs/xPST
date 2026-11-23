@@ -78,6 +78,17 @@ impl Mapping {
         self.get(key).is_some()
     }
 
+    /// The value stored under a string key, mutably.
+    ///
+    /// The config write path (`config set`, `config fix`) navigates a dotted
+    /// key in place; without this it would have to rebuild every level.
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut Value> {
+        self.0
+            .iter_mut()
+            .find(|(candidate, _)| candidate.as_str() == Some(key))
+            .map(|(_, value)| value)
+    }
+
     /// Insert an entry, replacing any existing entry with an equal key.
     ///
     /// Replacement preserves the original position, so a re-inserted key does

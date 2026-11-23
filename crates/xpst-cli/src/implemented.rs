@@ -40,6 +40,30 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         config_show,
     ),
     implemented(
+        "config export",
+        "xpst-config",
+        "Writes the masked (or `--raw`) document with a PyYAML-identical emitter; payload and file byte-compared with the Python CLI.",
+        config_export,
+    ),
+    implemented(
+        "config fix",
+        "xpst-config",
+        "Detects the same five defects and reports `fixes_applied`/`details`; payload byte-compared with the Python CLI.",
+        config_fix,
+    ),
+    implemented(
+        "config import",
+        "xpst-config",
+        "Merge/replace with the same deep-merge, diff and validation rules; payload byte-compared with the Python CLI.",
+        config_import,
+    ),
+    implemented(
+        "config set",
+        "xpst-config",
+        "Dotted-key set with Python's bool/int/float/str parsing; payload and file byte-compared with the Python CLI.",
+        config_set,
+    ),
+    implemented(
         "config validate",
         "xpst-config",
         "`{valid, checks}` payload; exit 2 on a blocker.",
@@ -147,6 +171,42 @@ fn media_status(
     err: &mut dyn Write,
 ) -> i32 {
     commands::media::status(global, leaf, out, err)
+}
+
+fn config_export(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::config::export(global, leaf, out, err)
+}
+
+fn config_fix(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::config::fix(global, leaf, out, err)
+}
+
+fn config_import(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::config::import(global, leaf, out, err)
+}
+
+fn config_set(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::config::set(global, leaf, out, err)
 }
 
 fn doctor(
