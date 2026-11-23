@@ -18,12 +18,14 @@ use serde_json::Value as JsonValue;
 use thiserror::Error;
 
 pub mod accounts;
+pub mod load;
 pub mod pyyaml;
 pub mod yaml;
 
 mod pyyaml_read;
 mod schema;
 
+pub use load::LoadError;
 pub use yaml::{Mapping, NonFinite, Value};
 
 pub use accounts::{

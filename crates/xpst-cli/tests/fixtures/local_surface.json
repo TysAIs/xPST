@@ -5,7 +5,7 @@
     "source": "src/xpst/cli.py"
   },
   "note": "Captured by running the shipped Python CLI against scratch profiles. scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent; snapshot modified_at is stripped and its epoch recorded instead.",
-  "scenario_count": 65,
+  "scenario_count": 73,
   "scenarios": [
     {
       "name": "status_empty_profile",
@@ -4266,6 +4266,194 @@
         "reply_rules": 0,
         "webhook_path": "/webhook/messenger"
       }
+    },
+    {
+      "name": "config_load_empty_file_byo_status",
+      "argv": [
+        "--config",
+        "cfg/config.yaml",
+        "byo",
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "cfg/config.yaml": ""
+      },
+      "compare": "text",
+      "exit_code": 2,
+      "cwd": "PROFILE",
+      "backup_dir": "cfg/backups",
+      "allow_nonzero": true,
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_<EPOCH>.\n",
+      "stderr": "[<TIME>] ERROR    XPST config file at cfg/config.yaml is corrupted; a\n                             copy was saved to                                  \n                             cfg/backups/config.yaml.corrupt_<EPOCH>         \n",
+      "normalize_clock": true,
+      "backups": [
+        {
+          "name": "config.yaml.corrupt_<EPOCH>",
+          "content": "",
+          "mode": "0o600"
+        }
+      ]
+    },
+    {
+      "name": "config_load_empty_file_providers",
+      "argv": [
+        "--config",
+        "cfg/config.yaml",
+        "providers",
+        "--json"
+      ],
+      "seed": {
+        "cfg/config.yaml": ""
+      },
+      "compare": "text",
+      "exit_code": 2,
+      "cwd": "PROFILE",
+      "backup_dir": "cfg/backups",
+      "allow_nonzero": true,
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_<EPOCH>.\n",
+      "stderr": "[<TIME>] ERROR    XPST config file at cfg/config.yaml is corrupted; a\n                             copy was saved to                                  \n                             cfg/backups/config.yaml.corrupt_<EPOCH>         \n",
+      "normalize_clock": true,
+      "backups": [
+        {
+          "name": "config.yaml.corrupt_<EPOCH>",
+          "content": "",
+          "mode": "0o600"
+        }
+      ]
+    },
+    {
+      "name": "config_load_empty_file_messenger_status",
+      "argv": [
+        "--config",
+        "cfg/config.yaml",
+        "messenger",
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "cfg/config.yaml": ""
+      },
+      "compare": "text",
+      "exit_code": 2,
+      "cwd": "PROFILE",
+      "backup_dir": "cfg/backups",
+      "allow_nonzero": true,
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_<EPOCH>.\n",
+      "stderr": "[<TIME>] ERROR    XPST config file at cfg/config.yaml is corrupted; a\n                             copy was saved to                                  \n                             cfg/backups/config.yaml.corrupt_<EPOCH>         \n",
+      "normalize_clock": true,
+      "backups": [
+        {
+          "name": "config.yaml.corrupt_<EPOCH>",
+          "content": "",
+          "mode": "0o600"
+        }
+      ]
+    },
+    {
+      "name": "config_load_empty_file_status",
+      "argv": [
+        "--config",
+        "cfg/config.yaml",
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "cfg/config.yaml": ""
+      },
+      "compare": "text",
+      "exit_code": 2,
+      "cwd": "PROFILE",
+      "backup_dir": "cfg/backups",
+      "allow_nonzero": true,
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_<EPOCH>.\n",
+      "stderr": "[<TIME>] ERROR    XPST config file at cfg/config.yaml is corrupted; a\n                             copy was saved to                                  \n                             cfg/backups/config.yaml.corrupt_<EPOCH>         \n",
+      "normalize_clock": true,
+      "backups": [
+        {
+          "name": "config.yaml.corrupt_<EPOCH>",
+          "content": "",
+          "mode": "0o600"
+        }
+      ]
+    },
+    {
+      "name": "config_load_non_mapping_byo_status",
+      "argv": [
+        "--config",
+        "cfg/config.yaml",
+        "byo",
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "cfg/config.yaml": "- 1\\n"
+      },
+      "compare": "text",
+      "exit_code": 2,
+      "cwd": "PROFILE",
+      "backup_dir": "cfg/backups",
+      "allow_nonzero": true,
+      "stdout": "Configuration error: XPST config must be a mapping, got list: cfg/config.yaml\n",
+      "stderr": ""
+    },
+    {
+      "name": "config_load_non_mapping_providers",
+      "argv": [
+        "--config",
+        "cfg/config.yaml",
+        "providers",
+        "--json"
+      ],
+      "seed": {
+        "cfg/config.yaml": "- 1\\n"
+      },
+      "compare": "text",
+      "exit_code": 2,
+      "cwd": "PROFILE",
+      "backup_dir": "cfg/backups",
+      "allow_nonzero": true,
+      "stdout": "Configuration error: XPST config must be a mapping, got list: cfg/config.yaml\n",
+      "stderr": ""
+    },
+    {
+      "name": "config_load_non_mapping_messenger_status",
+      "argv": [
+        "--config",
+        "cfg/config.yaml",
+        "messenger",
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "cfg/config.yaml": "- 1\\n"
+      },
+      "compare": "text",
+      "exit_code": 2,
+      "cwd": "PROFILE",
+      "backup_dir": "cfg/backups",
+      "allow_nonzero": true,
+      "stdout": "Configuration error: XPST config must be a mapping, got list: cfg/config.yaml\n",
+      "stderr": ""
+    },
+    {
+      "name": "config_load_non_mapping_status",
+      "argv": [
+        "--config",
+        "cfg/config.yaml",
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "cfg/config.yaml": "- 1\\n"
+      },
+      "compare": "text",
+      "exit_code": 2,
+      "cwd": "PROFILE",
+      "backup_dir": "cfg/backups",
+      "allow_nonzero": true,
+      "stdout": "Configuration error: XPST config must be a mapping, got list: cfg/config.yaml\n",
+      "stderr": ""
     }
   ]
 }

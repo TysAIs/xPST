@@ -309,6 +309,38 @@ impl Value {
     pub fn is_null(&self) -> bool {
         matches!(self, Value::Null)
     }
+
+    /// `type(value).__name__` for the Python object PyYAML would have built.
+    ///
+    /// Used where the engine quotes Python's own type name in a message
+    /// (`XPST config must be a mapping, got list: ...`). A bare date and a
+    /// timestamp are `datetime.date` and `datetime.datetime` in Python, and a
+    /// non-finite float is still a `float`.
+    #[must_use]
+    pub fn python_type_name(&self) -> &'static str {
+        match self {
+            Value::Null => "NoneType",
+            Value::Bool(_) => "bool",
+            Value::Number(number) => {
+                if number.is_i64() || number.is_u64() {
+                    "int"
+                } else {
+                    "float"
+                }
+            }
+            Value::NonFinite(_) => "float",
+            Value::Timestamp(text) => {
+                if text.contains(' ') {
+                    "datetime"
+                } else {
+                    "date"
+                }
+            }
+            Value::String(_) => "str",
+            Value::Sequence(_) => "list",
+            Value::Mapping(_) => "dict",
+        }
+    }
 }
 
 impl From<&str> for Value {

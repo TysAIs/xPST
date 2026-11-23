@@ -14,7 +14,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use xpst_config::ConfigDocument;
+use xpst_config::{ConfigDocument, LoadError};
 
 use crate::paths;
 use crate::GlobalOptions;
@@ -37,8 +37,9 @@ pub enum BootstrapError {
     NoProfile(String),
     /// Reading or creating the file failed.
     Io(String),
-    /// The file exists but is not readable as an xPST config.
-    Invalid(String),
+    /// The file exists but `XPSTConfig.load` refused it — empty, not a mapping,
+    /// not parseable, not UTF-8. Carries the backup path and Python's message.
+    Load(LoadError),
 }
 
 impl BootstrapError {
@@ -53,13 +54,18 @@ impl BootstrapError {
             ),
             BootstrapError::NoProfile(message) => message.clone(),
             BootstrapError::Io(message) => message.clone(),
-            BootstrapError::Invalid(message) => message.clone(),
+            BootstrapError::Load(error) => error.to_string(),
         }
     }
 }
 
-/// Resolve the config path, creating the first-run default when it is absent.
-pub fn ensure_config(global: &GlobalOptions) -> Result<PathBuf, BootstrapError> {
+/// Resolve the config path, creating the first-run default when it is absent,
+/// and load it the way `XPSTConfig.load` does.
+///
+/// The document is returned rather than re-read by the caller: a second read
+/// would be a second chance to back up the same corrupt file, and the two
+/// engines must produce exactly one `backups/config.yaml.corrupt_<epoch>`.
+pub fn load_document(global: &GlobalOptions) -> Result<(PathBuf, ConfigDocument), BootstrapError> {
     let explicit = global.config_path.as_ref().map(PathBuf::from);
     let path = match &explicit {
         Some(path) => path.clone(),
@@ -80,10 +86,18 @@ pub fn ensure_config(global: &GlobalOptions) -> Result<PathBuf, BootstrapError> 
         materialize(&path)?;
     }
 
-    // Parse check only: a config that is not valid YAML is a config error, and
-    // Python exits 2 for it too.
-    ConfigDocument::read(&path).map_err(|error| BootstrapError::Invalid(error.to_string()))?;
-    Ok(path)
+    let document = ConfigDocument::load(&path).map_err(|error| match error {
+        // A file that vanished between the existence check and the read is the
+        // same user error as an explicit path that never existed.
+        LoadError::NotFound { path } => BootstrapError::ExplicitPathMissing(path),
+        other => BootstrapError::Load(other),
+    })?;
+    Ok((path, document))
+}
+
+/// Resolve the config path, creating the first-run default when it is absent.
+pub fn ensure_config(global: &GlobalOptions) -> Result<PathBuf, BootstrapError> {
+    load_document(global).map(|(path, _)| path)
 }
 
 /// Write the default document the way the Python engine does: owner-only mode,
@@ -137,42 +151,27 @@ fn restrict_to_owner_dir(path: &Path) {
 #[cfg(not(unix))]
 fn restrict_to_owner_dir(_path: &Path) {}
 
-/// Report a bootstrap failure in the shape the caller asked for.
+/// Report a bootstrap failure the way `load_config()` does.
 ///
-/// Python prints a rich panel and exits 2, which is not machine-readable even
-/// under `--json`; the Rust engine answers with the same error payload shape
-/// every other implemented command uses.
-pub fn report(
-    err: &mut dyn Write,
-    json_mode: bool,
-    out: &mut dyn Write,
-    error: &BootstrapError,
-) -> i32 {
-    let message = error.message();
-    if json_mode {
-        let code = match error {
-            BootstrapError::ExplicitPathMissing(_) => "CONFIG_FILE_NOT_FOUND",
-            _ => "CONFIG_ERROR",
-        };
-        let payload = crate::output::error_payload_with(
-            code,
-            &message,
-            serde_json::json!({"path": config_path_hint(error)}),
-        );
-        let _ = crate::output::write_json(out, &payload);
-    } else {
-        let _ = writeln!(err, "Configuration error: {message}");
+/// Python's `load_config` catches `ValueError` and prints
+/// `Configuration error: {e}`, catches everything else (a `FileNotFoundError`
+/// for an explicit `--config`) and prints `Failed to load config: {e}`, then
+/// exits 2. Both go through `console.print`, so they land on **stdout** and are
+/// word-wrapped at the console width — even under `--json`, because the print
+/// happens before any JSON is produced. A corrupt file also logs the backup
+/// notice to stderr first, exactly where `_backup_corrupt_config_file` logs it.
+pub fn report(out: &mut dyn Write, err: &mut dyn Write, error: &BootstrapError) -> i32 {
+    let (prefix, message) = match error {
+        BootstrapError::ExplicitPathMissing(_) => ("Failed to load config: ", error.message()),
+        _ => ("Configuration error: ", error.message()),
+    };
+    if let BootstrapError::Load(load) = error {
+        if let Some(notice) = load.backup_notice() {
+            let _ = crate::rich::log_error(err, &notice);
+        }
     }
+    let _ = crate::rich::print_error(out, prefix, &message);
     crate::exit::CONFIG_ERROR
-}
-
-fn config_path_hint(error: &BootstrapError) -> String {
-    match error {
-        BootstrapError::ExplicitPathMissing(path) => path.clone(),
-        _ => paths::config_file()
-            .map(|path| path.display().to_string())
-            .unwrap_or_default(),
-    }
 }
 
 #[cfg(test)]

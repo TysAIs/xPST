@@ -52,17 +52,11 @@ pub fn status(
 ) -> i32 {
     let json_mode = global.json || leaf.is_some_and(|m| flag(m, "opt:json"));
 
-    let config_path = match bootstrap::ensure_config(global) {
-        Ok(path) => path,
-        Err(error) => return bootstrap::report(err, json_mode, out, &error),
+    let (config_path, document) = match bootstrap::load_document(global) {
+        Ok(loaded) => loaded,
+        Err(error) => return bootstrap::report(out, err, &error),
     };
-    let document = match xpst_config::ConfigDocument::read(&config_path) {
-        Ok(document) => document.raw().clone(),
-        Err(error) => {
-            let _ = writeln!(err, "{error}");
-            return exit::CONFIG_ERROR;
-        }
-    };
+    let document = document.raw().clone();
     let config_dir = config_path
         .parent()
         .map(Path::to_path_buf)

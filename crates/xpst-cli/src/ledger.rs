@@ -210,6 +210,27 @@ pub const DEVIATIONS: &[&str] = &[
     "Human-readable output is not byte-identical to the Rich tables: the Rust engine \
      prints plain text with the same facts. The `--json` payload is the contract and is \
      what the parity fixture compares.",
-    "A JSON error path prints the engine's `{ok:false,error:{...}}` payload under \
-     `--json`; Python prints a Rich panel that is not machine-readable even in JSON mode.",
+    "`config show` and `config validate` answer a config error with the engine's \
+     `{ok:false,error:{...}}` payload under `--json`; Python prints a Rich panel that is \
+     not machine-readable even in JSON mode. Those two commands have their own read path \
+     (`config_show`/`config_validate` in `cli.py`); every other config-reading command \
+     goes through the loader below.",
+    "The config-load error path reproduces `XPSTConfig.load` for a corrupt `config.yaml`: \
+     the same `Configuration error:` text on **stdout** (Rich-wrapped at the console \
+     width, even under `--json`), the same `backups/config.yaml.corrupt_<epoch>` copy, \
+     the same `RichHandler` block on **stderr**, and exit 2 — for an empty file, a \
+     non-mapping document, invalid UTF-8 and unparseable YAML. Pinned by the \
+     `config_load_*` rows in `crates/xpst-cli/tests/fixtures/local_surface.json` \
+     (stdout, stderr, exit code and the backup's bytes and mode). Three residual \
+     differences, all named: the parser's own text inside `could not be parsed: <path> \
+     (<message>)` is serde-saphyr's, not PyYAML's `MarkedYAMLError` block (the path, the \
+     backup and the fix are identical); the console width is `COLUMNS` or 80, where \
+     Python also asks the terminal when one is attached (the workspace forbids \
+     `unsafe_code`, so the ioctl is not available) and the parity harness pins \
+     `COLUMNS=80`; and the log timestamp is the C-locale rendering of `%x %X` \
+     (`[%m/%d/%y %H:%M:%S]`), not a locale-dependent one.",
+    "`doctor` reports a corrupt config as a failed check (exit 2, no backup) instead of \
+     printing the loader's message and dying. It is the diagnostic surface whose job is \
+     to say what is wrong; the exit code already matches, and the check names the file \
+     and the parser's complaint.",
 ];

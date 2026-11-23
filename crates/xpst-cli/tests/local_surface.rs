@@ -27,7 +27,7 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 65;
+const EXPECTED_SCENARIOS: usize = 73;
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -114,9 +114,15 @@ fn run(
     argv: &[String],
     env: &[(String, String)],
     config_dir: &std::path::Path,
+    cwd: Option<&Path>,
 ) -> (i32, String, String) {
     let mut command = Command::new(binary);
     command.args(argv).env("XPST_CONFIG_DIR", config_dir);
+    // A `cwd` scenario runs from the scratch profile so the config path in the
+    // message is relative and therefore machine-independent.
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
     // The capture strips inherited `XPST_*` overrides so the fixture is
     // machine-independent; the replay must do the same or a developer with
     // `XPST_X_AUTH_MODE` exported would see a spurious failure.
@@ -216,6 +222,131 @@ fn mask_for(row: &Value) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Replace the two wall-clock values a config-error row carries: the
+/// `config.yaml.corrupt_<epoch>` backup name and the `[MM/DD/YY HH:MM:SS]` log
+/// timestamp. The capture script does the same, so the row is reproducible.
+fn normalize_clock(text: &str) -> String {
+    let mut without_epoch = String::with_capacity(text.len());
+    let mut rest = text;
+    loop {
+        match rest.find("corrupt_") {
+            Some(position) => {
+                without_epoch.push_str(&rest[..position + "corrupt_".len()]);
+                let tail = &rest[position + "corrupt_".len()..];
+                let digits = tail.chars().take_while(|ch| ch.is_ascii_digit()).count();
+                if digits > 0 {
+                    without_epoch.push_str("<EPOCH>");
+                }
+                rest = &tail[digits..];
+            }
+            None => {
+                without_epoch.push_str(rest);
+                break;
+            }
+        }
+    }
+
+    let chars: Vec<char> = without_epoch.chars().collect();
+    let mut out = String::with_capacity(without_epoch.len());
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] == '[' && index + 19 <= chars.len() {
+            let candidate: String = chars[index..index + 19].iter().collect();
+            if is_log_stamp(&candidate) {
+                out.push_str("[<TIME>]");
+                index += 19;
+                continue;
+            }
+        }
+        out.push(chars[index]);
+        index += 1;
+    }
+    out
+}
+
+/// `[MM/DD/YY HH:MM:SS]` — `RichHandler`'s default `log_time_format`.
+fn is_log_stamp(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+    chars.len() == 19
+        && chars[0] == '['
+        && chars[18] == ']'
+        && chars[1..3].iter().all(|ch| ch.is_ascii_digit())
+        && chars[3] == '/'
+        && chars[4..6].iter().all(|ch| ch.is_ascii_digit())
+        && chars[6] == '/'
+        && chars[7..9].iter().all(|ch| ch.is_ascii_digit())
+        && chars[9] == ' '
+        && chars[10..12].iter().all(|ch| ch.is_ascii_digit())
+        && chars[12] == ':'
+        && chars[13..15].iter().all(|ch| ch.is_ascii_digit())
+        && chars[15] == ':'
+        && chars[16..18].iter().all(|ch| ch.is_ascii_digit())
+}
+
+/// Windows renders a relative path with `\`; the fixture was captured with
+/// `/`. The two are the same length, so the wrap is unaffected.
+fn normalize_separators(text: &str) -> String {
+    text.replace('\\', "/")
+}
+
+/// Compare the `backups/` files a corrupt-config run left behind.
+fn assert_backups_match(row: &Value, profile: &Profile, scenario: &str) {
+    let Some(expected) = row.get("backups").and_then(Value::as_array) else {
+        return;
+    };
+    assert!(
+        !expected.is_empty(),
+        "scenario `{scenario}` records an empty backups list"
+    );
+    let relative = row
+        .get("backup_dir")
+        .and_then(Value::as_str)
+        .unwrap_or("backups");
+    let dir = profile.path().join(relative);
+    let mut actual: Vec<(String, String)> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            actual.push((
+                normalize_clock(&entry.file_name().to_string_lossy()),
+                std::fs::read_to_string(entry.path()).unwrap_or_default(),
+            ));
+        }
+    }
+    actual.sort();
+    let want: Vec<(String, String)> = expected
+        .iter()
+        .map(|row| {
+            (
+                row["name"].as_str().unwrap_or_default().to_string(),
+                row["content"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        actual, want,
+        "scenario `{scenario}`: the backup the engine wrote differs from the Python engine's"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for (index, entry) in std::fs::read_dir(&dir)
+            .expect("backup directory")
+            .flatten()
+            .enumerate()
+        {
+            let mode = format!(
+                "0o{:o}",
+                entry.metadata().unwrap().permissions().mode() & 0o777
+            );
+            let want_mode = expected[index]["mode"].as_str().unwrap_or_default();
+            assert_eq!(
+                mode, want_mode,
+                "scenario `{scenario}`: backup mode differs from the Python engine's"
+            );
+        }
+    }
 }
 
 fn argv_for(row: &Value, profile: &Profile) -> Vec<String> {
@@ -337,7 +468,12 @@ fn every_recorded_scenario_matches_the_python_engine() {
         let argv = argv_for(row, &profile);
         let env = env_for(row, &profile);
         let config_dir = config_dir_for(row, &profile);
-        let (code, stdout, stderr) = run(binary(), &profile, &argv, &env, &config_dir);
+        let cwd = row
+            .get("cwd")
+            .and_then(Value::as_str)
+            .map(|_| profile.path().to_path_buf());
+        let (code, stdout, stderr) =
+            run(binary(), &profile, &argv, &env, &config_dir, cwd.as_deref());
         let compare = row["compare"].as_str().expect("compare mode");
 
         match compare {
@@ -368,6 +504,36 @@ fn every_recorded_scenario_matches_the_python_engine() {
                     .expect("stdout scenarios record the text");
                 let actual = stdout.replace(&profile.path().display().to_string(), "<PROFILE>");
                 assert_eq!(actual, expected, "scenario `{name}` stdout drifted");
+            }
+            "text" => {
+                // The config-error path is Rich text on stdout plus a
+                // RichHandler block on stderr, even under `--json`; both are
+                // the expectation, and the backup the run wrote is part of it.
+                assert_eq!(
+                    code,
+                    row["exit_code"].as_i64().unwrap_or(-1) as i32,
+                    "scenario `{name}` exit code drifted: {stderr}"
+                );
+                let root = profile.path().display().to_string();
+                let expected_stdout = row["stdout"]
+                    .as_str()
+                    .expect("text scenarios record stdout");
+                let actual_stdout =
+                    normalize_clock(&normalize_separators(&stdout.replace(&root, "<PROFILE>")));
+                assert_eq!(
+                    actual_stdout, expected_stdout,
+                    "scenario `{name}` stdout drifted"
+                );
+                let expected_stderr = row["stderr"]
+                    .as_str()
+                    .expect("text scenarios record stderr");
+                let actual_stderr =
+                    normalize_clock(&normalize_separators(&stderr.replace(&root, "<PROFILE>")));
+                assert_eq!(
+                    actual_stderr, expected_stderr,
+                    "scenario `{name}` stderr drifted"
+                );
+                assert_backups_match(row, &profile, name);
             }
             "digest" => {
                 // `providers` prints ~54 kB; the fixture pins a digest of the
@@ -442,6 +608,7 @@ fn a_fresh_profile_is_created_with_the_same_config_the_python_engine_writes() {
         &["status".to_string(), "--json".to_string()],
         &[],
         profile.path(),
+        None,
     );
     assert_eq!(code, 0, "status must not fail on a fresh profile: {stderr}");
     let written = std::fs::read_to_string(profile.path().join("config.yaml"))
@@ -490,6 +657,7 @@ fn schedule_list_never_writes_into_the_profile() {
         ],
         &[],
         profile.path(),
+        None,
     );
     assert_eq!(code, 0, "{stderr}");
     let after = std::fs::read_dir(profile.path())

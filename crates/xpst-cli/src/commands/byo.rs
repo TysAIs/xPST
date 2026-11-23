@@ -286,21 +286,14 @@ const NOTE: &str = "One Meta app covers Instagram, Threads and Messenger: enter 
 /// Resolve the profile and its config document.
 fn load(
     global: &GlobalOptions,
-    json_mode: bool,
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> Result<(std::path::PathBuf, YamlValue), i32> {
-    let config_path = match bootstrap::ensure_config(global) {
-        Ok(path) => path,
-        Err(error) => return Err(bootstrap::report(err, json_mode, out, &error)),
+    let (config_path, document) = match bootstrap::load_document(global) {
+        Ok(loaded) => loaded,
+        Err(error) => return Err(bootstrap::report(out, err, &error)),
     };
-    let document = match xpst_config::ConfigDocument::read(&config_path) {
-        Ok(document) => document.raw().clone(),
-        Err(error) => {
-            let _ = writeln!(err, "{error}");
-            return Err(exit::CONFIG_ERROR);
-        }
-    };
+    let document = document.raw().clone();
     let dir = config_path
         .parent()
         .map(Path::to_path_buf)
@@ -323,7 +316,7 @@ pub fn status(
             return exit::GENERAL;
         }
     };
-    let (dir, config) = match load(global, json_mode, out, err) {
+    let (dir, config) = match load(global, out, err) {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
@@ -413,7 +406,7 @@ pub fn clear(
         return exit::CONFIG_ERROR;
     };
 
-    let (dir, mut config) = match load(global, json_mode, out, err) {
+    let (dir, mut config) = match load(global, out, err) {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
