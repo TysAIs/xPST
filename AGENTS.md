@@ -5,7 +5,9 @@ Instagram Reels, YouTube, local files) and publishes it to YouTube Shorts, X/Twi
 Instagram Reels and Threads, tracking state and analytics locally. It also publishes
 text and image posts where a destination has that path — Bluesky (opt-in, AT Protocol)
 is text/image only and has no video upload. MIT OR Apache-2.0.
-TikTok publishing is not available yet — see the capability truth table in
+TikTok publishing is not available yet — the code path for a rented aggregator
+exists (`accounts.tiktok.provider: zernio`) but no key is stored and no post has
+been made on it, so nothing publishes today; see the capability truth table in
 `docs/INSTALL.md`.
 
 This file is the map an agent needs **before** touching the repo. Read it first. Other

@@ -965,6 +965,43 @@ def _tiktok_auth_readiness(account: Any, config: XPSTConfig) -> AuthReadiness:
     drift from where the publisher looks.
     """
     mode = str(getattr(account, "publish_mode", "auto") or "auto").lower()
+    provider = str(getattr(account, "provider", "local") or "local").strip().lower()
+    if provider == "zernio":
+        # The rented aggregator route: the credential is one vendor API key in
+        # the credential store, not a TikTok token, and the account must have
+        # been connected (its id is what a post is addressed to).
+        aggregator = getattr(account, "aggregator", None)
+        ref = str(getattr(aggregator, "api_key_ref", "") or "zernio_api_key")
+        account_id = str(getattr(aggregator, "account_id", "") or "")
+        if not account_id:
+            return AuthReadiness(
+                False,
+                "missing",
+                "TikTok publishes through the Zernio aggregator but "
+                "accounts.tiktok.aggregator.account_id is empty. Connect the account.",
+                "api_key",
+            )
+        key_present = False
+        try:
+            from xpst.utils.credentials import CredentialStore
+
+            key_present = bool(CredentialStore(str(config.config_dir)).retrieve(ref))
+        except Exception:  # noqa: BLE001 - readiness must never crash
+            key_present = False
+        if not key_present:
+            return AuthReadiness(
+                False,
+                "missing",
+                f"TikTok publishes through the Zernio aggregator but no API key is stored "
+                f"under '{ref}'. Store it in the credential store, not in config.yaml.",
+                "api_key",
+            )
+        return AuthReadiness(
+            True,
+            "ready",
+            "TikTok publishes through the Zernio aggregator; the API key and account id are configured.",
+            "api_key",
+        )
     if mode not in ("browser", "browser_only"):
         ready = bool(account.access_token)
         return AuthReadiness(

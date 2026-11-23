@@ -43,6 +43,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from xpst.providers import AuthMode
 from xpst.utils.graph_api import graph_api_url
 from xpst.utils.logger import get_logger
 from xpst.utils.sessions import SessionManager
@@ -113,6 +114,11 @@ def _auth_mode_for(config: XPSTConfig, platform: str) -> str:
             return "graph_api"
         return "session"
     if platform == "tiktok":
+        provider = str(getattr(config.tiktok, "provider", "local") or "local").strip().lower()
+        if provider == "zernio":
+            # The rented aggregator route authenticates with one vendor API key:
+            # no OAuth exchange happens and xPST never holds a TikTok token.
+            return AuthMode.API_KEY.value
         if config.tiktok.client_key and (config.tiktok.access_token or config.tiktok.refresh_token):
             return "content_posting_api"
         return "source_only"
@@ -222,9 +228,9 @@ def _build_uploaders(config: XPSTConfig) -> dict[str, Any]:
 
     if config.tiktok.enabled:
         try:
-            from xpst.platforms.tiktok import TikTokUploader
+            from xpst.platforms.tiktok_route import build_tiktok_uploader
 
-            uploaders["tiktok"] = TikTokUploader(config)
+            uploaders["tiktok"] = build_tiktok_uploader(config)
         except Exception as exc:  # noqa: BLE001
             logger.warning("TikTok uploader unavailable: %s", exc)
 
@@ -425,7 +431,12 @@ async def collect_live_auth_status_async(
     tiktok_publish_mode = str(
         getattr(config.tiktok, "publish_mode", "auto") or "auto"
     ).lower()
-    browser_publish = tiktok_publish_mode in ("browser", "browser_only")
+    aggregator_publish = (
+        str(getattr(config.tiktok, "provider", "local") or "local").strip().lower() == "zernio"
+    )
+    browser_publish = (
+        not aggregator_publish and tiktok_publish_mode in ("browser", "browser_only")
+    )
     tiktok_base: dict[str, Any] = {
         "auth_mode": _auth_mode_for(config, "tiktok"),
         "session_age_days": _age_days(_credential_file_for(config, "tiktok")),
@@ -482,6 +493,21 @@ async def collect_live_auth_status_async(
             else:
                 destination_check = await _check_via_uploader(uploader)
             destination_check["auth_mode"] = "session"
+        elif aggregator_publish:
+            # The rented aggregator route: one vendor API key, no OAuth token.
+            uploader = uploaders.get("tiktok")
+            if uploader is None:
+                destination_check = {
+                    "authenticated": False,
+                    "session_valid": False,
+                    "auth_mode": "api_key",
+                    "live_checked": True,
+                    "error": "the aggregator adapter could not be built",
+                    "details": {"route": "tiktok_aggregator", "probe_ran": False},
+                }
+            else:
+                destination_check = await _check_via_uploader(uploader)
+            destination_check["auth_mode"] = "api_key"
         elif tiktok_base["auth_mode"] == "content_posting_api":
             uploader = uploaders.get("tiktok")
             destination_check = (
@@ -513,7 +539,7 @@ async def collect_live_auth_status_async(
     # ``auth_mode: source_only`` plus a "no posting credentials" badge while
     # its destination role said session/ready, and made ``can_post`` answer a
     # download question.
-    publish_route = tiktok_base["auth_mode"] in ("content_posting_api", "session")
+    publish_route = tiktok_base["auth_mode"] in ("content_posting_api", "session", "api_key")
     compat = destination_check if publish_route else source_check
     tiktok_base.update(compat)
     tiktok_base["source_check"] = source_check

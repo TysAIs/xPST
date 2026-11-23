@@ -1,0 +1,11 @@
+{
+  "id": "zpost_1",
+  "status": "published",
+  "platforms": [
+    {
+      "platform": "tiktok",
+      "status": "published",
+      "platformPostUrl": "https://www.tiktok.com/@example.creator/video/7412345678901234567"
+    }
+  ]
+}

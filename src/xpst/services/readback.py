@@ -41,6 +41,16 @@ def _uploader(config: XPSTConfig, platform: str) -> Any | None:
     from xpst.platforms.base import PlatformRegistry
 
     PlatformRegistry.auto_discover()
+    if platform == "tiktok":
+        # TikTok's active route is a configuration choice, so it cannot be read
+        # off the registry: the aggregator route must read the post back, or a
+        # verified post would be answered by the wrong adapter.
+        from xpst.platforms.tiktok_route import build_tiktok_uploader
+
+        try:
+            return build_tiktok_uploader(config)
+        except ValueError:
+            return None
     try:
         return PlatformRegistry.get(platform, config)
     except KeyError:

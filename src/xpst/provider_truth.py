@@ -196,6 +196,10 @@ def _auth_mode(config: Any, name: str, raw: Mapping[str, Any]) -> str:
         return configured
     if name == "tiktok":
         account = _config_for(config, name)
+        if str(getattr(account, "provider", "local") or "local").strip().lower() == "zernio":
+            # The rented aggregator route authenticates with one vendor API key:
+            # no OAuth exchange, and xPST never holds a TikTok token.
+            return AuthMode.API_KEY.value
         if getattr(account, "client_key", "") and (
             getattr(account, "access_token", "") or getattr(account, "refresh_token", "")
         ):
@@ -213,6 +217,23 @@ def _auth_mode(config: Any, name: str, raw: Mapping[str, Any]) -> str:
 
 def _path_exists(value: Any) -> bool:
     return bool(value and Path(str(value)).expanduser().exists())
+
+
+def _credential_stored(config: Any, key: str) -> bool:
+    """Whether ``key`` resolves in the local credential store (never its value).
+
+    A presence check for an offline catalog: the credential is read from the
+    encrypted store, but only a boolean leaves this function. Any failure to
+    read counts as "not stored" — a status surface must never claim a usable
+    credential it could not confirm.
+    """
+    try:
+        from xpst.utils.credentials import CredentialStore
+
+        store = CredentialStore(str(getattr(config, "config_dir", "~/.xpst")))
+        return bool(store.retrieve(key))
+    except Exception:  # noqa: BLE001 - a status read must never raise
+        return False
 
 
 def _configured(config: Any, name: str, role: ProviderRole, raw: Mapping[str, Any]) -> bool:
@@ -238,6 +259,18 @@ def _configured(config: Any, name: str, role: ProviderRole, raw: Mapping[str, An
                 or _path_exists(getattr(account, "cookies_file", ""))
             )
         if role in (ProviderRole.VIDEO_DESTINATION, ProviderRole.ANALYTICS):
+            if str(getattr(account, "provider", "local") or "local").strip().lower() == "zernio":
+                # Rented aggregator route: the inputs are the stored vendor key
+                # and the connected account id — no TikTok token. "Configured"
+                # must mean the key is actually retrievable, or the offline
+                # catalog would report a ready destination that cannot publish.
+                aggregator = getattr(account, "aggregator", None)
+                if not getattr(aggregator, "account_id", ""):
+                    return False
+                return _credential_stored(
+                    config,
+                    str(getattr(aggregator, "api_key_ref", "") or "zernio_api_key"),
+                )
             if bool(
                 getattr(account, "client_key", "")
                 and (
@@ -786,6 +819,16 @@ def canonical_provider_catalog(config: Any) -> dict[str, Any]:
             else None
         )
         official = definition.official_api
+        if definition.name == "tiktok" and (
+            str(getattr(getattr(config, "tiktok", None), "provider", "local") or "local")
+            .strip()
+            .lower()
+            == "zernio"
+        ):
+            # The aggregator is a vendor acting between xPST and TikTok under its
+            # own audited app — not TikTok's own API, so the catalog must not
+            # label the destination official.
+            official = False
         if definition.name == "instagram" and byo_app is not None:
             official = bool(
                 byo_app["configured"]

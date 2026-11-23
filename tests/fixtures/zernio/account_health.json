@@ -1,0 +1,8 @@
+{
+  "canPost": true,
+  "needsReconnect": false,
+  "privacyLevels": [
+    "PUBLIC_TO_EVERYONE",
+    "SELF_ONLY"
+  ]
+}
