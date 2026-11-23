@@ -48,9 +48,9 @@ impl BootstrapError {
         match self {
             BootstrapError::ExplicitPathMissing(path) => format!(
                 "XPST config file not found: {path} (expected {} or a path passed via --config)",
-                paths::config_file()
+                default_config_file()
                     .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| "~/.xpst/config.yaml".to_string())
+                    .unwrap_or_else(|_| "~/.xpst/config.yaml".to_string())
             ),
             BootstrapError::NoProfile(message) => message.clone(),
             BootstrapError::Io(message) => message.clone(),
@@ -66,15 +66,18 @@ impl BootstrapError {
 /// would be a second chance to back up the same corrupt file, and the two
 /// engines must produce exactly one `backups/config.yaml.corrupt_<epoch>`.
 pub fn load_document(global: &GlobalOptions) -> Result<(PathBuf, ConfigDocument), BootstrapError> {
-    let explicit = global.config_path.as_ref().map(PathBuf::from);
+    // `cfg_path: Path = Path(config_path)` — Python normalises before the
+    // existence check, so `--config ./config.yaml` and `--config config.yaml/`
+    // read the file instead of reporting it missing, and the message and the
+    // backup directory carry the normalised form.
+    let explicit = global
+        .config_path
+        .as_deref()
+        .map(Path::new)
+        .map(xpst_config::python_path);
     let path = match &explicit {
         Some(path) => path.clone(),
-        None => paths::config_file().ok_or_else(|| {
-            BootstrapError::NoProfile(
-                "cannot determine the config directory: neither XPST_CONFIG_DIR nor HOME is set"
-                    .to_string(),
-            )
-        })?,
+        None => default_config_file()?,
     };
 
     if !path.exists() {
@@ -98,6 +101,21 @@ pub fn load_document(global: &GlobalOptions) -> Result<(PathBuf, ConfigDocument)
 /// Resolve the config path, creating the first-run default when it is absent.
 pub fn ensure_config(global: &GlobalOptions) -> Result<PathBuf, BootstrapError> {
     load_document(global).map(|(path, _)| path)
+}
+
+/// The default config file, normalised the way `Path(...)` normalises it.
+///
+/// `XPST_CONFIG_DIR=./cfg` is a legal override, and Python's
+/// `get_config_dir()` runs it through `Path()` before joining `config.yaml`,
+/// so the message must not carry the raw `./cfg/config.yaml`.
+fn default_config_file() -> Result<PathBuf, BootstrapError> {
+    let file = paths::config_file().ok_or_else(|| {
+        BootstrapError::NoProfile(
+            "cannot determine the config directory: neither XPST_CONFIG_DIR nor HOME is set"
+                .to_string(),
+        )
+    })?;
+    Ok(xpst_config::python_path(&file))
 }
 
 /// Write the default document the way the Python engine does: owner-only mode,

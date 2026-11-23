@@ -25,7 +25,7 @@ pub mod yaml;
 mod pyyaml_read;
 mod schema;
 
-pub use load::LoadError;
+pub use load::{python_path, LoadError};
 pub use yaml::{Mapping, NonFinite, Value};
 
 pub use accounts::{

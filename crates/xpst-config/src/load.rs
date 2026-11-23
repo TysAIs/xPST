@@ -25,6 +25,113 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{yaml, ConfigDocument, Value};
 
+/// `pathlib.Path(config_path)`: the normalisation Python applies before the
+/// path is used for the message, the backup directory and the existence check.
+///
+/// `PurePath` collapses repeated separators, drops `.` components and strips a
+/// trailing separator. It does **not** resolve `..` (that is `resolve()`), and
+/// on POSIX it keeps a leading `//` (the implementation-defined double slash)
+/// while collapsing three or more to one. On Windows both `/` and `\` are
+/// separators, a `C:` drive prefix is kept, and the result renders with `\`.
+///
+/// Two Windows edges are not reproduced because no config path reaches them:
+/// a verbatim `\\?\` prefix, and a UNC root with no tail (`\\server\share`
+/// gains a trailing separator in `PureWindowsPath`). Three or more leading
+/// separators also collapse to two here where `PureWindowsPath` keeps them.
+///
+/// This matters because `--config ./config.yaml` is what shell completion
+/// hands a user: Python prints `config.yaml` and backs up to `backups/…`, so a
+/// raw `./config.yaml` would be a different answer. A trailing slash is worse
+/// than cosmetic — `Path::new("config.yaml/").exists()` is false on Linux, so
+/// the raw path takes the "explicit path missing" branch instead of reading
+/// the file.
+#[must_use]
+pub fn python_path(path: &Path) -> PathBuf {
+    match path.to_str() {
+        Some(raw) => PathBuf::from(python_path_text(raw, cfg!(windows))),
+        // A non-UTF-8 path cannot come from `argv` (Python would have decoded
+        // it), so leave it alone rather than lossily rewriting it.
+        None => path.to_path_buf(),
+    }
+}
+
+/// The string half of [`python_path`], parameterised so the Windows rules can
+/// be tested on Linux.
+fn python_path_text(raw: &str, windows: bool) -> String {
+    let sep = if windows { '\\' } else { '/' };
+    let is_sep = |ch: char| ch == '/' || (windows && ch == '\\');
+    let chars: Vec<char> = raw.chars().collect();
+    let mut index = 0;
+    let mut prefix = String::new();
+
+    // `PureWindowsPath` keeps a drive (`C:`) verbatim, including a
+    // drive-relative path with no root (`C:config.yaml`).
+    if windows && chars.len() >= 2 && chars[1] == ':' && chars[0].is_ascii_alphabetic() {
+        prefix.push(chars[0]);
+        prefix.push(':');
+        index = 2;
+    }
+
+    let mut root = String::new();
+    if windows {
+        if index < chars.len() && is_sep(chars[index]) {
+            let mut slashes = 0;
+            while index < chars.len() && is_sep(chars[index]) {
+                slashes += 1;
+                index += 1;
+            }
+            // After a drive only one root separator survives (`C:\\a` is
+            // `C:\a`); a UNC path keeps its two (`\\server\share`).
+            root.push_str(if slashes >= 2 && prefix.is_empty() {
+                "\\\\"
+            } else {
+                "\\"
+            });
+        }
+    } else if index < chars.len() && chars[index] == '/' {
+        let mut slashes = 0;
+        while index < chars.len() && chars[index] == '/' {
+            slashes += 1;
+            index += 1;
+        }
+        root.push_str(if slashes == 2 { "//" } else { "/" });
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for &ch in &chars[index..] {
+        if is_sep(ch) {
+            push_component(&mut parts, &mut current);
+        } else {
+            current.push(ch);
+        }
+    }
+    push_component(&mut parts, &mut current);
+
+    let mut out = prefix;
+    out.push_str(&root);
+    for (position, part) in parts.iter().enumerate() {
+        if position > 0 {
+            out.push(sep);
+        }
+        out.push_str(part);
+    }
+    // `PurePath("")` and `PurePath(".")` both render as `.`.
+    if out.is_empty() {
+        out.push('.');
+    }
+    out
+}
+
+/// Keep a component unless it is empty (`a//b`) or `.` (`a/./b`); `..` stays.
+fn push_component(parts: &mut Vec<String>, current: &mut String) {
+    if !current.is_empty() && current != "." {
+        parts.push(std::mem::take(current));
+    } else {
+        current.clear();
+    }
+}
+
 /// A failure from the config *load* path.
 ///
 /// Deliberately separate from [`crate::ConfigError`]: that type is the pure
@@ -162,8 +269,24 @@ impl ConfigDocument {
     ///   string>", line 2, column 1`); this crate interpolates serde-saphyr's
     ///   one-line message. The path, the backup and the "fix or restore"
     ///   instruction around it are identical, and the ledger records the
-    ///   difference.
+    ///   difference. The same class covers an OS error: `--config` pointing at
+    ///   a directory reads `([Errno 21] Is a directory: '<path>')` in Python
+    ///   and `(Is a directory (os error 21))` here;
+    /// * `ensure_config_dir_usable`, which Python runs *before* reading. A
+    ///   config in a directory the user cannot write to reports
+    ///   `XPST config directory … is not writable by uid N. Fix: chmod u+rwx …`
+    ///   there, while this loader reports the empty-config message with
+    ///   `backed up to: None` (the copy failed). Porting the precondition
+    ///   would change valid-config behaviour, which this card forbids, so it
+    ///   is recorded rather than implemented;
+    /// * the narrow-console layout: at `COLUMNS` ≤ 30 Rich shrinks the time and
+    ///   level columns, while `rich::log_error` keeps the full 29-cell prefix
+    ///   and overflows the width. stdout still matches at every width.
     pub fn load(path: &Path) -> Result<Self, LoadError> {
+        // `cfg_path: Path = Path(config_path)` — the message, the backup
+        // directory and the existence check all use the normalised form.
+        let path = python_path(path);
+        let path = path.as_path();
         let path_text = path.display().to_string();
         let bytes = std::fs::read(path).map_err(|err| {
             if err.kind() == std::io::ErrorKind::NotFound {
@@ -479,5 +602,96 @@ mod tests {
         let backup = error.backup().expect("backed up");
         let backup_mode = std::fs::metadata(backup).unwrap().permissions().mode() & 0o777;
         assert_eq!(backup_mode, 0o600, "the copy inherits the tightened mode");
+    }
+
+    /// `pathlib.PurePosixPath(...)` answers, captured from CPython 3.13.
+    ///
+    /// The point of the table is the three shapes a shell hands a user:
+    /// `./config.yaml` (completion), `a//config.yaml` (a doubled separator)
+    /// and `config.yaml/` (a trailing slash, which `Path::exists()` rejects on
+    /// Linux even though the file is there).
+    #[test]
+    fn python_path_normalises_like_pathlib() {
+        for (raw, expected) in [
+            ("config.yaml", "config.yaml"),
+            ("./config.yaml", "config.yaml"),
+            ("a//config.yaml", "a/config.yaml"),
+            ("config.yaml/", "config.yaml"),
+            ("a/./b/config.yaml", "a/b/config.yaml"),
+            ("a/../b/config.yaml", "a/../b/config.yaml"),
+            ("//a/config.yaml", "//a/config.yaml"),
+            ("///a/config.yaml", "/a/config.yaml"),
+            ("//", "//"),
+            ("///", "/"),
+            ("", "."),
+            (".", "."),
+            ("./", "."),
+            ("a//", "a"),
+            ("a/./", "a"),
+            ("a/b/..", "a/b/.."),
+            ("a/./../b", "a/../b"),
+            ("a//b//c", "a/b/c"),
+            ("././a", "a"),
+            ("a/././b", "a/b"),
+        ] {
+            assert_eq!(
+                python_path_text(raw, false),
+                expected,
+                "PurePosixPath({raw:?})"
+            );
+        }
+    }
+
+    /// The Windows rules, exercised on Linux: both separators split, a drive
+    /// prefix survives, and the result renders with `\`. The three edges named
+    /// in [`python_path`]'s doc comment are deliberately absent.
+    #[test]
+    fn python_path_normalises_windows_separators() {
+        for (raw, expected) in [
+            ("C:\\cfg\\config.yaml", "C:\\cfg\\config.yaml"),
+            ("C:/cfg//config.yaml", "C:\\cfg\\config.yaml"),
+            ("C:\\\\cfg\\config.yaml", "C:\\cfg\\config.yaml"),
+            ("C:config.yaml", "C:config.yaml"),
+            (".\\cfg\\config.yaml", "cfg\\config.yaml"),
+            ("cfg\\config.yaml\\", "cfg\\config.yaml"),
+            (
+                "\\\\server\\share\\config.yaml",
+                "\\\\server\\share\\config.yaml",
+            ),
+            ("cfg\\..\\config.yaml", "cfg\\..\\config.yaml"),
+        ] {
+            assert_eq!(
+                python_path_text(raw, true),
+                expected,
+                "windows path {raw:?}"
+            );
+        }
+    }
+
+    /// The loader itself uses the normalised path for the message *and* the
+    /// backup directory, not just for the existence check.
+    #[test]
+    fn load_reports_and_backs_up_the_normalised_path() {
+        let scratch = Scratch::new("normalised");
+        std::fs::create_dir_all(scratch.dir.join("cfg")).unwrap();
+        std::fs::write(scratch.dir.join("cfg/config.yaml"), b"").unwrap();
+        let raw = format!("{}/./cfg//config.yaml", scratch.dir.display());
+        let error = ConfigDocument::load(Path::new(&raw)).unwrap_err();
+        let normalised = scratch.dir.join("cfg/config.yaml");
+        let text = error.to_string();
+        assert!(
+            text.contains(&format!("empty or invalid: {}.", normalised.display())),
+            "the message names the normalised path: {text}"
+        );
+        assert!(
+            !text.contains("//") && !text.contains("/./"),
+            "no raw separators survive: {text}"
+        );
+        let backup = error.backup().expect("backed up");
+        assert_eq!(
+            Path::new(backup).parent().unwrap(),
+            scratch.dir.join("cfg/backups"),
+            "the copy lands beside the normalised file"
+        );
     }
 }

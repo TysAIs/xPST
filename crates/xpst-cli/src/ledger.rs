@@ -219,16 +219,28 @@ pub const DEVIATIONS: &[&str] = &[
      the same `Configuration error:` text on **stdout** (Rich-wrapped at the console \
      width, even under `--json`), the same `backups/config.yaml.corrupt_<epoch>` copy, \
      the same `RichHandler` block on **stderr**, and exit 2 — for an empty file, a \
-     non-mapping document, invalid UTF-8 and unparseable YAML. Pinned by the \
+     non-mapping document, invalid UTF-8 and unparseable YAML. The path is normalised \
+     the way `pathlib.Path` normalises it, so `./cfg/config.yaml` and \
+     `cfg/config.yaml/` both read and report `cfg/config.yaml`. Pinned by the \
      `config_load_*` rows in `crates/xpst-cli/tests/fixtures/local_surface.json` \
-     (stdout, stderr, exit code and the backup's bytes and mode). Three residual \
-     differences, all named: the parser's own text inside `could not be parsed: <path> \
-     (<message>)` is serde-saphyr's, not PyYAML's `MarkedYAMLError` block (the path, the \
-     backup and the fix are identical); the console width is `COLUMNS` or 80, where \
-     Python also asks the terminal when one is attached (the workspace forbids \
-     `unsafe_code`, so the ioctl is not available) and the parity harness pins \
-     `COLUMNS=80`; and the log timestamp is the C-locale rendering of `%x %X` \
-     (`[%m/%d/%y %H:%M:%S]`), not a locale-dependent one.",
+     (stdout, stderr, exit code and the backup's bytes and mode). Six residual \
+     differences, all named: (1) the parser's own text inside `could not be parsed: \
+     <path> (<message>)` is serde-saphyr's, not PyYAML's `MarkedYAMLError` block (the \
+     path, the backup and the fix are identical); (2) the same class covers an OS \
+     error — `--config` pointing at a directory reads `([Errno 21] Is a directory: \
+     '<path>')` in Python and `(Is a directory (os error 21))` here; (3) the console \
+     width is `COLUMNS` or 80, where Python also asks the terminal when one is \
+     attached (the workspace forbids `unsafe_code`, so the ioctl is not available) and \
+     the parity harness pins `COLUMNS=80`; (4) at `COLUMNS` ≤ 30 Rich truncates the \
+     time column and shrinks the message column, while `rich::log_error` keeps the \
+     full 29-cell prefix and overflows the width (stdout still matches at every \
+     width); (5) the log timestamp is the C-locale rendering of `%x %X` \
+     (`[%m/%d/%y %H:%M:%S]`), not a locale-dependent one; (6) \
+     `ensure_config_dir_usable` is not ported — a config in a directory the user \
+     cannot write to reports `XPST config directory … is not writable by uid N. Fix: \
+     chmod u+rwx …` in Python and the empty-config message with `backed up to: None` \
+     here. Porting (6) would change valid-config behaviour (Python exits 2, Rust \
+     exits 0), which this slice must not do; it is a separate card.",
     "`doctor` reports a corrupt config as a failed check (exit 2, no backup) instead of \
      printing the loader's message and dying. It is the diagnostic surface whose job is \
      to say what is wrong; the exit code already matches, and the check names the file \

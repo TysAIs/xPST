@@ -779,6 +779,33 @@ SCENARIOS = [
         "expect_backup": True,
         "compare": "text",
     },
+    # `pathlib.Path(config_path)` normalises before the message, the backup
+    # directory and the existence check: `./cfg/config.yaml` (what shell
+    # completion hands you) prints `cfg/config.yaml`, and a trailing slash
+    # still reads the file instead of taking the "explicit path missing"
+    # branch (`Path::new("cfg/config.yaml/").exists()` is false on Linux).
+    {
+        "name": "config_load_dot_prefix_byo_status",
+        "argv": ["--config", "./cfg/config.yaml", "byo", "status", "--json"],
+        "seed": {"cfg/config.yaml": ""},
+        "cwd": "PROFILE",
+        "backup_dir": "cfg/backups",
+        "allow_nonzero": True,
+        "normalize_clock": True,
+        "expect_backup": True,
+        "compare": "text",
+    },
+    {
+        "name": "config_load_trailing_slash_byo_status",
+        "argv": ["--config", "cfg/config.yaml/", "byo", "status", "--json"],
+        "seed": {"cfg/config.yaml": ""},
+        "cwd": "PROFILE",
+        "backup_dir": "cfg/backups",
+        "allow_nonzero": True,
+        "normalize_clock": True,
+        "expect_backup": True,
+        "compare": "text",
+    },
     {
         "name": "config_load_non_mapping_byo_status",
         "argv": ["--config", "cfg/config.yaml", "byo", "status", "--json"],

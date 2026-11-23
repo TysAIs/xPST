@@ -14,12 +14,20 @@
 //! * [`log_error`] is `rich._log_render.LogRender` with `show_time`,
 //!   `show_level` and no path column, which is what `RichHandler` builds.
 //!
-//! **One named divergence.** Python asks the terminal for its width when any of
+//! **Named divergences.** Python asks the terminal for its width when any of
 //! stdin/stdout/stderr is a TTY (`Console.size`), and falls back to `COLUMNS`
 //! and then 80. This workspace forbids `unsafe_code`, so the ioctl that would
 //! answer that question is not available here; the engine honours `COLUMNS` and
 //! otherwise assumes 80. The parity harness pins `COLUMNS=80`, so both engines
 //! agree there; a TTY user gets 80 columns instead of their terminal's width.
+//!
+//! At `COLUMNS` ≤ 30 the stderr block also diverges: Rich shrinks the time and
+//! level columns (the stamp truncates to `[11/23/26`) and gives the message the
+//! remainder, while [`log_error`] keeps the full 29-cell prefix and lets the
+//! row overflow the width. Reimplementing Rich's column shrink is not worth it
+//! for a width no real terminal uses; the ledger records it. stdout still
+//! matches at every width.
+//!
 //! The log timestamp is likewise the C-locale rendering of Python's `%x %X`
 //! (`[%m/%d/%y %H:%M:%S]`), not a locale-dependent one.
 
