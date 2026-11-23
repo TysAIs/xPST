@@ -100,6 +100,12 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         media_status,
     ),
     implemented(
+        "messenger status",
+        "xpst-provider",
+        "Config + credential-presence payload (masked token preview, reply-rule count, comment platforms) read from the encrypted store with the config fallback; payload byte-compared with the Python CLI.",
+        messenger_status,
+    ),
+    implemented(
         "doctor",
         "xpst-cli",
         "Local-only diagnostics; live probes are P1 (the report says so).",
@@ -195,6 +201,15 @@ fn media_status(
     err: &mut dyn Write,
 ) -> i32 {
     commands::media::status(global, leaf, out, err)
+}
+
+fn messenger_status(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::messenger::status(global, leaf, out, err)
 }
 
 fn byo_clear(

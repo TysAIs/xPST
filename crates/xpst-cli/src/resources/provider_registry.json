@@ -1,0 +1,950 @@
+{
+ "definitions": [
+  {
+   "name": "youtube",
+   "display_name": "YouTube Shorts",
+   "roles": [
+    "source",
+    "video_destination",
+    "analytics"
+   ],
+   "auth_mode": "oauth",
+   "official_api": true,
+   "docs_url": "https://developers.google.com/youtube/v3"
+  },
+  {
+   "name": "x",
+   "display_name": "X",
+   "roles": [
+    "source",
+    "video_destination",
+    "analytics"
+   ],
+   "auth_mode": "cookies",
+   "official_api": false,
+   "docs_url": "https://developer.x.com/en/docs/x-api"
+  },
+  {
+   "name": "instagram",
+   "display_name": "Instagram Reels",
+   "roles": [
+    "source",
+    "video_destination",
+    "analytics"
+   ],
+   "auth_mode": "session",
+   "official_api": false,
+   "docs_url": "https://developers.facebook.com/docs/instagram-api"
+  },
+  {
+   "name": "bluesky",
+   "display_name": "Bluesky",
+   "roles": [
+    "video_destination"
+   ],
+   "auth_mode": "app_password",
+   "official_api": true,
+   "docs_url": "https://docs.bsky.app/"
+  },
+  {
+   "name": "tiktok",
+   "display_name": "TikTok",
+   "roles": [
+    "source",
+    "video_destination",
+    "analytics"
+   ],
+   "auth_mode": "source_only",
+   "official_api": true,
+   "docs_url": "https://developers.tiktok.com/doc/content-posting-api"
+  },
+  {
+   "name": "threads",
+   "display_name": "Threads",
+   "roles": [
+    "video_destination",
+    "analytics"
+   ],
+   "auth_mode": "oauth",
+   "official_api": true,
+   "docs_url": "https://developers.facebook.com/docs/threads"
+  },
+  {
+   "name": "messenger",
+   "display_name": "Messenger",
+   "roles": [
+    "messaging"
+   ],
+   "auth_mode": "oauth",
+   "official_api": true,
+   "docs_url": "https://developers.facebook.com/docs/messenger-platform"
+  },
+  {
+   "name": "facebook",
+   "display_name": "Facebook Page",
+   "roles": [
+    "video_destination"
+   ],
+   "auth_mode": "oauth",
+   "official_api": true,
+   "docs_url": "https://developers.facebook.com/docs/pages-api"
+  },
+  {
+   "name": "rumble",
+   "display_name": "Rumble",
+   "roles": [
+    "video_destination"
+   ],
+   "auth_mode": "api_key",
+   "official_api": true,
+   "docs_url": "https://rumble.com/"
+  },
+  {
+   "name": "local",
+   "display_name": "Local files",
+   "roles": [
+    "source"
+   ],
+   "auth_mode": "local",
+   "official_api": false,
+   "docs_url": null
+  }
+ ],
+ "roles": [
+  "source",
+  "video_destination",
+  "messaging",
+  "analytics"
+ ],
+ "defaults": {
+  "provider_mode": "official",
+  "accounts": {
+   "youtube": {
+    "enabled": true,
+    "token_file": "~/.xpst/credentials/youtube_token.json",
+    "client_secrets": "~/.xpst/credentials/youtube_client_secrets.json",
+    "video_mode": "auto"
+   },
+   "x": {
+    "enabled": true,
+    "auth_mode": "cookies",
+    "cookies_file": "~/.xpst/credentials/x_cookies.json",
+    "bearer_token": "",
+    "api_key": "",
+    "api_secret": "",
+    "access_token": "",
+    "access_token_secret": "",
+    "max_video_duration_seconds": 0
+   },
+   "instagram": {
+    "enabled": true,
+    "auth_mode": "graph_api",
+    "session_file": "~/.xpst/credentials/instagram_session.json",
+    "graph_access_token": "",
+    "app_id": "",
+    "app_secret": "",
+    "account_type": "",
+    "account_type_source": ""
+   },
+   "threads": {
+    "enabled": false,
+    "graph_access_token": "",
+    "threads_user_id": "",
+    "app_id": "",
+    "app_secret": ""
+   },
+   "bluesky": {
+    "enabled": false,
+    "identifier": ""
+   },
+   "messenger": {
+    "enabled": false,
+    "page_id": "",
+    "page_access_token": "",
+    "auto_reply": false,
+    "comment_reply_enabled": false,
+    "comment_platforms": [
+     "instagram",
+     "facebook"
+    ],
+    "reply_rules": {},
+    "webhook_path": "/webhook/messenger"
+   },
+   "facebook": {
+    "enabled": false,
+    "page_id": "",
+    "page_access_token": ""
+   },
+   "rumble": {
+    "enabled": false,
+    "api_key": "",
+    "upload_page_url": "https://rumble.com/upload.php"
+   },
+   "tiktok": {
+    "enabled": true,
+    "username": "",
+    "cookies_from_browser": false,
+    "cookies_file": null,
+    "provider": "local",
+    "client_key": "",
+    "access_token": "",
+    "refresh_token": "",
+    "sandbox": false,
+    "publish_mode": "auto",
+    "aggregator": {
+     "api_key_ref": "zernio_api_key",
+     "account_id": ""
+    }
+   },
+   "local": {
+    "path": ""
+   }
+  }
+ },
+ "manifests": {
+  "sources": {
+   "local": {
+    "default": {
+     "name": "local",
+     "display_name": "Local Files",
+     "roles": [
+      "source"
+     ],
+     "canonical_roles": [
+      "source"
+     ],
+     "capabilities": [
+      "list",
+      "download",
+      "carousel",
+      "health",
+      "local_only"
+     ],
+     "auth_mode": "local",
+     "is_official_api": false,
+     "is_local_first": true,
+     "docs_url": null,
+     "notes": "Scans local folders and files without any network service.",
+     "extra": {
+      "content": [
+       "video",
+       "image",
+       "carousel"
+      ],
+      "video_extensions": [
+       ".avi",
+       ".flv",
+       ".m4v",
+       ".mkv",
+       ".mov",
+       ".mp4",
+       ".webm",
+       ".wmv"
+      ],
+      "image_extensions": [
+       ".bmp",
+       ".gif",
+       ".jpeg",
+       ".jpg",
+       ".png",
+       ".tiff",
+       ".webp"
+      ]
+     }
+    }
+   },
+   "tiktok": {
+    "default": {
+     "name": "tiktok",
+     "display_name": "TikTok",
+     "roles": [
+      "source"
+     ],
+     "canonical_roles": [
+      "source"
+     ],
+     "capabilities": [
+      "list",
+      "download",
+      "carousel",
+      "health",
+      "cookie_auth",
+      "rate_limits"
+     ],
+     "auth_mode": "cookies",
+     "is_official_api": false,
+     "is_local_first": true,
+     "docs_url": "https://github.com/yt-dlp/yt-dlp",
+     "notes": "Uses yt-dlp extraction with optional browser cookies or cookies file for better access.",
+     "extra": {
+      "content": [
+       "video",
+       "image_carousel"
+      ],
+      "helper": "yt-dlp",
+      "auth_optional": true
+     }
+    }
+   },
+   "youtube": {
+    "default": {
+     "name": "youtube",
+     "display_name": "YouTube",
+     "roles": [
+      "source"
+     ],
+     "canonical_roles": [
+      "source"
+     ],
+     "capabilities": [
+      "list",
+      "download",
+      "health",
+      "cookie_auth",
+      "rate_limits"
+     ],
+     "auth_mode": "cookies",
+     "is_official_api": false,
+     "is_local_first": true,
+     "docs_url": "https://github.com/yt-dlp/yt-dlp",
+     "notes": "Reads public channel videos with yt-dlp; browser cookies can help with age, region, or bot checks.",
+     "extra": {
+      "content": [
+       "video"
+      ],
+      "helper": "yt-dlp",
+      "auth_optional": true,
+      "official_upload_api_available": true
+     }
+    }
+   },
+   "x": {
+    "default": {
+     "name": "x",
+     "display_name": "X",
+     "roles": [
+      "source"
+     ],
+     "canonical_roles": [
+      "source"
+     ],
+     "capabilities": [
+      "list",
+      "download",
+      "health",
+      "cookie_auth",
+      "rate_limits"
+     ],
+     "auth_mode": "cookies",
+     "is_official_api": false,
+     "is_local_first": true,
+     "docs_url": "https://github.com/yt-dlp/yt-dlp",
+     "notes": "Uses yt-dlp for media downloads and twikit cookies for richer timeline metadata when available.",
+     "extra": {
+      "content": [
+       "video"
+      ],
+      "helpers": [
+       "yt-dlp",
+       "twikit"
+      ],
+      "auth_optional": true
+     }
+    }
+   },
+   "instagram": {
+    "default": {
+     "name": "instagram",
+     "display_name": "Instagram",
+     "roles": [
+      "source"
+     ],
+     "canonical_roles": [
+      "source"
+     ],
+     "capabilities": [
+      "list",
+      "download",
+      "carousel",
+      "health",
+      "cookie_auth",
+      "rate_limits"
+     ],
+     "auth_mode": "session",
+     "is_official_api": false,
+     "is_local_first": true,
+     "docs_url": "https://github.com/subzeroid/instagrapi",
+     "notes": "Uses persisted Instagram sessions through instagrapi for listing and downloading posts.",
+     "extra": {
+      "content": [
+       "video",
+       "image",
+       "carousel"
+      ],
+      "helper": "instagrapi",
+      "auth_required": true
+     }
+    }
+   }
+  },
+  "destinations": {
+   "bluesky": {
+    "default": {
+     "name": "bluesky",
+     "display_name": "Bluesky",
+     "roles": [
+      "video_destination",
+      "destination"
+     ],
+     "canonical_roles": [
+      "video_destination"
+     ],
+     "capabilities": [
+      "upload",
+      "delete",
+      "carousel",
+      "health",
+      "official_api",
+      "rate_limits"
+     ],
+     "auth_mode": "app_password",
+     "is_official_api": true,
+     "is_local_first": true,
+     "docs_url": "https://docs.bsky.app/",
+     "notes": "Open posting API (AT Protocol): text, image and multi-image posts through com.atproto.repo.createRecord. No review, no fee. Video is not implemented.",
+     "extra": {
+      "content": [
+       "text",
+       "image",
+       "carousel"
+      ],
+      "max_caption_length": 300,
+      "max_images_per_post": 4,
+      "max_image_bytes": 2000000,
+      "video": false
+     }
+    }
+   },
+   "facebook": {
+    "default": {
+     "name": "facebook",
+     "display_name": "Facebook Page",
+     "roles": [
+      "video_destination"
+     ],
+     "canonical_roles": [
+      "video_destination"
+     ],
+     "capabilities": [
+      "upload",
+      "delete",
+      "health",
+      "official_api",
+      "oauth",
+      "rate_limits"
+     ],
+     "auth_mode": "oauth",
+     "is_official_api": true,
+     "is_local_first": true,
+     "docs_url": "https://developers.facebook.com/docs/pages-api",
+     "notes": "Page-scoped publishing through the Graph API (Facebook Login for Business). Personal profiles have no publishing API and are never used.",
+     "extra": {
+      "content": [
+       "video"
+      ],
+      "page_scoped": true,
+      "max_caption_length": 63206,
+      "publish_endpoint": "/{page_id}/videos"
+     }
+    }
+   },
+   "instagram": {
+    "session": {
+     "name": "instagram",
+     "display_name": "Instagram Reels",
+     "roles": [
+      "video_destination",
+      "destination"
+     ],
+     "canonical_roles": [
+      "video_destination"
+     ],
+     "capabilities": [
+      "upload",
+      "delete",
+      "carousel",
+      "health",
+      "cookie_auth",
+      "rate_limits"
+     ],
+     "auth_mode": "session",
+     "is_official_api": false,
+     "is_local_first": true,
+     "docs_url": "https://github.com/subzeroid/instagrapi",
+     "notes": "Uses persisted Instagram sessions through instagrapi; not an official Meta publishing API.",
+     "extra": {
+      "content": [
+       "video",
+       "image",
+       "carousel"
+      ],
+      "max_caption_length": 2200,
+      "max_carousel_items": 10
+     }
+    },
+    "graph_api": {
+     "name": "instagram",
+     "display_name": "Instagram Reels",
+     "roles": [
+      "video_destination",
+      "destination"
+     ],
+     "canonical_roles": [
+      "video_destination"
+     ],
+     "capabilities": [
+      "upload",
+      "delete",
+      "carousel",
+      "health",
+      "official_api",
+      "rate_limits"
+     ],
+     "auth_mode": "graph_api",
+     "is_official_api": true,
+     "is_local_first": true,
+     "docs_url": "https://developers.facebook.com/docs/instagram-api",
+     "notes": "Uses the official Meta Graph API.",
+     "extra": {
+      "content": [
+       "video",
+       "image",
+       "carousel"
+      ],
+      "max_caption_length": 2200,
+      "max_carousel_items": 10
+     }
+    }
+   },
+   "messenger": {
+    "default": {
+     "name": "messenger",
+     "display_name": "Messenger",
+     "roles": [
+      "messaging",
+      "destination"
+     ],
+     "canonical_roles": [
+      "messaging"
+     ],
+     "capabilities": [
+      "health",
+      "official_api",
+      "rate_limits"
+     ],
+     "auth_mode": "oauth",
+     "is_official_api": true,
+     "is_local_first": true,
+     "docs_url": "https://developers.facebook.com/docs/messenger-platform",
+     "notes": "Opt-in Messenger auto-reply (ManyChat-lite). Static Page Access Token, appsecret_proof on everything outbound, X-Hub-Signature-256 on inbound.",
+     "extra": {
+      "content": [
+       "text"
+      ],
+      "max_caption_length": 640
+     }
+    }
+   },
+   "rumble": {
+    "no_key": {
+     "name": "rumble",
+     "display_name": "Rumble",
+     "roles": [
+      "video_destination"
+     ],
+     "canonical_roles": [
+      "video_destination"
+     ],
+     "capabilities": [
+      "upload",
+      "health"
+     ],
+     "auth_mode": "unknown",
+     "is_official_api": true,
+     "is_local_first": true,
+     "docs_url": "https://rumble.com/",
+     "notes": "Long-form video. Upload API is partner-gated with no self-serve developer console: xPST publishes through it when an API key is configured, and otherwise exports the rendition for a manual handoff. Not advertised as ready until one live upload succeeds.",
+     "extra": {
+      "content": [
+       "video"
+      ],
+      "integration": "integration_uncertain",
+      "verified_live": false,
+      "mode": "manual_handoff",
+      "manual_handoff": true,
+      "upload_page_url": "https://rumble.com/upload.php"
+     }
+    },
+    "api_key": {
+     "name": "rumble",
+     "display_name": "Rumble",
+     "roles": [
+      "video_destination"
+     ],
+     "canonical_roles": [
+      "video_destination"
+     ],
+     "capabilities": [
+      "upload",
+      "health"
+     ],
+     "auth_mode": "api_v2",
+     "is_official_api": true,
+     "is_local_first": true,
+     "docs_url": "https://rumble.com/",
+     "notes": "Long-form video. Upload API is partner-gated with no self-serve developer console: xPST publishes through it when an API key is configured, and otherwise exports the rendition for a manual handoff. Not advertised as ready until one live upload succeeds.",
+     "extra": {
+      "content": [
+       "video"
+      ],
+      "integration": "integration_uncertain",
+      "verified_live": false,
+      "mode": "api",
+      "manual_handoff": true,
+      "upload_page_url": "https://rumble.com/upload.php"
+     }
+    }
+   },
+   "threads": {
+    "default": {
+     "name": "threads",
+     "display_name": "Threads",
+     "roles": [
+      "video_destination",
+      "destination"
+     ],
+     "canonical_roles": [
+      "video_destination"
+     ],
+     "capabilities": [
+      "upload",
+      "health",
+      "official_api",
+      "oauth",
+      "rate_limits"
+     ],
+     "auth_mode": "oauth",
+     "is_official_api": true,
+     "is_local_first": true,
+     "docs_url": "https://developers.facebook.com/docs/threads",
+     "notes": "Publishes text and media via the Meta Threads API container publish model.",
+     "extra": {
+      "content": [
+       "video",
+       "text"
+      ],
+      "media_transport": "public_url",
+      "max_caption_length": 500,
+      "max_video_duration_seconds": 300,
+      "rate_limit_per_day": 250
+     }
+    }
+   },
+   "tiktok": {
+    "local": {
+     "name": "tiktok",
+     "display_name": "TikTok",
+     "roles": [
+      "video_destination",
+      "destination"
+     ],
+     "canonical_roles": [
+      "video_destination"
+     ],
+     "capabilities": [
+      "upload",
+      "delete",
+      "health",
+      "official_api",
+      "oauth",
+      "rate_limits"
+     ],
+     "auth_mode": "oauth",
+     "is_official_api": true,
+     "is_local_first": true,
+     "docs_url": "https://developers.tiktok.com/doc/content-posting-api",
+     "notes": "Uploads videos through the TikTok Content Posting API (Direct Post endpoint).",
+     "extra": {
+      "content": [
+       "video"
+      ],
+      "max_caption_length": 2200,
+      "rate_limit_per_min": 6,
+      "publish_mode": "auto",
+      "provider": "local",
+      "routes": [
+       "official-direct-post",
+       "tiktok_browser",
+       "inbox-draft"
+      ]
+     }
+    },
+    "browser": {
+     "name": "tiktok",
+     "display_name": "TikTok",
+     "roles": [
+      "video_destination",
+      "destination"
+     ],
+     "canonical_roles": [
+      "video_destination"
+     ],
+     "capabilities": [
+      "upload",
+      "delete",
+      "health",
+      "cookie_auth",
+      "oauth",
+      "rate_limits"
+     ],
+     "auth_mode": "session",
+     "is_official_api": false,
+     "is_local_first": true,
+     "docs_url": "https://developers.tiktok.com/doc/content-posting-api",
+     "notes": "Publishes through the logged-in TikTok Studio web flow (browser-native publisher (unofficial); uploads ride TikTok's own first-party web pipeline; no official API secret involved). Falls back to inbox drafts when the browser route fails.",
+     "extra": {
+      "content": [
+       "video"
+      ],
+      "max_caption_length": 2200,
+      "rate_limit_per_min": 6,
+      "publish_mode": "browser",
+      "provider": "local",
+      "routes": [
+       "official-direct-post",
+       "tiktok_browser",
+       "inbox-draft"
+      ]
+     }
+    },
+    "zernio": {
+     "name": "tiktok",
+     "display_name": "TikTok",
+     "roles": [
+      "video_destination",
+      "destination"
+     ],
+     "canonical_roles": [
+      "video_destination"
+     ],
+     "capabilities": [
+      "upload",
+      "delete",
+      "health",
+      "rate_limits"
+     ],
+     "auth_mode": "api_key",
+     "is_official_api": false,
+     "is_local_first": true,
+     "docs_url": "https://docs.zernio.com/platforms/tiktok",
+     "notes": "Publishes through the rented Zernio aggregator route: the vendor owns the audited TikTok app and xPST holds only a vendor API key (no TikTok token, no OAuth exchange). Public posts only.",
+     "extra": {
+      "content": [
+       "video"
+      ],
+      "max_caption_length": 2200,
+      "rate_limit_per_min": 6,
+      "publish_mode": "auto",
+      "provider": "zernio",
+      "routes": [
+       "tiktok_aggregator"
+      ]
+     }
+    }
+   },
+   "x": {
+    "cookies": {
+     "name": "x",
+     "display_name": "X",
+     "roles": [
+      "video_destination",
+      "destination"
+     ],
+     "canonical_roles": [
+      "video_destination"
+     ],
+     "capabilities": [
+      "upload",
+      "delete",
+      "carousel",
+      "health",
+      "cookie_auth",
+      "rate_limits"
+     ],
+     "auth_mode": "cookies",
+     "is_official_api": false,
+     "is_local_first": true,
+     "docs_url": "https://github.com/d60/twikit",
+     "notes": "Uses persisted X cookies through twikit; carousel posts are published as threads.",
+     "extra": {
+      "content": [
+       "video",
+       "carousel",
+       "text",
+       "image"
+      ],
+      "max_caption_length": 280,
+      "max_video_duration_seconds": 140
+     }
+    },
+    "api_v2": {
+     "name": "x",
+     "display_name": "X",
+     "roles": [
+      "video_destination",
+      "destination"
+     ],
+     "canonical_roles": [
+      "video_destination"
+     ],
+     "capabilities": [
+      "upload",
+      "delete",
+      "carousel",
+      "health",
+      "official_api",
+      "rate_limits"
+     ],
+     "auth_mode": "api_v2",
+     "is_official_api": true,
+     "is_local_first": true,
+     "docs_url": "https://developer.x.com/en/docs/x-api",
+     "notes": "Uses the official X API v2 media/tweet path.",
+     "extra": {
+      "content": [
+       "video",
+       "carousel",
+       "text",
+       "image"
+      ],
+      "max_caption_length": 280,
+      "max_video_duration_seconds": 140
+     }
+    }
+   },
+   "youtube": {
+    "auto": {
+     "name": "youtube",
+     "display_name": "YouTube",
+     "roles": [
+      "video_destination",
+      "destination"
+     ],
+     "canonical_roles": [
+      "video_destination"
+     ],
+     "capabilities": [
+      "upload",
+      "delete",
+      "health",
+      "official_api",
+      "oauth",
+      "rate_limits"
+     ],
+     "auth_mode": "oauth",
+     "is_official_api": true,
+     "is_local_first": true,
+     "docs_url": "https://developers.google.com/youtube/v3",
+     "notes": "Uploads and deletes through the YouTube Data API v3: Shorts (≤ 60 s, square-or-vertical) and long-form (resumable videos.insert, up to 12 h / 256 GB).",
+     "extra": {
+      "content": [
+       "video"
+      ],
+      "max_duration_seconds": 43200,
+      "shorts_max_duration_seconds": 60,
+      "video_mode": "auto",
+      "auth_scopes": [
+       "https://www.googleapis.com/auth/youtube.upload",
+       "https://www.googleapis.com/auth/youtube.readonly",
+       "https://www.googleapis.com/auth/youtube.force-ssl"
+      ]
+     }
+    },
+    "shorts": {
+     "name": "youtube",
+     "display_name": "YouTube",
+     "roles": [
+      "video_destination",
+      "destination"
+     ],
+     "canonical_roles": [
+      "video_destination"
+     ],
+     "capabilities": [
+      "upload",
+      "delete",
+      "health",
+      "official_api",
+      "oauth",
+      "rate_limits"
+     ],
+     "auth_mode": "oauth",
+     "is_official_api": true,
+     "is_local_first": true,
+     "docs_url": "https://developers.google.com/youtube/v3",
+     "notes": "Uploads and deletes through the YouTube Data API v3: Shorts (≤ 60 s, square-or-vertical) and long-form (resumable videos.insert, up to 12 h / 256 GB).",
+     "extra": {
+      "content": [
+       "video"
+      ],
+      "max_duration_seconds": 60,
+      "shorts_max_duration_seconds": 60,
+      "video_mode": "shorts",
+      "auth_scopes": [
+       "https://www.googleapis.com/auth/youtube.upload",
+       "https://www.googleapis.com/auth/youtube.readonly",
+       "https://www.googleapis.com/auth/youtube.force-ssl"
+      ]
+     }
+    },
+    "long": {
+     "name": "youtube",
+     "display_name": "YouTube",
+     "roles": [
+      "video_destination",
+      "destination"
+     ],
+     "canonical_roles": [
+      "video_destination"
+     ],
+     "capabilities": [
+      "upload",
+      "delete",
+      "health",
+      "official_api",
+      "oauth",
+      "rate_limits"
+     ],
+     "auth_mode": "oauth",
+     "is_official_api": true,
+     "is_local_first": true,
+     "docs_url": "https://developers.google.com/youtube/v3",
+     "notes": "Uploads and deletes through the YouTube Data API v3: Shorts (≤ 60 s, square-or-vertical) and long-form (resumable videos.insert, up to 12 h / 256 GB).",
+     "extra": {
+      "content": [
+       "video"
+      ],
+      "max_duration_seconds": 43200,
+      "shorts_max_duration_seconds": 60,
+      "video_mode": "long",
+      "auth_scopes": [
+       "https://www.googleapis.com/auth/youtube.upload",
+       "https://www.googleapis.com/auth/youtube.readonly",
+       "https://www.googleapis.com/auth/youtube.force-ssl"
+      ]
+     }
+    }
+   }
+  }
+ }
+}

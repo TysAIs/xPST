@@ -503,6 +503,44 @@ SCENARIOS = [
         "seed": {"schedule.json": json.dumps(SCHEDULE_ENTRIES[:1])},
         "compare": "json",
     },
+    # ── the provider surface (t_53b960e8) ─────────────────────────────────
+    #
+    # `providers` prints ~54 kB, so the fixture records a digest of the exact
+    # stdout plus a summary instead of the whole document: any byte change
+    # fails the test, and `--check-with` prints the real diff in CI. The
+    # summary is what a reader needs to see what the row covers.
+    {
+        "name": "messenger_status_unconfigured",
+        "argv": ["messenger", "status", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "compare": "json",
+    },
+    {
+        "name": "messenger_status_configured",
+        "argv": ["messenger", "status", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  messenger:\n    enabled: true\n"
+                "    page_id: '1234567890'\n"
+                "    page_access_token: synthetic-page-token-0123456789\n"
+                "    auto_reply: true\n    comment_reply_enabled: true\n"
+                "    comment_platforms:\n    - instagram\n"
+                "    reply_rules:\n      hi: hello\n"
+            )
+        },
+        "compare": "json",
+    },
+    {
+        "name": "messenger_status_short_token",
+        "argv": ["messenger", "status", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  messenger:\n    page_id: '1'\n"
+                "    page_access_token: short\n"
+            )
+        },
+        "compare": "json",
+    },
 ]
 
 
@@ -544,6 +582,13 @@ def config_dir_for(scenario: dict, profile: Path) -> Path:
 
 def env_for(scenario: dict, profile: Path) -> dict[str, str]:
     env = dict(os.environ)
+    # Inherited `XPST_*` overrides would make the fixture machine-dependent:
+    # `XPSTConfig.load` applies them above the file, so a developer with
+    # `XPST_X_AUTH_MODE` exported would capture a different payload than CI.
+    # `XPST_CONFIG_DIR` is set below, and a scenario's own `env` block is
+    # applied after this, so both still win.
+    for name in [name for name in env if name.startswith("XPST_")]:
+        del env[name]
     env["XPST_CONFIG_DIR"] = str(config_dir_for(scenario, profile))
     env["PYTHONPATH"] = str(REPO / "src")
     if scenario.get("config_dir"):
@@ -596,7 +641,7 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
             timeout=180,
         )
         payload = None
-        if scenario["compare"] == "json":
+        if scenario["compare"] in ("json", "digest"):
             try:
                 payload = normalize(
                     json.loads(proc.stdout.strip()), profile, scenario.get("mask")
@@ -620,6 +665,43 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
         }
     finally:
         shutil.rmtree(profile, ignore_errors=True)
+
+
+def digest(text: str) -> str:
+    """FNV-1a 64-bit over the exact stdout.
+
+    Dependency-free on purpose: this is a regression guard, not a security
+    boundary, and the Rust test has to compute the same value without adding a
+    hashing crate to the workspace.
+    """
+    value = 0xCBF29CE484222325
+    for byte in text.encode("utf-8"):
+        value ^= byte
+        value = (value * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return f"{value:016x}"
+
+
+def providers_summary(payload: dict) -> dict:
+    """What a reader needs to see which behaviour a digest row covers."""
+    return {
+        "provider_mode": payload.get("provider_mode"),
+        "providers": {item["name"]: item["state"] for item in payload.get("providers", [])},
+        "destinations": {
+            item["name"]: [item.get("provider_mode"), item.get("visible")]
+            for item in payload.get("destinations", [])
+        },
+        "counts": {
+            key: len(payload.get(key) or [])
+            for key in (
+                "sources",
+                "destinations",
+                "providers",
+                "video_destinations",
+                "messaging",
+                "analytics",
+            )
+        },
+    }
 
 
 def run_scenario(scenario: dict, python: str) -> dict:
@@ -651,6 +733,16 @@ def run_scenario(scenario: dict, python: str) -> dict:
         return record
     if scenario["compare"] == "stdout":
         record["stdout"] = observed["stdout_normalized"]
+        return record
+    if scenario["compare"] == "digest":
+        if observed["payload"] is None:
+            raise SystemExit(
+                f"scenario {scenario['name']}: stdout is not JSON:\n"
+                f"{observed['stdout']}\n{observed['stderr']}"
+            )
+        record["stdout_sha256"] = digest(observed["stdout_normalized"])
+        record["stdout_bytes"] = len(observed["stdout_normalized"].encode("utf-8"))
+        record["summary"] = providers_summary(observed["payload"])
         return record
     if scenario["compare"] == "json":
         if observed["payload"] is None:
@@ -696,6 +788,20 @@ def compare_scenarios(python: str, binary: str) -> int:
                 mismatches.append(
                     f"{name}: payload differs\n  python: {json.dumps(expected['payload'])}\n"
                     f"  rust:   {json.dumps(actual['payload'])}"
+                )
+        elif mode == "digest":
+            if expected["exit_code"] != actual["exit_code"]:
+                mismatches.append(
+                    f"{name}: exit {expected['exit_code']} (python) != "
+                    f"{actual['exit_code']} (rust)"
+                )
+            want = digest(expected["stdout_normalized"])
+            got = digest(actual["stdout_normalized"])
+            if want != got:
+                mismatches.append(
+                    f"{name}: stdout digest {want} (python) != {got} (rust)\n"
+                    f"  python: {expected['stdout_normalized'][:400]}\n"
+                    f"  rust:   {actual['stdout_normalized'][:400]}"
                 )
         elif mode == "stdout":
             if expected["exit_code"] != actual["exit_code"]:
@@ -751,7 +857,7 @@ def main() -> None:
         raise SystemExit("refusing to write an empty fixture")
     for record in records:
         if (
-            record["compare"] == "json"
+            record["compare"] in ("json", "digest")
             and record["exit_code"] != 0
             and not record.get("allow_nonzero")
         ):

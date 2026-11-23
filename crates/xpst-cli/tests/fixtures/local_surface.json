@@ -5,7 +5,7 @@
     "source": "src/xpst/cli.py"
   },
   "note": "Captured by running the shipped Python CLI against scratch profiles. scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent; snapshot modified_at is stripped and its epoch recorded instead.",
-  "scenario_count": 45,
+  "scenario_count": 48,
   "scenarios": [
     {
       "name": "status_empty_profile",
@@ -3029,6 +3029,89 @@
           "scheduled_time_local": "2026-02-01T12:00:00+00:00"
         }
       ]
+    },
+    {
+      "name": "messenger_status_unconfigured",
+      "argv": [
+        "messenger",
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "enabled": false,
+        "page_configured": false,
+        "page_id": null,
+        "token_configured": false,
+        "token_preview": null,
+        "auto_reply": false,
+        "comment_reply_enabled": false,
+        "comment_platforms": [
+          "instagram",
+          "facebook"
+        ],
+        "reply_rules": 0,
+        "webhook_path": "/webhook/messenger"
+      }
+    },
+    {
+      "name": "messenger_status_configured",
+      "argv": [
+        "messenger",
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\naccounts:\n  messenger:\n    enabled: true\n    page_id: '1234567890'\n    page_access_token: synthetic-page-token-0123456789\n    auto_reply: true\n    comment_reply_enabled: true\n    comment_platforms:\n    - instagram\n    reply_rules:\n      hi: hello\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "enabled": true,
+        "page_configured": true,
+        "page_id": "1234567890",
+        "token_configured": true,
+        "token_preview": "syntheti\u202656789",
+        "auto_reply": true,
+        "comment_reply_enabled": true,
+        "comment_platforms": [
+          "instagram"
+        ],
+        "reply_rules": 1,
+        "webhook_path": "/webhook/messenger"
+      }
+    },
+    {
+      "name": "messenger_status_short_token",
+      "argv": [
+        "messenger",
+        "status",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\naccounts:\n  messenger:\n    page_id: '1'\n    page_access_token: short\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "enabled": false,
+        "page_configured": true,
+        "page_id": "1",
+        "token_configured": true,
+        "token_preview": "shor\u2026",
+        "auto_reply": false,
+        "comment_reply_enabled": false,
+        "comment_platforms": [
+          "instagram",
+          "facebook"
+        ],
+        "reply_rules": 0,
+        "webhook_path": "/webhook/messenger"
+      }
     }
   ]
 }

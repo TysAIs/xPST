@@ -262,6 +262,24 @@ fn status_for(spec: &Spec, config: &YamlValue, store: &CredentialStore) -> YamlV
     ])
 }
 
+/// `byo_status_for_platform()` for one platform, or `None` when the platform
+/// has no BYO path.
+///
+/// `xpst providers` embeds this per provider (`byo_app`), so the catalog and
+/// `xpst byo status` cannot disagree about which platforms have an app.
+pub(crate) fn status_for_platform(
+    config: &YamlValue,
+    platform: &str,
+    store: &CredentialStore,
+) -> Option<YamlValue> {
+    let registry = registry().ok()?;
+    let spec = registry
+        .specs
+        .iter()
+        .find(|spec| spec.platform == platform)?;
+    Some(status_for(spec, config, store))
+}
+
 /// The note `byo_status()` carries, verbatim.
 const NOTE: &str = "One Meta app covers Instagram, Threads and Messenger: enter it once and both platforms pick it up. Secrets live only in the encrypted store under the xPST config dir and are never echoed back.";
 
