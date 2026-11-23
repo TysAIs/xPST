@@ -17,6 +17,7 @@ pub mod doctor;
 pub mod failures;
 pub mod media;
 pub mod messenger;
+pub mod providers;
 pub mod schedule;
 pub mod status;
 pub mod version;

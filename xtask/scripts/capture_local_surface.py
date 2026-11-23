@@ -510,6 +510,87 @@ SCENARIOS = [
     # fails the test, and `--check-with` prints the real diff in CI. The
     # summary is what a reader needs to see what the row covers.
     {
+        "name": "providers_pristine",
+        "argv": ["providers", "--json"],
+        "seed": {},
+        "compare": "digest",
+    },
+    {
+        "name": "providers_community_mode",
+        "argv": ["providers", "--json"],
+        "seed": {"config.yaml": "version: 4\nprovider_mode: community\n"},
+        "compare": "digest",
+    },
+    {
+        "name": "providers_x_api_v2",
+        "argv": ["providers", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  x:\n    auth_mode: api_v2\n"
+                "    bearer_token: synthetic-bearer-token\n"
+            )
+        },
+        "compare": "digest",
+    },
+    {
+        "name": "providers_instagram_session",
+        "argv": ["providers", "--json"],
+        "seed": {"config.yaml": "version: 4\naccounts:\n  instagram:\n    auth_mode: session\n"},
+        "compare": "digest",
+    },
+    {
+        "name": "providers_tiktok_zernio",
+        "argv": ["providers", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  tiktok:\n    provider: zernio\n"
+                "    aggregator:\n      account_id: 'acct-1'\n"
+            )
+        },
+        "compare": "digest",
+    },
+    {
+        "name": "providers_tiktok_browser",
+        "argv": ["providers", "--json"],
+        "seed": {"config.yaml": "version: 4\naccounts:\n  tiktok:\n    publish_mode: browser\n"},
+        "compare": "digest",
+    },
+    {
+        "name": "providers_youtube_shorts",
+        "argv": ["providers", "--json"],
+        "seed": {"config.yaml": "version: 4\naccounts:\n  youtube:\n    video_mode: shorts\n"},
+        "compare": "digest",
+    },
+    {
+        "name": "providers_rumble_key",
+        "argv": ["providers", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  rumble:\n    enabled: true\n"
+                "    api_key: synthetic-rumble-key\n"
+            )
+        },
+        "compare": "digest",
+    },
+    {
+        "name": "providers_disabled_accounts",
+        "argv": ["providers", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  youtube:\n    enabled: false\n"
+                "  x:\n    enabled: false\n"
+            )
+        },
+        "compare": "digest",
+    },
+    {
+        "name": "providers_env_override",
+        "argv": ["providers", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "env": {"XPST_X_AUTH_MODE": "api_v2", "XPST_PROVIDER_MODE": "community"},
+        "compare": "digest",
+    },
+    {
         "name": "messenger_status_unconfigured",
         "argv": ["messenger", "status", "--json"],
         "seed": {"config.yaml": "version: 4\n"},

@@ -5,7 +5,7 @@
     "source": "src/xpst/cli.py"
   },
   "note": "Captured by running the shipped Python CLI against scratch profiles. scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent; snapshot modified_at is stripped and its epoch recorded instead.",
-  "scenario_count": 48,
+  "scenario_count": 58,
   "scenarios": [
     {
       "name": "status_empty_profile",
@@ -3029,6 +3029,758 @@
           "scheduled_time_local": "2026-02-01T12:00:00+00:00"
         }
       ]
+    },
+    {
+      "name": "providers_pristine",
+      "argv": [
+        "providers",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "digest",
+      "exit_code": 0,
+      "stdout_sha256": "7eba73f55cd5015c",
+      "stdout_bytes": 54141,
+      "summary": {
+        "provider_mode": "official",
+        "providers": {
+          "youtube": "unconfigured",
+          "x": "unconfigured",
+          "instagram": "unconfigured",
+          "bluesky": "disabled",
+          "tiktok": "unconfigured",
+          "threads": "disabled",
+          "messenger": "disabled",
+          "facebook": "disabled",
+          "rumble": "disabled",
+          "local": "unconfigured"
+        },
+        "destinations": {
+          "bluesky": [
+            "official",
+            true
+          ],
+          "facebook": [
+            "official",
+            true
+          ],
+          "instagram": [
+            "official",
+            true
+          ],
+          "messenger": [
+            "official",
+            true
+          ],
+          "rumble": [
+            "official",
+            true
+          ],
+          "threads": [
+            "official",
+            true
+          ],
+          "tiktok": [
+            "official",
+            true
+          ],
+          "x": [
+            "community",
+            false
+          ],
+          "youtube": [
+            "official",
+            true
+          ]
+        },
+        "counts": {
+          "sources": 5,
+          "destinations": 9,
+          "providers": 10,
+          "video_destinations": 8,
+          "messaging": 1,
+          "analytics": 5
+        }
+      }
+    },
+    {
+      "name": "providers_community_mode",
+      "argv": [
+        "providers",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\nprovider_mode: community\n"
+      },
+      "compare": "digest",
+      "exit_code": 0,
+      "stdout_sha256": "04aaadb642b81fd9",
+      "stdout_bytes": 54141,
+      "summary": {
+        "provider_mode": "community",
+        "providers": {
+          "youtube": "unconfigured",
+          "x": "unconfigured",
+          "instagram": "unconfigured",
+          "bluesky": "disabled",
+          "tiktok": "unconfigured",
+          "threads": "disabled",
+          "messenger": "disabled",
+          "facebook": "disabled",
+          "rumble": "disabled",
+          "local": "unconfigured"
+        },
+        "destinations": {
+          "bluesky": [
+            "official",
+            true
+          ],
+          "facebook": [
+            "official",
+            true
+          ],
+          "instagram": [
+            "official",
+            true
+          ],
+          "messenger": [
+            "official",
+            true
+          ],
+          "rumble": [
+            "official",
+            true
+          ],
+          "threads": [
+            "official",
+            true
+          ],
+          "tiktok": [
+            "official",
+            true
+          ],
+          "x": [
+            "community",
+            true
+          ],
+          "youtube": [
+            "official",
+            true
+          ]
+        },
+        "counts": {
+          "sources": 5,
+          "destinations": 9,
+          "providers": 10,
+          "video_destinations": 8,
+          "messaging": 1,
+          "analytics": 5
+        }
+      }
+    },
+    {
+      "name": "providers_x_api_v2",
+      "argv": [
+        "providers",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\naccounts:\n  x:\n    auth_mode: api_v2\n    bearer_token: synthetic-bearer-token\n"
+      },
+      "compare": "digest",
+      "exit_code": 0,
+      "stdout_sha256": "c96eb9f8f44ae45e",
+      "stdout_bytes": 53899,
+      "summary": {
+        "provider_mode": "official",
+        "providers": {
+          "youtube": "unconfigured",
+          "x": "ready",
+          "instagram": "unconfigured",
+          "bluesky": "disabled",
+          "tiktok": "unconfigured",
+          "threads": "disabled",
+          "messenger": "disabled",
+          "facebook": "disabled",
+          "rumble": "disabled",
+          "local": "unconfigured"
+        },
+        "destinations": {
+          "bluesky": [
+            "official",
+            true
+          ],
+          "facebook": [
+            "official",
+            true
+          ],
+          "instagram": [
+            "official",
+            true
+          ],
+          "messenger": [
+            "official",
+            true
+          ],
+          "rumble": [
+            "official",
+            true
+          ],
+          "threads": [
+            "official",
+            true
+          ],
+          "tiktok": [
+            "official",
+            true
+          ],
+          "x": [
+            "official",
+            true
+          ],
+          "youtube": [
+            "official",
+            true
+          ]
+        },
+        "counts": {
+          "sources": 5,
+          "destinations": 9,
+          "providers": 10,
+          "video_destinations": 8,
+          "messaging": 1,
+          "analytics": 5
+        }
+      }
+    },
+    {
+      "name": "providers_instagram_session",
+      "argv": [
+        "providers",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\naccounts:\n  instagram:\n    auth_mode: session\n"
+      },
+      "compare": "digest",
+      "exit_code": 0,
+      "stdout_sha256": "af6a40820e9f3b8b",
+      "stdout_bytes": 54119,
+      "summary": {
+        "provider_mode": "official",
+        "providers": {
+          "youtube": "unconfigured",
+          "x": "unconfigured",
+          "instagram": "unconfigured",
+          "bluesky": "disabled",
+          "tiktok": "unconfigured",
+          "threads": "disabled",
+          "messenger": "disabled",
+          "facebook": "disabled",
+          "rumble": "disabled",
+          "local": "unconfigured"
+        },
+        "destinations": {
+          "bluesky": [
+            "official",
+            true
+          ],
+          "facebook": [
+            "official",
+            true
+          ],
+          "instagram": [
+            "community",
+            false
+          ],
+          "messenger": [
+            "official",
+            true
+          ],
+          "rumble": [
+            "official",
+            true
+          ],
+          "threads": [
+            "official",
+            true
+          ],
+          "tiktok": [
+            "official",
+            true
+          ],
+          "x": [
+            "community",
+            false
+          ],
+          "youtube": [
+            "official",
+            true
+          ]
+        },
+        "counts": {
+          "sources": 5,
+          "destinations": 9,
+          "providers": 10,
+          "video_destinations": 8,
+          "messaging": 1,
+          "analytics": 5
+        }
+      }
+    },
+    {
+      "name": "providers_tiktok_zernio",
+      "argv": [
+        "providers",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\naccounts:\n  tiktok:\n    provider: zernio\n    aggregator:\n      account_id: 'acct-1'\n"
+      },
+      "compare": "digest",
+      "exit_code": 0,
+      "stdout_sha256": "316b341543a43631",
+      "stdout_bytes": 53781,
+      "summary": {
+        "provider_mode": "official",
+        "providers": {
+          "youtube": "unconfigured",
+          "x": "unconfigured",
+          "instagram": "unconfigured",
+          "bluesky": "disabled",
+          "tiktok": "unconfigured",
+          "threads": "disabled",
+          "messenger": "disabled",
+          "facebook": "disabled",
+          "rumble": "disabled",
+          "local": "unconfigured"
+        },
+        "destinations": {
+          "bluesky": [
+            "official",
+            true
+          ],
+          "facebook": [
+            "official",
+            true
+          ],
+          "instagram": [
+            "official",
+            true
+          ],
+          "messenger": [
+            "official",
+            true
+          ],
+          "rumble": [
+            "official",
+            true
+          ],
+          "threads": [
+            "official",
+            true
+          ],
+          "tiktok": [
+            "official",
+            true
+          ],
+          "x": [
+            "community",
+            false
+          ],
+          "youtube": [
+            "official",
+            true
+          ]
+        },
+        "counts": {
+          "sources": 5,
+          "destinations": 9,
+          "providers": 10,
+          "video_destinations": 8,
+          "messaging": 1,
+          "analytics": 5
+        }
+      }
+    },
+    {
+      "name": "providers_tiktok_browser",
+      "argv": [
+        "providers",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\naccounts:\n  tiktok:\n    publish_mode: browser\n"
+      },
+      "compare": "digest",
+      "exit_code": 0,
+      "stdout_sha256": "aaf064de67422e98",
+      "stdout_bytes": 53976,
+      "summary": {
+        "provider_mode": "official",
+        "providers": {
+          "youtube": "unconfigured",
+          "x": "unconfigured",
+          "instagram": "unconfigured",
+          "bluesky": "disabled",
+          "tiktok": "unconfigured",
+          "threads": "disabled",
+          "messenger": "disabled",
+          "facebook": "disabled",
+          "rumble": "disabled",
+          "local": "unconfigured"
+        },
+        "destinations": {
+          "bluesky": [
+            "official",
+            true
+          ],
+          "facebook": [
+            "official",
+            true
+          ],
+          "instagram": [
+            "official",
+            true
+          ],
+          "messenger": [
+            "official",
+            true
+          ],
+          "rumble": [
+            "official",
+            true
+          ],
+          "threads": [
+            "official",
+            true
+          ],
+          "tiktok": [
+            "official",
+            true
+          ],
+          "x": [
+            "community",
+            false
+          ],
+          "youtube": [
+            "official",
+            true
+          ]
+        },
+        "counts": {
+          "sources": 5,
+          "destinations": 9,
+          "providers": 10,
+          "video_destinations": 8,
+          "messaging": 1,
+          "analytics": 5
+        }
+      }
+    },
+    {
+      "name": "providers_youtube_shorts",
+      "argv": [
+        "providers",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\naccounts:\n  youtube:\n    video_mode: shorts\n"
+      },
+      "compare": "digest",
+      "exit_code": 0,
+      "stdout_sha256": "ee1a96f2aacb873d",
+      "stdout_bytes": 54140,
+      "summary": {
+        "provider_mode": "official",
+        "providers": {
+          "youtube": "unconfigured",
+          "x": "unconfigured",
+          "instagram": "unconfigured",
+          "bluesky": "disabled",
+          "tiktok": "unconfigured",
+          "threads": "disabled",
+          "messenger": "disabled",
+          "facebook": "disabled",
+          "rumble": "disabled",
+          "local": "unconfigured"
+        },
+        "destinations": {
+          "bluesky": [
+            "official",
+            true
+          ],
+          "facebook": [
+            "official",
+            true
+          ],
+          "instagram": [
+            "official",
+            true
+          ],
+          "messenger": [
+            "official",
+            true
+          ],
+          "rumble": [
+            "official",
+            true
+          ],
+          "threads": [
+            "official",
+            true
+          ],
+          "tiktok": [
+            "official",
+            true
+          ],
+          "x": [
+            "community",
+            false
+          ],
+          "youtube": [
+            "official",
+            true
+          ]
+        },
+        "counts": {
+          "sources": 5,
+          "destinations": 9,
+          "providers": 10,
+          "video_destinations": 8,
+          "messaging": 1,
+          "analytics": 5
+        }
+      }
+    },
+    {
+      "name": "providers_rumble_key",
+      "argv": [
+        "providers",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\naccounts:\n  rumble:\n    enabled: true\n    api_key: synthetic-rumble-key\n"
+      },
+      "compare": "digest",
+      "exit_code": 0,
+      "stdout_sha256": "1a8f4eacb705eaa6",
+      "stdout_bytes": 54165,
+      "summary": {
+        "provider_mode": "official",
+        "providers": {
+          "youtube": "unconfigured",
+          "x": "unconfigured",
+          "instagram": "unconfigured",
+          "bluesky": "disabled",
+          "tiktok": "unconfigured",
+          "threads": "disabled",
+          "messenger": "disabled",
+          "facebook": "disabled",
+          "rumble": "unconfigured",
+          "local": "unconfigured"
+        },
+        "destinations": {
+          "bluesky": [
+            "official",
+            true
+          ],
+          "facebook": [
+            "official",
+            true
+          ],
+          "instagram": [
+            "official",
+            true
+          ],
+          "messenger": [
+            "official",
+            true
+          ],
+          "rumble": [
+            "official",
+            true
+          ],
+          "threads": [
+            "official",
+            true
+          ],
+          "tiktok": [
+            "official",
+            true
+          ],
+          "x": [
+            "community",
+            false
+          ],
+          "youtube": [
+            "official",
+            true
+          ]
+        },
+        "counts": {
+          "sources": 5,
+          "destinations": 9,
+          "providers": 10,
+          "video_destinations": 8,
+          "messaging": 1,
+          "analytics": 5
+        }
+      }
+    },
+    {
+      "name": "providers_disabled_accounts",
+      "argv": [
+        "providers",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: false\n  x:\n    enabled: false\n"
+      },
+      "compare": "digest",
+      "exit_code": 0,
+      "stdout_sha256": "4a833bc0830806c6",
+      "stdout_bytes": 53949,
+      "summary": {
+        "provider_mode": "official",
+        "providers": {
+          "youtube": "disabled",
+          "x": "disabled",
+          "instagram": "unconfigured",
+          "bluesky": "disabled",
+          "tiktok": "unconfigured",
+          "threads": "disabled",
+          "messenger": "disabled",
+          "facebook": "disabled",
+          "rumble": "disabled",
+          "local": "unconfigured"
+        },
+        "destinations": {
+          "bluesky": [
+            "official",
+            true
+          ],
+          "facebook": [
+            "official",
+            true
+          ],
+          "instagram": [
+            "official",
+            true
+          ],
+          "messenger": [
+            "official",
+            true
+          ],
+          "rumble": [
+            "official",
+            true
+          ],
+          "threads": [
+            "official",
+            true
+          ],
+          "tiktok": [
+            "official",
+            true
+          ],
+          "x": [
+            "community",
+            false
+          ],
+          "youtube": [
+            "official",
+            true
+          ]
+        },
+        "counts": {
+          "sources": 5,
+          "destinations": 9,
+          "providers": 10,
+          "video_destinations": 8,
+          "messaging": 1,
+          "analytics": 5
+        }
+      }
+    },
+    {
+      "name": "providers_env_override",
+      "argv": [
+        "providers",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "digest",
+      "exit_code": 0,
+      "env": {
+        "XPST_X_AUTH_MODE": "api_v2",
+        "XPST_PROVIDER_MODE": "community"
+      },
+      "stdout_sha256": "25c66bacdc870eca",
+      "stdout_bytes": 54101,
+      "summary": {
+        "provider_mode": "community",
+        "providers": {
+          "youtube": "unconfigured",
+          "x": "unconfigured",
+          "instagram": "unconfigured",
+          "bluesky": "disabled",
+          "tiktok": "unconfigured",
+          "threads": "disabled",
+          "messenger": "disabled",
+          "facebook": "disabled",
+          "rumble": "disabled",
+          "local": "unconfigured"
+        },
+        "destinations": {
+          "bluesky": [
+            "official",
+            true
+          ],
+          "facebook": [
+            "official",
+            true
+          ],
+          "instagram": [
+            "official",
+            true
+          ],
+          "messenger": [
+            "official",
+            true
+          ],
+          "rumble": [
+            "official",
+            true
+          ],
+          "threads": [
+            "official",
+            true
+          ],
+          "tiktok": [
+            "official",
+            true
+          ],
+          "x": [
+            "official",
+            true
+          ],
+          "youtube": [
+            "official",
+            true
+          ]
+        },
+        "counts": {
+          "sources": 5,
+          "destinations": 9,
+          "providers": 10,
+          "video_destinations": 8,
+          "messaging": 1,
+          "analytics": 5
+        }
+      }
     },
     {
       "name": "messenger_status_unconfigured",

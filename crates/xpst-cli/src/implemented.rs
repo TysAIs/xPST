@@ -106,6 +106,12 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         messenger_status,
     ),
     implemented(
+        "providers",
+        "xpst-provider",
+        "Captured registry manifests plus the ported canonical role catalog and per-destination `provider_mode`/`visible`; payload byte-compared with the Python CLI on pristine, configured and community-mode profiles.",
+        providers,
+    ),
+    implemented(
         "doctor",
         "xpst-cli",
         "Local-only diagnostics; live probes are P1 (the report says so).",
@@ -210,6 +216,15 @@ fn messenger_status(
     err: &mut dyn Write,
 ) -> i32 {
     commands::messenger::status(global, leaf, out, err)
+}
+
+fn providers(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::providers::run(global, leaf, out, err)
 }
 
 fn byo_clear(

@@ -4,7 +4,7 @@
 
 One row per leaf command of the shipped CLI. `status` is `implemented` when the Rust engine runs the command and `stub` when it answers `not implemented in the Rust engine yet`. The two columns either side are the questions a reader actually has: which crate owns the behaviour, and whether the Python implementation they are comparing against makes an outbound network call.
 
-**19 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
+**20 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
 
 ## Columns
 
@@ -68,7 +68,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `plugins list` | stub | xpst-cli | none |
 | `post` | stub | xpst-core | yes |
 | `preflight` | stub | xpst-core | none |
-| `providers` | stub | xpst-provider | none |
+| `providers` | implemented | xpst-provider | none |
 | `quota` | stub | xpst-state | none |
 | `readiness` | stub | xpst-cli | none |
 | `refresh-tokens` | stub | xpst-auth | yes |
@@ -120,6 +120,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `config validate` | xpst-config | `{valid, checks}` payload; exit 2 on a blocker. |
 | `media status` | xpst-media | Resolution order (env → PATH → system dirs → fetched) and the `env`/`system`/`fetched`/`missing` vocabulary of `media_binary_status()`; payload byte-compared with the Python CLI. |
 | `messenger status` | xpst-provider | Config + credential-presence payload (masked token preview, reply-rule count, comment platforms) read from the encrypted store with the config fallback; payload byte-compared with the Python CLI. |
+| `providers` | xpst-provider | Captured registry manifests plus the ported canonical role catalog and per-destination `provider_mode`/`visible`; payload byte-compared with the Python CLI on pristine, configured and community-mode profiles. |
 | `doctor` | xpst-cli | Local-only diagnostics; live probes are P1 (the report says so). |
 | `version` | xpst-cli | Version and dependency report; `--version` matches Click's shape. |
 | `status` | xpst-state | Statistics payload field-for-field with `get_statistics()` on captured fixtures. |
