@@ -241,7 +241,14 @@ fn manifests_in(registry: &Registry, section: &str, view: &ConfigView) -> Vec<Ya
             "default"
         };
         if let Some(manifest) = variants.get(key) {
-            rows.push(apply_account_ceiling(manifest.clone(), name, view));
+            // The account's own video ceiling is a *destination* fact: the
+            // source manifest has no `max_video_duration_seconds` to replace.
+            let manifest = if section == "destinations" {
+                apply_account_ceiling(manifest.clone(), name, view)
+            } else {
+                manifest.clone()
+            };
+            rows.push(manifest);
         }
     }
     rows.sort_by(|left, right| {
@@ -940,6 +947,38 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_verified_ceiling_replaces_the_destination_manifest_only() {
+        // `X.video_duration_cap` is a destination fact. Applying it to the
+        // source manifest would invent a key Python never emits there.
+        let registry = registry().expect("registry parses");
+        let view = view("accounts:\n  x:\n    max_video_duration_seconds: 300\n");
+        let destinations = manifests_in(&registry, "destinations", &view);
+        let destination = destinations
+            .iter()
+            .find(|row| row.get("name").and_then(YamlValue::as_str) == Some("x"))
+            .expect("x destination");
+        assert_eq!(
+            destination
+                .get("extra")
+                .and_then(|extra| extra.get("max_video_duration_seconds"))
+                .and_then(YamlValue::as_i64),
+            Some(300)
+        );
+        let sources = manifests_in(&registry, "sources", &view);
+        let source = sources
+            .iter()
+            .find(|row| row.get("name").and_then(YamlValue::as_str) == Some("x"))
+            .expect("x source");
+        assert!(
+            source
+                .get("extra")
+                .and_then(|extra| extra.get("max_video_duration_seconds"))
+                .is_none(),
+            "the source manifest must not gain a destination-only key"
+        );
     }
 
     #[test]

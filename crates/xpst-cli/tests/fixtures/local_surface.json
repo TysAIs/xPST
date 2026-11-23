@@ -5,7 +5,7 @@
     "source": "src/xpst/cli.py"
   },
   "note": "Captured by running the shipped Python CLI against scratch profiles. scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent; snapshot modified_at is stripped and its epoch recorded instead.",
-  "scenario_count": 58,
+  "scenario_count": 59,
   "scenarios": [
     {
       "name": "status_empty_profile",
@@ -3646,6 +3646,81 @@
         "providers": {
           "youtube": "disabled",
           "x": "disabled",
+          "instagram": "unconfigured",
+          "bluesky": "disabled",
+          "tiktok": "unconfigured",
+          "threads": "disabled",
+          "messenger": "disabled",
+          "facebook": "disabled",
+          "rumble": "disabled",
+          "local": "unconfigured"
+        },
+        "destinations": {
+          "bluesky": [
+            "official",
+            true
+          ],
+          "facebook": [
+            "official",
+            true
+          ],
+          "instagram": [
+            "official",
+            true
+          ],
+          "messenger": [
+            "official",
+            true
+          ],
+          "rumble": [
+            "official",
+            true
+          ],
+          "threads": [
+            "official",
+            true
+          ],
+          "tiktok": [
+            "official",
+            true
+          ],
+          "x": [
+            "community",
+            false
+          ],
+          "youtube": [
+            "official",
+            true
+          ]
+        },
+        "counts": {
+          "sources": 5,
+          "destinations": 9,
+          "providers": 10,
+          "video_destinations": 8,
+          "messaging": 1,
+          "analytics": 5
+        }
+      }
+    },
+    {
+      "name": "providers_x_duration_cap",
+      "argv": [
+        "providers",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\naccounts:\n  x:\n    max_video_duration_seconds: 300\n"
+      },
+      "compare": "digest",
+      "exit_code": 0,
+      "stdout_sha256": "11eab671c2c634e2",
+      "stdout_bytes": 54141,
+      "summary": {
+        "provider_mode": "official",
+        "providers": {
+          "youtube": "unconfigured",
+          "x": "unconfigured",
           "instagram": "unconfigured",
           "bluesky": "disabled",
           "tiktok": "unconfigured",

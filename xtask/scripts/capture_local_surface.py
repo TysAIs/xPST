@@ -584,6 +584,18 @@ SCENARIOS = [
         "compare": "digest",
     },
     {
+        "name": "providers_x_duration_cap",
+        # The account's verified ceiling replaces the destination manifest's
+        # default; the *source* manifest must not gain the key.
+        "argv": ["providers", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  x:\n    max_video_duration_seconds: 300\n"
+            )
+        },
+        "compare": "digest",
+    },
+    {
         "name": "providers_env_override",
         "argv": ["providers", "--json"],
         "seed": {"config.yaml": "version: 4\n"},
