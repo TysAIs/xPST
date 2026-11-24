@@ -3940,6 +3940,7 @@ dependencies = [
  "xpst-authflow",
  "xpst-config",
  "xpst-core",
+ "xpst-mcp",
  "xpst-media",
  "xpst-state",
  "xpst-store",

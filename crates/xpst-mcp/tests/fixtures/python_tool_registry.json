@@ -133,6 +133,15 @@
             "long"
           ],
           "description": "Publish a video as short-form or long-form. Defaults to deriving it from the media probe (shorts: <=60s and square-or-vertical; long: >=180s or landscape); an ambiguous video is refused rather than guessed. YouTube honours it (Shorts vs long-form upload)."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "public",
+            "unlisted",
+            "private"
+          ],
+          "description": "Ask for an upload-time visibility instead of letting the destination decide. YouTube writes privacyStatus; TikTok's Content Posting API maps private to SELF_ONLY and public to PUBLIC_TO_EVERYONE. A destination whose route cannot honour the request (X has no private mode; TikTok's browser route has no privacy control) is REFUSED — never silently posted publicly — and the result reports state refused_visibility. Omit for the destination default (public)."
         }
       },
       "required": [

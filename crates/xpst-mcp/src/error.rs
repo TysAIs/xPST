@@ -10,7 +10,10 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum ToolError {
     /// The caller asked for a tool this server does not serve.
-    #[error("{name} is not a tool this server serves")]
+    ///
+    /// The sentence is Python's (`Unknown tool: <name>`), because the wire body
+    /// of an error is the `Display` text.
+    #[error("Unknown tool: {name}")]
     UnknownTool { name: String },
 
     /// The name is part of the surface (so `tools/list` is honest) but the
@@ -67,8 +70,12 @@ impl ToolError {
         }
     }
 
-    /// The text an MCP caller receives. One JSON object, so a caller never has
-    /// to parse prose to learn whether something happened.
+    /// A structured view of the failure, for tests and logs.
+    ///
+    /// This is *not* the wire body: an MCP caller receives [`Display`] as plain
+    /// text with `isError: true`, which is what the Python server serves. The
+    /// JSON form exists so a test can assert the discriminant without parsing
+    /// prose.
     pub fn to_payload(&self) -> Value {
         json!({
             "ok": false,

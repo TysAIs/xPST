@@ -48,11 +48,16 @@ pub fn build() -> Command {
 fn build_subtree(spec: &CommandSpec) -> Command {
     let children = children_of(&spec.path);
     let is_group = !children.is_empty();
+    // `mcp` is the one group whose bare invocation *does* something: the shipped
+    // Click group is `invoke_without_command=True` and starts the stdio server,
+    // so `python -m xpst mcp` is the documented way to run it. Requiring a
+    // subcommand here would turn that into a usage error.
+    let starts_a_server_when_bare = spec.path.len() == 1 && spec.path[0] == "mcp";
 
     let mut command = Command::new(spec.name.clone())
         .about(spec.help.clone())
         .subcommand_required(false)
-        .arg_required_else_help(is_group);
+        .arg_required_else_help(is_group && !starts_a_server_when_bare);
 
     if !spec.about.trim().is_empty() && spec.about != spec.help {
         command = command.long_about(spec.about.clone());

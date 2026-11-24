@@ -12,10 +12,20 @@ Usage (from the repository root, with the runtime deps installed):
 Writes:
     crates/xpst-mcp/tests/fixtures/python_tool_registry.json
     crates/xpst-mcp/tests/fixtures/python_providers.json
+    crates/xpst-mcp/tests/fixtures/python_config_show_model.json
+
+The third fixture is the *structured* model behind `xpst_config_show`: the
+Python tool projects `dict(section.__dict__)` for seven account sections plus
+`video`/`monitoring`/`schedule`, and renders nested dataclasses as `repr()`
+strings. Capturing the model (nested dicts, unmasked) plus the class name of
+every nested dataclass lets the Rust tool overlay the operator's `config.yaml`
+onto the same defaults and render the same reprs, instead of shipping a second
+hand-maintained copy of ~100 field defaults.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import sys
@@ -68,12 +78,83 @@ def main() -> int:
 
     providers_path = FIXTURES / "python_providers.json"
     providers_path.write_text(
-        json.dumps(catalog, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+        json.dumps(catalog, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    # The structured model behind `xpst_config_show`. `plain()` turns a
+    # dataclass into a dict (field order preserved) so the Rust side can merge
+    # the operator's config.yaml per field; `repr_classes` names the dataclasses
+    # the Python tool renders as `ClassName(field=value, ...)` strings.
+    from xpst.config import XPSTConfig
+
+    def plain(value):
+        if dataclasses.is_dataclass(value) and not isinstance(value, type):
+            return {
+                field.name: plain(getattr(value, field.name))
+                for field in dataclasses.fields(value)
+            }
+        if isinstance(value, dict):
+            return {key: plain(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [plain(item) for item in value]
+        return value
+
+    def repr_classes(value, path, out, defaults):
+        if dataclasses.is_dataclass(value) and not isinstance(value, type):
+            out[path] = type(value).__name__
+            # The *dataclass* defaults, which are not the config defaults: a
+            # partial `video.encoding.youtube` block in config.yaml is
+            # constructed as `EncodingConfig(**block)`, so every field the block
+            # omits falls back to the dataclass default (usually None), not to
+            # the shipped youtube preset.
+            defaults[path] = plain(type(value)())
+            for field in dataclasses.fields(value):
+                repr_classes(getattr(value, field.name), f"{path}.{field.name}", out, defaults)
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                repr_classes(item, f"{path}.{key}", out, defaults)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        previous = os.environ.get("XPST_CONFIG_DIR")
+        os.environ["XPST_CONFIG_DIR"] = tmp
+        try:
+            config = XPSTConfig.load()
+        finally:
+            if previous is None:
+                os.environ.pop("XPST_CONFIG_DIR", None)
+            else:
+                os.environ["XPST_CONFIG_DIR"] = previous
+
+        accounts = {}
+        classes = {}
+        defaults = {}
+        for platform in ("tiktok", "youtube", "x", "instagram", "threads", "messenger", "local"):
+            section = getattr(config, platform, None)
+            if section is None:
+                continue
+            accounts[platform] = plain(section)
+            repr_classes(section, f"accounts.{platform}", classes, defaults)
+        model = {"accounts": accounts}
+        for name in ("video", "monitoring", "schedule"):
+            section = getattr(config, name)
+            model[name] = plain(section)
+            repr_classes(section, name, classes, defaults)
+
+    model_path = FIXTURES / "python_config_show_model.json"
+    model_path.write_text(
+        json.dumps(
+            {"model": model, "repr_classes": classes, "repr_defaults": defaults},
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n",
         encoding="utf-8",
     )
 
     print(f"wrote {registry_path.relative_to(ROOT)} ({len(tools)} tools)")
     print(f"wrote {providers_path.relative_to(ROOT)}")
+    print(f"wrote {model_path.relative_to(ROOT)}")
     return 0
 
 

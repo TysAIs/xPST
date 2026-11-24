@@ -33,41 +33,82 @@ fn config_show_masks_secrets_and_keeps_the_python_projection() {
     std::fs::write(
         dir.join("config.yaml"),
         "version: 4\n\
-         youtube:\n  api_key: not-a-real-key-value\n  enabled: true\n\
-         x:\n  cookies_path: /home/someone/cookies.json\n\
-         video:\n  quality: 1080\n  download_dir: /tmp/videos\n\
-         monitoring:\n  dashboard_password: hunter2\n  port: 8080\n\
-         schedule:\n  enabled: false\n\
+         accounts:\n  youtube:\n    enabled: false\n    username: alice\n    client_secrets: /home/someone/secrets.json\n\
+         \x20 x:\n    cookies_file: /home/someone/cookies.json\n\
+         video:\n  download_dir: /tmp/videos\n  cleanup_after_post: true\n\
+         monitoring:\n  log_level: DEBUG\n  dashboard_password_hash: hunter2\n\
+         schedule:\n  check_interval: 120\n\
          unrelated_section:\n  secret_key: also-hidden\n",
     )
     .expect("write config");
 
     let payload = call(&ctx(&dir), "xpst_config_show", json!({}));
 
-    assert_eq!(payload["accounts"]["youtube"]["api_key"], json!("***"));
-    assert_eq!(payload["accounts"]["youtube"]["enabled"], json!(true));
-    assert_eq!(payload["accounts"]["x"]["cookies_path"], json!("***"));
-    assert_eq!(payload["video"]["quality"], json!(1080));
-    assert_eq!(payload["monitoring"]["dashboard_password"], json!("***"));
-    assert_eq!(payload["schedule"]["enabled"], json!(false));
+    // The file's values win where it has them...
+    assert_eq!(payload["accounts"]["youtube"]["enabled"], json!(false));
+    assert_eq!(payload["accounts"]["youtube"]["username"], json!("alice"));
+    assert_eq!(payload["video"]["download_dir"], json!("/tmp/videos"));
+    assert_eq!(payload["video"]["cleanup_after_post"], json!(true));
+    assert_eq!(payload["monitoring"]["log_level"], json!("DEBUG"));
+    assert_eq!(payload["schedule"]["check_interval"], json!(120));
+    // ...and the model's defaults fill the rest, which is what Python serves.
+    assert_eq!(payload["accounts"]["youtube"]["video_mode"], json!("auto"));
+    assert_eq!(payload["accounts"]["tiktok"]["provider"], json!("local"));
+    assert_eq!(payload["monitoring"]["healthcheck_port"], json!(8080));
+    // Secrets are masked, empty strings stay empty.
+    assert_eq!(
+        payload["accounts"]["youtube"]["client_secrets"],
+        json!("***")
+    );
+    assert_eq!(payload["accounts"]["x"]["cookies_file"], json!("***"));
+    assert_eq!(
+        payload["monitoring"]["dashboard_password_hash"],
+        json!("***")
+    );
+    assert_eq!(payload["accounts"]["youtube"]["channel_id"], json!(""));
+    // Nested dataclasses render as Python `repr()` strings.
+    assert!(
+        payload["video"]["encoding_youtube"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("EncodingConfig(resolution="),
+        "{}",
+        payload["video"]["encoding_youtube"]
+    );
+    assert!(
+        payload["accounts"]["tiktok"]["aggregator"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("TikTokAggregatorConfig("),
+        "{}",
+        payload["accounts"]["tiktok"]["aggregator"]
+    );
     assert!(
         payload.get("unrelated_section").is_none(),
         "the projection must not leak sections Python does not return"
     );
 
     let rendered = serde_json::to_string(&payload).expect("serialise");
-    assert!(!rendered.contains("not-a-real-key-value"));
     assert!(!rendered.contains("hunter2"));
+    assert!(!rendered.contains("also-hidden"));
 }
 
 #[test]
-fn config_show_reports_a_missing_file_instead_of_inventing_defaults() {
+fn config_show_answers_the_model_defaults_when_the_profile_is_fresh() {
+    // `XPSTConfig.load()` materializes the defaults, so the shipped tool
+    // answers a full projection on a profile that has never been used. A
+    // file-only projection would report `accounts.youtube.enabled` as absent
+    // while the engine actually runs with `true`.
     let dir = profile("config_show_missing");
-    let err = registry()
-        .dispatch(&ctx(&dir), "xpst_config_show", &json!({}))
-        .expect_err("a missing config is not a success");
-    assert_eq!(err.code(), "not_found");
-    assert!(err.to_string().contains("config.yaml"));
+    let payload = call(&ctx(&dir), "xpst_config_show", json!({}));
+    assert_eq!(payload["accounts"]["youtube"]["enabled"], json!(true));
+    assert_eq!(payload["accounts"]["threads"]["enabled"], json!(false));
+    assert_eq!(payload["monitoring"]["log_level"], json!("INFO"));
+    assert_eq!(payload["schedule"]["check_interval"], json!(900));
+    assert!(payload["video"]["download_dir"]
+        .as_str()
+        .unwrap_or_default()
+        .ends_with("/.xpst/downloads"));
 }
 
 #[test]

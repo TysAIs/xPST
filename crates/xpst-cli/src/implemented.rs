@@ -274,6 +274,12 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         mcp_list,
     ),
     implemented(
+        "mcp start",
+        "xpst-mcp",
+        "Serves the 46-tool surface over stdio in-process (`xpst_mcp::serve_stdio`, the same loop the `xpst-mcp` binary runs); a bare `xpst mcp` starts it too, as the shipped Click group does. Pinned by a protocol capture from the Python server (`tests/mcp_stdio.rs`) instead of a local-surface row, because the process never exits.",
+        mcp_start,
+    ),
+    implemented(
         "app",
         "xpst-app",
         "Locates the installed desktop shell in the same preference order and prints the same not-found guidance (exit 1); byte-compared with the Python CLI.",
@@ -742,6 +748,15 @@ fn mcp_list(
     err: &mut dyn Write,
 ) -> i32 {
     commands::mcp::list(global, leaf, out, err)
+}
+
+fn mcp_start(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::mcp::start(global, leaf, out, err)
 }
 
 fn app(

@@ -384,6 +384,151 @@ pub fn python_style_json(value: &Value) -> Result<String, String> {
     Ok(out)
 }
 
+/// `json.dumps(value, indent=2)` for a `serde_json` document.
+///
+/// Python's default `ensure_ascii=True` escapes every character outside
+/// printable ASCII as `\uXXXX` (a surrogate pair above the BMP), items are
+/// separated by `","` with no trailing space, a key is followed by `": "`, and
+/// the indent is two spaces. This is the renderer the MCP server serves as a
+/// tool result body, so it lives next to the compact one instead of being
+/// re-implemented per crate.
+pub fn python_style_json_pretty(value: &JsonValue) -> Result<String, String> {
+    let mut out = String::new();
+    write_json_serde(value, 0, true, true, &mut out);
+    Ok(out)
+}
+
+/// [`python_style_json_pretty`] with `ensure_ascii=False` (raw UTF-8).
+pub fn python_style_json_pretty_utf8(value: &JsonValue) -> Result<String, String> {
+    let mut out = String::new();
+    write_json_serde(value, 0, false, true, &mut out);
+    Ok(out)
+}
+
+/// `json.dumps(value)` — no indent, Python's default `", "` / `": "`
+/// separators and `ensure_ascii=True`.
+///
+/// Not `serde_json::to_string`, which emits `{"a":1}`: Python's default
+/// separators put a space after every comma and colon, and a tool result body
+/// is compared byte for byte.
+pub fn python_style_json_compact(value: &JsonValue) -> Result<String, String> {
+    let mut out = String::new();
+    write_json_serde(value, 0, true, false, &mut out);
+    Ok(out)
+}
+
+fn write_json_serde(
+    value: &JsonValue,
+    depth: usize,
+    ascii_only: bool,
+    indented: bool,
+    out: &mut String,
+) {
+    let item_separator = if indented { ",\n" } else { ", " };
+    match value {
+        JsonValue::Null => out.push_str("null"),
+        JsonValue::Bool(true) => out.push_str("true"),
+        JsonValue::Bool(false) => out.push_str("false"),
+        JsonValue::Number(number) => {
+            if let Some(integer) = number.as_i64() {
+                out.push_str(&integer.to_string());
+            } else if let Some(integer) = number.as_u64() {
+                out.push_str(&integer.to_string());
+            } else {
+                out.push_str(&pyyaml::python_json_float(
+                    number.as_f64().unwrap_or_default(),
+                ));
+            }
+        }
+        JsonValue::String(text) => write_json_pretty_string(text, ascii_only, out),
+        JsonValue::Array(items) => {
+            if items.is_empty() {
+                out.push_str("[]");
+                return;
+            }
+            out.push('[');
+            if indented {
+                out.push('\n');
+            }
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(item_separator);
+                }
+                if indented {
+                    write_json_indent(depth + 1, out);
+                }
+                write_json_serde(item, depth + 1, ascii_only, indented, out);
+            }
+            if indented {
+                out.push('\n');
+                write_json_indent(depth, out);
+            }
+            out.push(']');
+        }
+        JsonValue::Object(map) => {
+            if map.is_empty() {
+                out.push_str("{}");
+                return;
+            }
+            out.push('{');
+            if indented {
+                out.push('\n');
+            }
+            for (index, (key, item)) in map.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(item_separator);
+                }
+                if indented {
+                    write_json_indent(depth + 1, out);
+                }
+                write_json_pretty_string(key, ascii_only, out);
+                out.push_str(": ");
+                write_json_serde(item, depth + 1, ascii_only, indented, out);
+            }
+            if indented {
+                out.push('\n');
+                write_json_indent(depth, out);
+            }
+            out.push('}');
+        }
+    }
+}
+
+fn write_json_indent(depth: usize, out: &mut String) {
+    for _ in 0..depth {
+        out.push_str("  ");
+    }
+}
+
+/// `json.dumps` string escaping, with `ensure_ascii` as a switch.
+fn write_json_pretty_string(text: &str, ascii_only: bool, out: &mut String) {
+    out.push('"');
+    for character in text.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0c}' => out.push_str("\\f"),
+            c if (' '..='~').contains(&c) => out.push(c),
+            // Python's `py_encode_basestring` escapes `[\x00-\x1f]` whether or
+            // not `ensure_ascii` is set — only the *non-ASCII* range depends on
+            // the flag.
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c if !ascii_only => out.push(c),
+            c => {
+                let mut units = [0u16; 2];
+                for unit in c.encode_utf16(&mut units) {
+                    out.push_str(&format!("\\u{unit:04x}"));
+                }
+            }
+        }
+    }
+    out.push('"');
+}
+
 fn write_json(value: &Value, out: &mut String) -> Result<(), String> {
     match value {
         Value::Null => out.push_str("null"),

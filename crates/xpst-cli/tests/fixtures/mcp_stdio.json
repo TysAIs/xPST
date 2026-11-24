@@ -1,0 +1,302 @@
+{
+  "captured_from": "python -m xpst mcp start (src/xpst/mcp/server.py)",
+  "note": "Recorded by xtask/scripts/capture_mcp_stdio.py. `tools/list` is a count, the ordered names and an FNV-1a digest of the parsed tool array with sorted keys; every other step is the exact wire body.",
+  "scenarios": [
+    {
+      "name": "default",
+      "env": {},
+      "steps": [
+        {
+          "id": 1,
+          "method": "initialize",
+          "result": {
+            "capabilities": {
+              "tools": {
+                "listChanged": false
+              }
+            },
+            "protocolVersion": "2024-11-05",
+            "serverInfo": {
+              "name": "xpst-mcp",
+              "version": "1.3.0"
+            }
+          }
+        },
+        {
+          "id": 2,
+          "method": "tools/list",
+          "count": 46,
+          "names": [
+            "xpst_run",
+            "xpst_post",
+            "xpst_analytics",
+            "xpst_cross_post_analytics",
+            "xpst_followers",
+            "xpst_best_time",
+            "xpst_security_audit",
+            "xpst_suggest_caption",
+            "xpst_generate_ideas",
+            "xpst_transcript",
+            "xpst_search",
+            "xpst_activity",
+            "xpst_schedule_list",
+            "xpst_schedule_add",
+            "xpst_schedule_cancel",
+            "xpst_schedule_pause",
+            "xpst_schedule_resume",
+            "xpst_failures_retry",
+            "xpst_health",
+            "xpst_status",
+            "xpst_rate_limit_status",
+            "xpst_backfill",
+            "xpst_config_show",
+            "xpst_auth_status",
+            "xpst_byo_app",
+            "xpst_bio_get",
+            "xpst_capabilities",
+            "xpst_preflight",
+            "xpst_readiness",
+            "xpst_auth_start",
+            "xpst_providers",
+            "xpst_disconnect",
+            "xpst_delete",
+            "messenger_send",
+            "messenger_set_rules",
+            "xpst_messenger_check_comments",
+            "kb_add",
+            "kb_query",
+            "kb_organize",
+            "kb_areas",
+            "xpst_setup_start",
+            "xpst_setup_status",
+            "xpst_setup_resume",
+            "xpst_setup_reset",
+            "xpst_stream",
+            "xpst_chat"
+          ],
+          "digest": "2f1d723594eed7ae"
+        },
+        {
+          "id": 10,
+          "method": "tools/call",
+          "tool": "xpst_status",
+          "is_error": false,
+          "text": "{\n  \"version\": 2,\n  \"total_videos_tracked\": 0,\n  \"total_processed\": 0,\n  \"cross_posted_count\": 0,\n  \"by_platform\": {\n    \"youtube\": 0,\n    \"x\": 0,\n    \"instagram\": 0,\n    \"tiktok\": 0,\n    \"threads\": 0\n  },\n  \"last_check\": null,\n  \"last_wake_check\": null,\n  \"dead_letter_count\": 0,\n  \"platform_health\": {},\n  \"platform_health_note\": \"platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness.\"\n}"
+        },
+        {
+          "id": 11,
+          "method": "tools/call",
+          "tool": "xpst_config_show",
+          "is_error": false,
+          "text": "{\n  \"accounts\": {\n    \"tiktok\": {\n      \"enabled\": true,\n      \"credentials_path\": null,\n      \"proxy\": null,\n      \"username\": \"\",\n      \"cookies_from_browser\": false,\n      \"cookies_file\": null,\n      \"provider\": \"local\",\n      \"aggregator\": \"TikTokAggregatorConfig(api_key_ref='zernio_api_key', account_id='', profile_id='', vendor_schedule=False, scoped_key=True)\",\n      \"client_key\": \"\",\n      \"client_secret\": \"\",\n      \"access_token\": \"\",\n      \"refresh_token\": \"\",\n      \"sandbox\": false,\n      \"draft_mode\": \"auto\",\n      \"publish_mode\": \"auto\",\n      \"browser_headless\": true\n    },\n    \"youtube\": {\n      \"enabled\": true,\n      \"credentials_path\": null,\n      \"proxy\": null,\n      \"client_secrets\": \"***\",\n      \"token_file\": \"***\",\n      \"channel_id\": \"\",\n      \"username\": \"\",\n      \"video_mode\": \"auto\"\n    },\n    \"x\": {\n      \"enabled\": true,\n      \"credentials_path\": null,\n      \"proxy\": null,\n      \"cookies_file\": \"***\",\n      \"username\": \"\",\n      \"password\": \"\",\n      \"auth_mode\": \"***\",\n      \"api_key\": \"\",\n      \"api_secret\": \"\",\n      \"access_token\": \"\",\n      \"access_token_secret\": \"\",\n      \"bearer_token\": \"\",\n      \"max_video_duration_seconds\": 0\n    },\n    \"instagram\": {\n      \"enabled\": true,\n      \"credentials_path\": null,\n      \"proxy\": null,\n      \"session_file\": \"***\",\n      \"username\": \"\",\n      \"password\": \"\",\n      \"auth_mode\": \"***\",\n      \"device_id\": null,\n      \"graph_access_token\": \"\",\n      \"graph_ig_user_id\": \"\",\n      \"app_id\": \"\",\n      \"app_secret\": \"\",\n      \"account_type\": \"\",\n      \"account_type_source\": \"\"\n    },\n    \"threads\": {\n      \"enabled\": false,\n      \"credentials_path\": null,\n      \"proxy\": null,\n      \"graph_access_token\": \"\",\n      \"threads_user_id\": \"\",\n      \"app_id\": \"\",\n      \"app_secret\": \"\"\n    },\n    \"messenger\": {\n      \"enabled\": false,\n      \"credentials_path\": null,\n      \"proxy\": null,\n      \"page_id\": \"\",\n      \"page_access_token\": \"\",\n      \"app_id\": \"\",\n      \"app_secret\": \"\",\n      \"verify_token\": \"\",\n      \"webhook_path\": \"/webhook/messenger\",\n      \"auto_reply\": false,\n      \"reply_rules\": {},\n      \"comment_reply_enabled\": false,\n      \"comment_platforms\": [\n        \"instagram\",\n        \"facebook\"\n      ]\n    },\n    \"local\": {\n      \"path\": \"\"\n    }\n  },\n  \"video\": {\n    \"download_dir\": \"<PROFILE>/.xpst/downloads\",\n    \"cleanup_after_post\": false,\n    \"encoding_youtube\": \"EncodingConfig(resolution=1920, crf=None, bitrate='8M', maxrate='10M', bufsize='12M', profile='high', level=None, gop=15, fps=60, color='bt709', pix_fmt='yuv420p', passthrough=False, two_pass=False, hw_encoder=None)\",\n    \"encoding_instagram\": \"EncodingConfig(resolution=1920, crf=20, bitrate=None, maxrate='10M', bufsize=None, profile='high', level='4.0', gop=72, fps=60, color='bt709', pix_fmt='yuv420p', passthrough=False, two_pass=False, hw_encoder=None)\",\n    \"encoding_x\": \"EncodingConfig(resolution=1920, crf=None, bitrate='10M', maxrate='12M', bufsize=None, profile='high', level='4.0', gop=90, fps=60, color='bt709', pix_fmt='yuv420p', passthrough=False, two_pass=False, hw_encoder=None)\",\n    \"encoding_tiktok\": \"EncodingConfig(resolution=1920, crf=20, bitrate=None, maxrate='10M', bufsize='20M', profile='high', level='4.0', gop=None, fps=60, color='bt709', pix_fmt='yuv420p', passthrough=False, two_pass=False, hw_encoder=None)\"\n  },\n  \"monitoring\": {\n    \"log_level\": \"INFO\",\n    \"log_file\": \"<PROFILE>/.xpst/logs/xpst.log\",\n    \"log_rotation\": \"10 MB\",\n    \"healthcheck_port\": 8080,\n    \"enable_metrics\": true,\n    \"dashboard_username\": \"\",\n    \"dashboard_password_hash\": \"\",\n    \"health_check_interval\": 300\n  },\n  \"schedule\": {\n    \"check_interval\": 900,\n    \"catchup_window\": 172800,\n    \"catchup_times_per_day\": 3,\n    \"analytics_snapshot_enabled\": false,\n    \"analytics_snapshot_interval\": 3600,\n    \"posting_paused\": false\n  }\n}"
+        },
+        {
+          "id": 12,
+          "method": "tools/call",
+          "tool": "xpst_providers",
+          "is_error": false,
+          "text": "{\n  \"sources\": [\n    {\n      \"name\": \"instagram\",\n      \"display_name\": \"Instagram\",\n      \"roles\": [\n        \"source\"\n      ],\n      \"canonical_roles\": [\n        \"source\"\n      ],\n      \"capabilities\": [\n        \"list\",\n        \"download\",\n        \"carousel\",\n        \"health\",\n        \"cookie_auth\",\n        \"rate_limits\"\n      ],\n      \"auth_mode\": \"session\",\n      \"is_official_api\": false,\n      \"is_local_first\": true,\n      \"docs_url\": \"https://github.com/subzeroid/instagrapi\",\n      \"notes\": \"Uses persisted Instagram sessions through instagrapi for listing and downloading posts.\",\n      \"extra\": {\n        \"content\": [\n          \"video\",\n          \"image\",\n          \"carousel\"\n        ],\n        \"helper\": \"instagrapi\",\n        \"auth_required\": true\n      }\n    },\n    {\n      \"name\": \"local\",\n      \"display_name\": \"Local Files\",\n      \"roles\": [\n        \"source\"\n      ],\n      \"canonical_roles\": [\n        \"source\"\n      ],\n      \"capabilities\": [\n        \"list\",\n        \"download\",\n        \"carousel\",\n        \"health\",\n        \"local_only\"\n      ],\n      \"auth_mode\": \"local\",\n      \"is_official_api\": false,\n      \"is_local_first\": true,\n      \"docs_url\": null,\n      \"notes\": \"Scans local folders and files without any network service.\",\n      \"extra\": {\n        \"content\": [\n          \"video\",\n          \"image\",\n          \"carousel\"\n        ],\n        \"video_extensions\": [\n          \".avi\",\n          \".flv\",\n          \".m4v\",\n          \".mkv\",\n          \".mov\",\n          \".mp4\",\n          \".webm\",\n          \".wmv\"\n        ],\n        \"image_extensions\": [\n          \".bmp\",\n          \".gif\",\n          \".jpeg\",\n          \".jpg\",\n          \".png\",\n          \".tiff\",\n          \".webp\"\n        ]\n      }\n    },\n    {\n      \"name\": \"tiktok\",\n      \"display_name\": \"TikTok\",\n      \"roles\": [\n        \"source\"\n      ],\n      \"canonical_roles\": [\n        \"source\"\n      ],\n      \"capabilities\": [\n        \"list\",\n        \"download\",\n        \"carousel\",\n        \"health\",\n        \"cookie_auth\",\n        \"rate_limits\"\n      ],\n      \"auth_mode\": \"cookies\",\n      \"is_official_api\": false,\n      \"is_local_first\": true,\n      \"docs_url\": \"https://github.com/yt-dlp/yt-dlp\",\n      \"notes\": \"Uses yt-dlp extraction with optional browser cookies or cookies file for better access.\",\n      \"extra\": {\n        \"content\": [\n          \"video\",\n          \"image_carousel\"\n        ],\n        \"helper\": \"yt-dlp\",\n        \"auth_optional\": true\n      }\n    },\n    {\n      \"name\": \"x\",\n      \"display_name\": \"X\",\n      \"roles\": [\n        \"source\"\n      ],\n      \"canonical_roles\": [\n        \"source\"\n      ],\n      \"capabilities\": [\n        \"list\",\n        \"download\",\n        \"health\",\n        \"cookie_auth\",\n        \"rate_limits\"\n      ],\n      \"auth_mode\": \"cookies\",\n      \"is_official_api\": false,\n      \"is_local_first\": true,\n      \"docs_url\": \"https://github.com/yt-dlp/yt-dlp\",\n      \"notes\": \"Uses yt-dlp for media downloads and twikit cookies for richer timeline metadata when available.\",\n      \"extra\": {\n        \"content\": [\n          \"video\"\n        ],\n        \"helpers\": [\n          \"yt-dlp\",\n          \"twikit\"\n        ],\n        \"auth_optional\": true\n      }\n    },\n    {\n      \"name\": \"youtube\",\n      \"display_name\": \"YouTube\",\n      \"roles\": [\n        \"source\"\n      ],\n      \"canonical_roles\": [\n        \"source\"\n      ],\n      \"capabilities\": [\n        \"list\",\n        \"download\",\n        \"health\",\n        \"cookie_auth\",\n        \"rate_limits\"\n      ],\n      \"auth_mode\": \"cookies\",\n      \"is_official_api\": false,\n      \"is_local_first\": true,\n      \"docs_url\": \"https://github.com/yt-dlp/yt-dlp\",\n      \"notes\": \"Reads public channel videos with yt-dlp; browser cookies can help with age, region, or bot checks.\",\n      \"extra\": {\n        \"content\": [\n          \"video\"\n        ],\n        \"helper\": \"yt-dlp\",\n        \"auth_optional\": true,\n        \"official_upload_api_available\": true\n      }\n    }\n  ],\n  \"destinations\": [\n    {\n      \"name\": \"bluesky\",\n      \"display_name\": \"Bluesky\",\n      \"roles\": [\n        \"video_destination\",\n        \"destination\"\n      ],\n      \"canonical_roles\": [\n        \"video_destination\"\n      ],\n      \"capabilities\": [\n        \"upload\",\n        \"delete\",\n        \"carousel\",\n        \"health\",\n        \"official_api\",\n        \"rate_limits\"\n      ],\n      \"auth_mode\": \"app_password\",\n      \"is_official_api\": true,\n      \"is_local_first\": true,\n      \"docs_url\": \"https://docs.bsky.app/\",\n      \"notes\": \"Open posting API (AT Protocol): text, image and multi-image posts through com.atproto.repo.createRecord. No review, no fee. Video is not implemented.\",\n      \"extra\": {\n        \"content\": [\n          \"text\",\n          \"image\",\n          \"carousel\"\n        ],\n        \"max_caption_length\": 300,\n        \"max_images_per_post\": 4,\n        \"max_image_bytes\": 2000000,\n        \"video\": false\n      }\n    },\n    {\n      \"name\": \"facebook\",\n      \"display_name\": \"Facebook Page\",\n      \"roles\": [\n        \"video_destination\"\n      ],\n      \"canonical_roles\": [\n        \"video_destination\"\n      ],\n      \"capabilities\": [\n        \"upload\",\n        \"delete\",\n        \"health\",\n        \"official_api\",\n        \"oauth\",\n        \"rate_limits\"\n      ],\n      \"auth_mode\": \"oauth\",\n      \"is_official_api\": true,\n      \"is_local_first\": true,\n      \"docs_url\": \"https://developers.facebook.com/docs/pages-api\",\n      \"notes\": \"Page-scoped publishing through the Graph API (Facebook Login for Business). Personal profiles have no publishing API and are never used.\",\n      \"extra\": {\n        \"content\": [\n          \"video\"\n        ],\n        \"page_scoped\": true,\n        \"max_caption_length\": 63206,\n        \"publish_endpoint\": \"/{page_id}/videos\"\n      }\n    },\n    {\n      \"name\": \"instagram\",\n      \"display_name\": \"Instagram Reels\",\n      \"roles\": [\n        \"video_destination\",\n        \"destination\"\n      ],\n      \"canonical_roles\": [\n        \"video_destination\"\n      ],\n      \"capabilities\": [\n        \"upload\",\n        \"delete\",\n        \"carousel\",\n        \"health\",\n        \"cookie_auth\",\n        \"rate_limits\"\n      ],\n      \"auth_mode\": \"session\",\n      \"is_official_api\": false,\n      \"is_local_first\": true,\n      \"docs_url\": \"https://github.com/subzeroid/instagrapi\",\n      \"notes\": \"Uses persisted Instagram sessions through instagrapi; not an official Meta publishing API.\",\n      \"extra\": {\n        \"content\": [\n          \"video\",\n          \"image\",\n          \"carousel\"\n        ],\n        \"max_caption_length\": 2200,\n        \"max_carousel_items\": 10\n      }\n    },\n    {\n      \"name\": \"messenger\",\n      \"display_name\": \"Messenger\",\n      \"roles\": [\n        \"messaging\",\n        \"destination\"\n      ],\n      \"canonical_roles\": [\n        \"messaging\"\n      ],\n      \"capabilities\": [\n        \"health\",\n        \"official_api\",\n        \"rate_limits\"\n      ],\n      \"auth_mode\": \"oauth\",\n      \"is_official_api\": true,\n      \"is_local_first\": true,\n      \"docs_url\": \"https://developers.facebook.com/docs/messenger-platform\",\n      \"notes\": \"Opt-in Messenger auto-reply (ManyChat-lite). Static Page Access Token, appsecret_proof on everything outbound, X-Hub-Signature-256 on inbound.\",\n      \"extra\": {\n        \"content\": [\n          \"text\"\n        ],\n        \"max_caption_length\": 640\n      }\n    },\n    {\n      \"name\": \"rumble\",\n      \"display_name\": \"Rumble\",\n      \"roles\": [\n        \"video_destination\"\n      ],\n      \"canonical_roles\": [\n        \"video_destination\"\n      ],\n      \"capabilities\": [\n        \"upload\",\n        \"health\"\n      ],\n      \"auth_mode\": \"unknown\",\n      \"is_official_api\": true,\n      \"is_local_first\": true,\n      \"docs_url\": \"https://rumble.com/\",\n      \"notes\": \"Long-form video. Upload API is partner-gated with no self-serve developer console: xPST publishes through it when an API key is configured, and otherwise exports the rendition for a manual handoff. Not advertised as ready until one live upload succeeds.\",\n      \"extra\": {\n        \"content\": [\n          \"video\"\n        ],\n        \"integration\": \"integration_uncertain\",\n        \"verified_live\": false,\n        \"mode\": \"manual_handoff\",\n        \"manual_handoff\": true,\n        \"upload_page_url\": \"https://rumble.com/upload.php\"\n      }\n    },\n    {\n      \"name\": \"threads\",\n      \"display_name\": \"Threads\",\n      \"roles\": [\n        \"video_destination\",\n        \"destination\"\n      ],\n      \"canonical_roles\": [\n        \"video_destination\"\n      ],\n      \"capabilities\": [\n        \"upload\",\n        \"health\",\n        \"official_api\",\n        \"oauth\",\n        \"rate_limits\"\n      ],\n      \"auth_mode\": \"oauth\",\n      \"is_official_api\": true,\n      \"is_local_first\": true,\n      \"docs_url\": \"https://developers.facebook.com/docs/threads\",\n      \"notes\": \"Publishes text and media via the Meta Threads API container publish model.\",\n      \"extra\": {\n        \"content\": [\n          \"video\",\n          \"text\"\n        ],\n        \"media_transport\": \"public_url\",\n        \"max_caption_length\": 500,\n        \"max_video_duration_seconds\": 300,\n        \"rate_limit_per_day\": 250\n      }\n    },\n    {\n      \"name\": \"tiktok\",\n      \"display_name\": \"TikTok\",\n      \"roles\": [\n        \"video_destination\",\n        \"destination\"\n      ],\n      \"canonical_roles\": [\n        \"video_destination\"\n      ],\n      \"capabilities\": [\n        \"upload\",\n        \"delete\",\n        \"health\",\n        \"official_api\",\n        \"oauth\",\n        \"rate_limits\"\n      ],\n      \"auth_mode\": \"oauth\",\n      \"is_official_api\": true,\n      \"is_local_first\": true,\n      \"docs_url\": \"https://developers.tiktok.com/doc/content-posting-api\",\n      \"notes\": \"Uploads videos through the TikTok Content Posting API (Direct Post endpoint).\",\n      \"extra\": {\n        \"content\": [\n          \"video\"\n        ],\n        \"max_caption_length\": 2200,\n        \"rate_limit_per_min\": 6,\n        \"publish_mode\": \"auto\",\n        \"provider\": \"local\",\n        \"routes\": [\n          \"official-direct-post\",\n          \"tiktok_browser\",\n          \"inbox-draft\"\n        ]\n      }\n    },\n    {\n      \"name\": \"x\",\n      \"display_name\": \"X\",\n      \"roles\": [\n        \"video_destination\",\n        \"destination\"\n      ],\n      \"canonical_roles\": [\n        \"video_destination\"\n      ],\n      \"capabilities\": [\n        \"upload\",\n        \"delete\",\n        \"carousel\",\n        \"health\",\n        \"cookie_auth\",\n        \"rate_limits\"\n      ],\n      \"auth_mode\": \"cookies\",\n      \"is_official_api\": false,\n      \"is_local_first\": true,\n      \"docs_url\": \"https://github.com/d60/twikit\",\n      \"notes\": \"Uses persisted X cookies through twikit; carousel posts are published as threads.\",\n      \"extra\": {\n        \"content\": [\n          \"video\",\n          \"carousel\",\n          \"text\",\n          \"image\"\n        ],\n        \"max_caption_length\": 280,\n        \"max_video_duration_seconds\": 140\n      }\n    },\n    {\n      \"name\": \"youtube\",\n      \"display_name\": \"YouTube\",\n      \"roles\": [\n        \"video_destination\",\n        \"destination\"\n      ],\n      \"canonical_roles\": [\n        \"video_destination\"\n      ],\n      \"capabilities\": [\n        \"upload\",\n        \"delete\",\n        \"health\",\n        \"official_api\",\n        \"oauth\",\n        \"rate_limits\"\n      ],\n      \"auth_mode\": \"oauth\",\n      \"is_official_api\": true,\n      \"is_local_first\": true,\n      \"docs_url\": \"https://developers.google.com/youtube/v3\",\n      \"notes\": \"Uploads and deletes through the YouTube Data API v3: Shorts (\\u2264 60 s, square-or-vertical) and long-form (resumable videos.insert, up to 12 h / 256 GB).\",\n      \"extra\": {\n        \"content\": [\n          \"video\"\n        ],\n        \"max_duration_seconds\": 43200,\n        \"shorts_max_duration_seconds\": 60,\n        \"video_mode\": \"auto\",\n        \"auth_scopes\": [\n          \"https://www.googleapis.com/auth/youtube.upload\",\n          \"https://www.googleapis.com/auth/youtube.readonly\",\n          \"https://www.googleapis.com/auth/youtube.force-ssl\"\n        ]\n      }\n    }\n  ]\n}"
+        },
+        {
+          "id": 13,
+          "method": "tools/call",
+          "tool": "xpst_schedule_list",
+          "is_error": false,
+          "text": "{\"schedules\": [], \"paused\": {\"paused\": false, \"paused_at\": null, \"reason\": \"\"}}"
+        },
+        {
+          "id": 14,
+          "method": "tools/call",
+          "tool": "xpst_rate_limit_status",
+          "is_error": false,
+          "text": "{\n  \"state\": \"idle\",\n  \"active\": [],\n  \"cooldowns\": {},\n  \"source\": \"<PROFILE>/rate_cooldowns.json\",\n  \"file_present\": false,\n  \"note\": \"A cooldown defers posts to the affected platform; it does not fail them. xPST resumes automatically when the pause expires.\"\n}"
+        },
+        {
+          "id": 20,
+          "method": "tools/call",
+          "tool": "xpst_post",
+          "is_error": true,
+          "text": "xpst_post posts to or mutates REAL accounts. Set XPST_MCP_ALLOW_MUTATIONS=1 to allow, or XPST_MCP_REQUIRE_CONFIRM=1 to require per-call confirmation."
+        },
+        {
+          "id": 21,
+          "method": "tools/call",
+          "tool": "xpst_not_a_tool",
+          "is_error": true,
+          "text": "Unknown tool: xpst_not_a_tool"
+        }
+      ]
+    },
+    {
+      "name": "readonly",
+      "env": {
+        "XPST_MCP_READONLY": "1",
+        "XPST_MCP_ALLOW_MUTATIONS": "1"
+      },
+      "steps": [
+        {
+          "id": 1,
+          "method": "initialize",
+          "result": {
+            "capabilities": {
+              "tools": {
+                "listChanged": false
+              }
+            },
+            "protocolVersion": "2024-11-05",
+            "serverInfo": {
+              "name": "xpst-mcp",
+              "version": "1.3.0"
+            }
+          }
+        },
+        {
+          "id": 2,
+          "method": "tools/list",
+          "count": 46,
+          "names": [
+            "xpst_run",
+            "xpst_post",
+            "xpst_analytics",
+            "xpst_cross_post_analytics",
+            "xpst_followers",
+            "xpst_best_time",
+            "xpst_security_audit",
+            "xpst_suggest_caption",
+            "xpst_generate_ideas",
+            "xpst_transcript",
+            "xpst_search",
+            "xpst_activity",
+            "xpst_schedule_list",
+            "xpst_schedule_add",
+            "xpst_schedule_cancel",
+            "xpst_schedule_pause",
+            "xpst_schedule_resume",
+            "xpst_failures_retry",
+            "xpst_health",
+            "xpst_status",
+            "xpst_rate_limit_status",
+            "xpst_backfill",
+            "xpst_config_show",
+            "xpst_auth_status",
+            "xpst_byo_app",
+            "xpst_bio_get",
+            "xpst_capabilities",
+            "xpst_preflight",
+            "xpst_readiness",
+            "xpst_auth_start",
+            "xpst_providers",
+            "xpst_disconnect",
+            "xpst_delete",
+            "messenger_send",
+            "messenger_set_rules",
+            "xpst_messenger_check_comments",
+            "kb_add",
+            "kb_query",
+            "kb_organize",
+            "kb_areas",
+            "xpst_setup_start",
+            "xpst_setup_status",
+            "xpst_setup_resume",
+            "xpst_setup_reset",
+            "xpst_stream",
+            "xpst_chat"
+          ],
+          "digest": "2f1d723594eed7ae"
+        },
+        {
+          "id": 20,
+          "method": "tools/call",
+          "tool": "xpst_post",
+          "is_error": true,
+          "text": "Blocked: xpst_post is disabled (XPST_MCP_READONLY is set). Unset it to allow posting/mutating tools."
+        }
+      ]
+    },
+    {
+      "name": "require_confirm",
+      "env": {
+        "XPST_MCP_REQUIRE_CONFIRM": "1"
+      },
+      "steps": [
+        {
+          "id": 1,
+          "method": "initialize",
+          "result": {
+            "capabilities": {
+              "tools": {
+                "listChanged": false
+              }
+            },
+            "protocolVersion": "2024-11-05",
+            "serverInfo": {
+              "name": "xpst-mcp",
+              "version": "1.3.0"
+            }
+          }
+        },
+        {
+          "id": 2,
+          "method": "tools/list",
+          "count": 46,
+          "names": [
+            "xpst_run",
+            "xpst_post",
+            "xpst_analytics",
+            "xpst_cross_post_analytics",
+            "xpst_followers",
+            "xpst_best_time",
+            "xpst_security_audit",
+            "xpst_suggest_caption",
+            "xpst_generate_ideas",
+            "xpst_transcript",
+            "xpst_search",
+            "xpst_activity",
+            "xpst_schedule_list",
+            "xpst_schedule_add",
+            "xpst_schedule_cancel",
+            "xpst_schedule_pause",
+            "xpst_schedule_resume",
+            "xpst_failures_retry",
+            "xpst_health",
+            "xpst_status",
+            "xpst_rate_limit_status",
+            "xpst_backfill",
+            "xpst_config_show",
+            "xpst_auth_status",
+            "xpst_byo_app",
+            "xpst_bio_get",
+            "xpst_capabilities",
+            "xpst_preflight",
+            "xpst_readiness",
+            "xpst_auth_start",
+            "xpst_providers",
+            "xpst_disconnect",
+            "xpst_delete",
+            "messenger_send",
+            "messenger_set_rules",
+            "xpst_messenger_check_comments",
+            "kb_add",
+            "kb_query",
+            "kb_organize",
+            "kb_areas",
+            "xpst_setup_start",
+            "xpst_setup_status",
+            "xpst_setup_resume",
+            "xpst_setup_reset",
+            "xpst_stream",
+            "xpst_chat"
+          ],
+          "digest": "2f1d723594eed7ae"
+        },
+        {
+          "id": 20,
+          "method": "tools/call",
+          "tool": "xpst_post",
+          "is_error": true,
+          "text": "xpst_post posts to or mutates REAL accounts and XPST_MCP_REQUIRE_CONFIRM is set. Re-call with \"confirm\": true to proceed."
+        }
+      ]
+    }
+  ]
+}

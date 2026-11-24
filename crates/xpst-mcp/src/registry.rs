@@ -37,8 +37,24 @@ pub enum Consent {
 /// How much of a tool this build actually implements.
 #[derive(Debug, Clone, Copy)]
 pub enum Implementation {
-    Ported(Handler),
+    Ported { handler: Handler, render: Render },
     Stub { reason: &'static str },
+}
+
+/// How a ported tool's payload becomes the `content[0].text` body.
+///
+/// Python has no single renderer: every handler calls `json.dumps` itself, and
+/// the shipped calls differ — `indent=2` for most, compact for
+/// `xpst_schedule_list`, `sort_keys=True` only in the generic fallback. The
+/// renderer is therefore a property of the tool, not of the server, and it is
+/// pinned per row so a ported tool cannot silently re-render its payload into a
+/// shape an agent's parser has never seen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Render {
+    /// `json.dumps(payload, indent=2, default=str)` — insertion order.
+    Pretty,
+    /// `json.dumps(payload, default=str)` — insertion order, compact.
+    Compact,
 }
 
 /// One row of the surface.
@@ -52,7 +68,7 @@ pub struct ToolEntry {
 
 impl ToolEntry {
     pub fn is_ported(&self) -> bool {
-        matches!(self.implementation, Implementation::Ported(_))
+        matches!(self.implementation, Implementation::Ported { .. })
     }
 
     pub fn is_read_only(&self) -> bool {
@@ -61,8 +77,16 @@ impl ToolEntry {
 
     pub fn stub_reason(&self) -> Option<&'static str> {
         match self.implementation {
-            Implementation::Ported(_) => None,
+            Implementation::Ported { .. } => None,
             Implementation::Stub { reason } => Some(reason),
+        }
+    }
+
+    /// The renderer a ported tool's payload uses; `None` for a stub.
+    pub fn render(&self) -> Option<Render> {
+        match self.implementation {
+            Implementation::Ported { render, .. } => Some(render),
+            Implementation::Stub { .. } => None,
         }
     }
 
@@ -192,7 +216,10 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_schedule_list",
         Consent::ReadOnly,
-        Implementation::Ported(crate::tools::schedule::run),
+        Implementation::Ported {
+            handler: crate::tools::schedule::run,
+            render: Render::Compact,
+        },
     ),
     (
         "xpst_schedule_add",
@@ -239,12 +266,18 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_status",
         Consent::ReadOnly,
-        Implementation::Ported(crate::tools::status::run),
+        Implementation::Ported {
+            handler: crate::tools::status::run,
+            render: Render::Pretty,
+        },
     ),
     (
         "xpst_rate_limit_status",
         Consent::ReadOnly,
-        Implementation::Ported(crate::tools::rate_limit::run),
+        Implementation::Ported {
+            handler: crate::tools::rate_limit::run,
+            render: Render::Pretty,
+        },
     ),
     (
         "xpst_backfill",
@@ -256,7 +289,10 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_config_show",
         Consent::ReadOnly,
-        Implementation::Ported(crate::tools::config_show::run),
+        Implementation::Ported {
+            handler: crate::tools::config_show::run,
+            render: Render::Pretty,
+        },
     ),
     (
         "xpst_auth_status",
@@ -310,7 +346,10 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_providers",
         Consent::ReadOnly,
-        Implementation::Ported(crate::tools::providers::run),
+        Implementation::Ported {
+            handler: crate::tools::providers::run,
+            render: Render::Pretty,
+        },
     ),
     (
         "xpst_disconnect",
@@ -515,7 +554,7 @@ impl Registry {
             name: name.to_string(),
         })?;
         match entry.implementation {
-            Implementation::Ported(handler) => handler(ctx, arguments),
+            Implementation::Ported { handler, .. } => handler(ctx, arguments),
             Implementation::Stub { reason } => Err(ToolError::NotImplemented {
                 tool: entry.name,
                 reason,

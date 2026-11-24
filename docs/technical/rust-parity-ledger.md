@@ -4,7 +4,7 @@
 
 One row per leaf command of the shipped CLI. `status` is `implemented` when the Rust engine runs the command and `stub` when it answers `not implemented in the Rust engine yet`. The two columns either side are the questions a reader actually has: which crate owns the behaviour, and whether the Python implementation they are comparing against makes an outbound network call.
 
-**56 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
+**57 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
 
 ## Columns
 
@@ -57,7 +57,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `kb reembed` | stub | xpst-store | possible |
 | `logs` | implemented | xpst-cli | none |
 | `mcp list` | implemented | xpst-mcp | none |
-| `mcp start` | stub | xpst-mcp | none |
+| `mcp start` | implemented | xpst-mcp | none |
 | `media fetch` | stub | xpst-media | yes |
 | `media status` | implemented | xpst-media | none |
 | `messenger check-comments` | stub | xpst-provider | yes |
@@ -148,6 +148,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `bio` | xpst-cli | Public and editor URLs with the dashboard API token read from the credential store and masked unless `--reveal`; payload byte-compared with the Python CLI on a seeded token. `--port` is Click's int conversion, so `0900` renders as `900` and a non-integer is a usage error (exit 2). |
 | `security-audit` | xpst-cli | The six live checks (credential file modes, dashboard bind, MCP readonly, provider mode, ffmpeg, encrypted storage) with `indent=2` ASCII-escaped JSON; payload byte-compared with the Python CLI. |
 | `mcp list` | xpst-mcp | The captured Python tool registry in Python's order, rendered with `json.dumps(indent=2)`; payload byte-compared with the Python CLI. |
+| `mcp start` | xpst-mcp | Serves the 46-tool surface over stdio in-process (`xpst_mcp::serve_stdio`, the same loop the `xpst-mcp` binary runs); a bare `xpst mcp` starts it too, as the shipped Click group does. Pinned by a protocol capture from the Python server (`tests/mcp_stdio.rs`) instead of a local-surface row, because the process never exits. |
 | `app` | xpst-app | Locates the installed desktop shell in the same preference order and prints the same not-found guidance (exit 1); byte-compared with the Python CLI. |
 | `best-time` | xpst-store | Hour-of-week engagement buckets from `analytics.db` (`BestTimeAnalyzer.analyze`), ranked by Python's rounded average with the first snapshot per post and `collection_status: failed` rows excluded; payload byte-compared with the Python CLI on empty, seeded and platform-filtered ledgers. |
 | `kb areas` | xpst-store | Discovered knowledge areas in course order (`order_index`, label, id) with their nugget counts, read from the workspace's `areas.json`; payload byte-compared with the Python CLI. The reader reproduces `JsonKnowledgeStore._load_file`: a decode failure, an unknown key or a missing required key renames the file to `<name>.corrupt` and starts empty, while a non-object document escapes as Python's `AttributeError`. An invalid `--workspace` reproduces Python's uncaught `ValueError` contract — empty stdout, exit 1 — with the exception line on stderr instead of the traceback frames. |
