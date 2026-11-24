@@ -51,15 +51,19 @@ python3 scripts/measure_rust_boot.py --binary target/release/xpst --runs 30
 Output of the size gate:
 
 ```
-generated: 2026-11-17T20:00:21+00:00
-xpst: 961960 bytes (0.92 MiB)
-  budget 2097152 bytes (2.00 MiB)  -> 45.9% used, 1135192 bytes headroom
-  D-4 target 26214400 bytes (25 MiB)  -> 3.67% of it
-xpst-mcp: 3146912 bytes (3.00 MiB)
-  budget 6291456 bytes (6.00 MiB)  -> 50.0% used, 3144544 bytes headroom
-  D-4 target 26214400 bytes (25 MiB)  -> 12.0% of it
+generated: 2026-11-24T07:32:39+00:00
+xpst: 2005624 bytes (1.91 MiB)
+  budget 2097152 bytes (2.00 MiB)  -> 95.6% used, 91528 bytes headroom
+  D-4 target 26214400 bytes (25 MiB)  -> 7.65% of it
+xpst-mcp: 1983944 bytes (1.89 MiB)
+  budget 6291456 bytes (6.00 MiB)  -> 31.5% used, 4307512 bytes headroom
+  D-4 target 26214400 bytes (25 MiB)  -> 7.57% of it
 size budget: PASS
 ```
+
+The `xpst` headroom is thin (91 kB) after the live `doctor` report landed:
+the next slice that adds a provider surface should re-measure before
+assuming it fits.
 
 Output of the cold-start harness (one of five runs; this is the lowest-median
 run of the quietest machine state observed):
