@@ -2532,6 +2532,132 @@
           ],
           "multiline": false,
           "text": "{\"schedules\": [{\"id\": \"<CLOCK>\", \"operation_id\": \"<CLOCK>\", \"idempotency_key\": \"<CLOCK>\", \"video_path\": \"\", \"caption\": \"parity text\", \"per_platform_captions\": {}, \"platforms\": [\"x\"], \"scheduled_time\": \"2026-12-01T16:30:00+00:00\", \"timezone\": \"America/Denver\", \"status\": \"pending\", \"created_at\": \"<CLOCK>\", \"completed_at\": null, \"error\": null, \"post_results\": {}, \"repeat_rule\": null, \"content_type\": \"text\", \"scheduled_time_local\": \"2026-12-01T09:30:00-07:00\"}, {\"id\": \"<CLOCK>\", \"operation_id\": \"<CLOCK>\", \"idempotency_key\": \"<CLOCK>\", \"video_path\": \"<PROFILE>/clip.mp4\", \"caption\": \"parity video\", \"per_platform_captions\": {}, \"platforms\": [\"youtube\"], \"scheduled_time\": \"2026-12-02T09:30:00+00:00\", \"timezone\": \"America/Denver\", \"status\": \"pending\", \"created_at\": \"<CLOCK>\", \"completed_at\": null, \"error\": null, \"post_results\": {}, \"repeat_rule\": \"weekly\", \"scheduled_time_local\": \"2026-12-02T02:30:00-07:00\"}, {\"id\": \"<CLOCK>\", \"operation_id\": \"<CLOCK>\", \"idempotency_key\": \"<CLOCK>\", \"video_path\": \"<PROFILE>/clip.mp4\", \"caption\": \"parity slash\", \"per_platform_captions\": {}, \"platforms\": [\"youtube\", \"x\", \"instagram\", \"tiktok\"], \"scheduled_time\": \"2026-12-03T16:30:00+00:00\", \"timezone\": \"America/Denver\", \"status\": \"pending\", \"created_at\": \"<CLOCK>\", \"completed_at\": null, \"error\": null, \"post_results\": {}, \"repeat_rule\": null, \"scheduled_time_local\": \"2026-12-03T09:30:00-07:00\"}, {\"id\": \"<CLOCK>\", \"operation_id\": \"<CLOCK>\", \"idempotency_key\": \"<CLOCK>\", \"video_path\": \"\", \"caption\": \"parity overrides\", \"per_platform_captions\": {\"x\": \"short\", \"youtube\": \"long\"}, \"platforms\": [\"x\"], \"scheduled_time\": \"2026-12-04T16:30:00+00:00\", \"timezone\": \"America/Denver\", \"status\": \"pending\", \"created_at\": \"<CLOCK>\", \"completed_at\": null, \"error\": null, \"post_results\": {}, \"repeat_rule\": null, \"content_type\": \"text\", \"scheduled_time_local\": \"2026-12-04T09:30:00-07:00\"}], \"paused\": {\"paused\": false, \"paused_at\": null, \"reason\": \"\"}}"
+        },
+        {
+          "id": 229,
+          "method": "tools/call",
+          "tool": "kb_add",
+          "arguments": {
+            "source": "http://127.0.0.1:8080/x"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "Blocked: kb_add argument 'source' was refused — Host resolves to a non-public address and was refused: 127.0.0.1. Media paths must live inside the xPST config dir or a user media folder (override with XPST_MEDIA_ROOTS); URLs must be public http(s)."
+        },
+        {
+          "id": 230,
+          "method": "tools/call",
+          "tool": "kb_add",
+          "arguments": {
+            "source": "http://169.254.169.254/latest/meta-data/"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "Blocked: kb_add argument 'source' was refused — Host resolves to a non-public address and was refused: 169.254.169.254. Media paths must live inside the xPST config dir or a user media folder (override with XPST_MEDIA_ROOTS); URLs must be public http(s)."
+        },
+        {
+          "id": 231,
+          "method": "tools/call",
+          "tool": "kb_add",
+          "arguments": {
+            "source": "http://[::ffff:127.0.0.1]/x"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "Blocked: kb_add argument 'source' was refused — Host resolves to a non-public address and was refused: ::ffff:127.0.0.1. Media paths must live inside the xPST config dir or a user media folder (override with XPST_MEDIA_ROOTS); URLs must be public http(s)."
+        },
+        {
+          "id": 232,
+          "method": "tools/call",
+          "tool": "kb_add",
+          "arguments": {
+            "source": "http://240.0.0.1/x"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "Blocked: kb_add argument 'source' was refused — Host resolves to a non-public address and was refused: 240.0.0.1. Media paths must live inside the xPST config dir or a user media folder (override with XPST_MEDIA_ROOTS); URLs must be public http(s)."
+        },
+        {
+          "id": 233,
+          "method": "tools/call",
+          "tool": "kb_add",
+          "arguments": {
+            "source": "http://localhost/x"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "Blocked: kb_add argument 'source' was refused — Host is not a public destination: localhost. Media paths must live inside the xPST config dir or a user media folder (override with XPST_MEDIA_ROOTS); URLs must be public http(s)."
+        },
+        {
+          "id": 234,
+          "method": "tools/call",
+          "tool": "kb_add",
+          "arguments": {
+            "source": "http://user:pass@1.1.1.1/x"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "Blocked: kb_add argument 'source' was refused — URL must not embed credentials. Media paths must live inside the xPST config dir or a user media folder (override with XPST_MEDIA_ROOTS); URLs must be public http(s)."
+        },
+        {
+          "id": 235,
+          "method": "tools/call",
+          "tool": "kb_add",
+          "arguments": {
+            "source": "ftp://1.1.1.1/x"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "Blocked: kb_add argument 'source' was refused — Scheme not allowed: ftp. Media paths must live inside the xPST config dir or a user media folder (override with XPST_MEDIA_ROOTS); URLs must be public http(s)."
+        },
+        {
+          "id": 236,
+          "method": "tools/call",
+          "tool": "kb_add",
+          "arguments": {
+            "source": "http://1.1.1.1:99999/x"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "Blocked: kb_add argument 'source' was refused — Malformed URL. Media paths must live inside the xPST config dir or a user media folder (override with XPST_MEDIA_ROOTS); URLs must be public http(s)."
+        },
+        {
+          "id": 237,
+          "method": "tools/call",
+          "tool": "xpst_backfill",
+          "arguments": {
+            "source": "http://169.254.169.254/latest/meta-data/"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "Blocked: xpst_backfill argument 'source' was refused — Host resolves to a non-public address and was refused: 169.254.169.254. Media paths must live inside the xPST config dir or a user media folder (override with XPST_MEDIA_ROOTS); URLs must be public http(s)."
         }
       ]
     },

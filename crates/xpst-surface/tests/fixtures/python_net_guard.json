@@ -1,0 +1,433 @@
+{
+  "captured_from": "src/xpst/utils/net_guard.py::validate_public_url",
+  "python_version": "3.13.16",
+  "note": "Recorded by xtask/scripts/capture_net_guard.py. `dns` is the stub answer the resolver gave for each host (null = gaierror); `resolved` is the exact sequence of hosts the guard asked for, so a port that resolves when Python does not fails the Rust test. No row touches the network.",
+  "constants": {
+    "default_allowed_schemes": [
+      "http",
+      "https"
+    ],
+    "metadata_addresses": [
+      "100.100.100.200",
+      "169.254.169.253",
+      "169.254.169.254",
+      "192.0.0.192",
+      "fd00:ec2::254"
+    ],
+    "blocked_hostnames": [
+      "instance-data",
+      "ip6-localhost",
+      "ip6-loopback",
+      "localhost",
+      "localhost.localdomain",
+      "metadata",
+      "metadata.goog",
+      "metadata.google.internal"
+    ],
+    "cgnat": "100.64.0.0/10",
+    "ipv4": {
+      "loopback": [
+        "127.0.0.0/8"
+      ],
+      "link_local": [
+        "169.254.0.0/16"
+      ],
+      "multicast": [
+        "224.0.0.0/4"
+      ],
+      "reserved": [
+        "240.0.0.0/4"
+      ],
+      "private": [
+        "0.0.0.0/8",
+        "10.0.0.0/8",
+        "127.0.0.0/8",
+        "169.254.0.0/16",
+        "172.16.0.0/12",
+        "192.0.0.0/24",
+        "192.0.0.170/31",
+        "192.0.2.0/24",
+        "192.168.0.0/16",
+        "198.18.0.0/15",
+        "198.51.100.0/24",
+        "203.0.113.0/24",
+        "240.0.0.0/4",
+        "255.255.255.255/32"
+      ],
+      "private_exceptions": [
+        "192.0.0.9/32",
+        "192.0.0.10/32"
+      ],
+      "unspecified": [
+        "0.0.0.0"
+      ]
+    },
+    "ipv6": {
+      "loopback": [
+        "::1/128"
+      ],
+      "link_local": [
+        "fe80::/10"
+      ],
+      "multicast": [
+        "ff00::/8"
+      ],
+      "reserved": [
+        "::/8",
+        "100::/8",
+        "200::/7",
+        "400::/6",
+        "800::/5",
+        "1000::/4",
+        "4000::/3",
+        "6000::/3",
+        "8000::/3",
+        "a000::/3",
+        "c000::/3",
+        "e000::/4",
+        "f000::/5",
+        "f800::/6",
+        "fe00::/9"
+      ],
+      "private": [
+        "::1/128",
+        "::/128",
+        "::ffff:0.0.0.0/96",
+        "64:ff9b:1::/48",
+        "100::/64",
+        "2001::/23",
+        "2001:db8::/32",
+        "2002::/16",
+        "3fff::/20",
+        "fc00::/7",
+        "fe80::/10"
+      ],
+      "private_exceptions": [
+        "2001:1::1/128",
+        "2001:1::2/128",
+        "2001:3::/32",
+        "2001:4:112::/48",
+        "2001:20::/28",
+        "2001:30::/28"
+      ],
+      "unspecified": [
+        "::/128"
+      ]
+    },
+    "nfkc_delimiters": [
+      {
+        "codepoint": 8263,
+        "expansion": "??"
+      },
+      {
+        "codepoint": 8264,
+        "expansion": "?!"
+      },
+      {
+        "codepoint": 8265,
+        "expansion": "!?"
+      },
+      {
+        "codepoint": 8448,
+        "expansion": "a/c"
+      },
+      {
+        "codepoint": 8449,
+        "expansion": "a/s"
+      },
+      {
+        "codepoint": 8453,
+        "expansion": "c/o"
+      },
+      {
+        "codepoint": 8454,
+        "expansion": "c/u"
+      },
+      {
+        "codepoint": 10868,
+        "expansion": "::="
+      },
+      {
+        "codepoint": 65043,
+        "expansion": ":"
+      },
+      {
+        "codepoint": 65046,
+        "expansion": "?"
+      },
+      {
+        "codepoint": 65109,
+        "expansion": ":"
+      },
+      {
+        "codepoint": 65110,
+        "expansion": "?"
+      },
+      {
+        "codepoint": 65119,
+        "expansion": "#"
+      },
+      {
+        "codepoint": 65131,
+        "expansion": "@"
+      },
+      {
+        "codepoint": 65283,
+        "expansion": "#"
+      },
+      {
+        "codepoint": 65295,
+        "expansion": "/"
+      },
+      {
+        "codepoint": 65306,
+        "expansion": ":"
+      },
+      {
+        "codepoint": 65311,
+        "expansion": "?"
+      },
+      {
+        "codepoint": 65312,
+        "expansion": "@"
+      }
+    ]
+  },
+  "rows": [
+    {"label": "empty", "url": "", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL is empty"}},
+    {"label": "whitespace-only", "url": "   ", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL is empty"}},
+    {"label": "tab-and-newline-only", "url": "\t\n", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL is empty"}},
+    {"label": "leading-and-trailing-space-is-stripped", "url": "  http://1.1.1.1/x  ", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1/x"}},
+    {"label": "trailing-newline-is-stripped", "url": "http://1.1.1.1/x\n", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1/x"}},
+    {"label": "leading-tab-is-stripped", "url": "\thttp://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1/x"}},
+    {"label": "scheme-http", "url": "http://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1/x"}},
+    {"label": "scheme-https", "url": "https://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "https://1.1.1.1/x"}},
+    {"label": "scheme-HTTP", "url": "HTTP://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "HTTP://1.1.1.1/x"}},
+    {"label": "scheme-Https", "url": "Https://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "Https://1.1.1.1/x"}},
+    {"label": "scheme-ftp", "url": "ftp://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: ftp"}},
+    {"label": "scheme-ftps", "url": "ftps://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: ftps"}},
+    {"label": "scheme-file", "url": "file://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: file"}},
+    {"label": "scheme-ws", "url": "ws://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: ws"}},
+    {"label": "scheme-wss", "url": "wss://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: wss"}},
+    {"label": "scheme-gopher", "url": "gopher://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: gopher"}},
+    {"label": "scheme-javascript", "url": "javascript://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: javascript"}},
+    {"label": "scheme-data", "url": "data://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: data"}},
+    {"label": "scheme-mailto", "url": "mailto://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: mailto"}},
+    {"label": "scheme-ssh", "url": "ssh://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: ssh"}},
+    {"label": "scheme-http+unix", "url": "http+unix://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: http+unix"}},
+    {"label": "scheme-none-protocol-relative", "url": "//1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: (none)"}},
+    {"label": "scheme-none-bare-host", "url": "1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: (none)"}},
+    {"label": "scheme-none-empty", "url": "://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: (none)"}},
+    {"label": "scheme-http-without-slashes", "url": "http:1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL has no host"}},
+    {"label": "scheme-uppercase-is-lowercased", "url": "HTTP://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "HTTP://1.1.1.1/x"}},
+    {"label": "scheme-mixed-case-is-lowercased", "url": "HtTpS://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "HtTpS://1.1.1.1/x"}},
+    {"label": "allowed-schemes-uppercase-entry-never-matches", "url": "http://1.1.1.1/x", "options": {"allowed_schemes": ["HTTP"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: http"}},
+    {"label": "allowed-schemes-ftp-only-refuses-http", "url": "http://1.1.1.1/x", "options": {"allowed_schemes": ["ftp"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: http"}},
+    {"label": "allowed-schemes-ftp-only-accepts-ftp", "url": "ftp://1.1.1.1/x", "options": {"allowed_schemes": ["ftp"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "ftp://1.1.1.1/x"}},
+    {"label": "allowed-schemes-empty-refuses-http", "url": "http://1.1.1.1/x", "options": {"allowed_schemes": [], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: http"}},
+    {"label": "allowed-schemes-extra-accepts-ws", "url": "ws://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https", "ws"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "ws://1.1.1.1/x"}},
+    {"label": "ipv4-127.0.0.1", "url": "http://127.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 127.0.0.1"}},
+    {"label": "ipv4-127.0.0.2", "url": "http://127.0.0.2/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 127.0.0.2"}},
+    {"label": "ipv4-127.255.255.254", "url": "http://127.255.255.254/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 127.255.255.254"}},
+    {"label": "ipv4-0.0.0.0", "url": "http://0.0.0.0/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 0.0.0.0"}},
+    {"label": "ipv4-0.0.0.1", "url": "http://0.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 0.0.0.1"}},
+    {"label": "ipv4-10.0.0.1", "url": "http://10.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 10.0.0.1"}, "//": "public-safety: allow-private-ip"},
+    {"label": "ipv4-10.255.255.255", "url": "http://10.255.255.255/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 10.255.255.255"}, "//": "public-safety: allow-private-ip"},
+    {"label": "ipv4-172.16.0.1", "url": "http://172.16.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 172.16.0.1"}, "//": "public-safety: allow-private-ip"},
+    {"label": "ipv4-172.31.255.255", "url": "http://172.31.255.255/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 172.31.255.255"}, "//": "public-safety: allow-private-ip"},
+    {"label": "ipv4-192.168.1.1", "url": "http://192.168.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 192.168.1.1"}, "//": "public-safety: allow-private-ip"},
+    {"label": "ipv4-169.254.169.254", "url": "http://169.254.169.254/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 169.254.169.254"}},
+    {"label": "ipv4-169.254.169.253", "url": "http://169.254.169.253/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 169.254.169.253"}},
+    {"label": "ipv4-169.254.1.1", "url": "http://169.254.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 169.254.1.1"}},
+    {"label": "ipv4-100.100.100.200", "url": "http://100.100.100.200/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 100.100.100.200"}},
+    {"label": "ipv4-192.0.0.192", "url": "http://192.0.0.192/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 192.0.0.192"}},
+    {"label": "ipv4-192.0.0.8", "url": "http://192.0.0.8/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 192.0.0.8"}},
+    {"label": "ipv4-192.0.0.9", "url": "http://192.0.0.9/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://192.0.0.9/x"}},
+    {"label": "ipv4-192.0.0.10", "url": "http://192.0.0.10/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://192.0.0.10/x"}},
+    {"label": "ipv4-192.0.0.170", "url": "http://192.0.0.170/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 192.0.0.170"}},
+    {"label": "ipv4-192.0.0.171", "url": "http://192.0.0.171/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 192.0.0.171"}},
+    {"label": "ipv4-100.64.0.1", "url": "http://100.64.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 100.64.0.1"}, "//": "public-safety: allow-private-ip"},
+    {"label": "ipv4-100.127.255.255", "url": "http://100.127.255.255/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 100.127.255.255"}, "//": "public-safety: allow-private-ip"},
+    {"label": "ipv4-100.128.0.1", "url": "http://100.128.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://100.128.0.1/x"}},
+    {"label": "ipv4-224.0.0.1", "url": "http://224.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 224.0.0.1"}},
+    {"label": "ipv4-239.255.255.250", "url": "http://239.255.255.250/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 239.255.255.250"}},
+    {"label": "ipv4-240.0.0.1", "url": "http://240.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 240.0.0.1"}},
+    {"label": "ipv4-255.255.255.254", "url": "http://255.255.255.254/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 255.255.255.254"}},
+    {"label": "ipv4-255.255.255.255", "url": "http://255.255.255.255/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 255.255.255.255"}},
+    {"label": "ipv4-198.18.0.1", "url": "http://198.18.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 198.18.0.1"}},
+    {"label": "ipv4-192.0.2.1", "url": "http://192.0.2.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 192.0.2.1"}},
+    {"label": "ipv4-203.0.113.5", "url": "http://203.0.113.5/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 203.0.113.5"}},
+    {"label": "ipv4-198.51.100.7", "url": "http://198.51.100.7/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 198.51.100.7"}},
+    {"label": "ipv4-192.88.99.1", "url": "http://192.88.99.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://192.88.99.1/x"}},
+    {"label": "ipv4-8.8.8.8", "url": "http://8.8.8.8/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://8.8.8.8/x"}},
+    {"label": "ipv4-1.1.1.1", "url": "http://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1/x"}},
+    {"label": "ipv4-93.184.216.34", "url": "http://93.184.216.34/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://93.184.216.34/x"}},
+    {"label": "ipv6-::1", "url": "http://[::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: ::1"}},
+    {"label": "ipv6-::", "url": "http://[::]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: ::"}},
+    {"label": "ipv6-fe80::1", "url": "http://[fe80::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: fe80::1"}},
+    {"label": "ipv6-fe80::", "url": "http://[fe80::]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: fe80::"}},
+    {"label": "ipv6-febf:ffff::1", "url": "http://[febf:ffff::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: febf:ffff::1"}},
+    {"label": "ipv6-fc00::1", "url": "http://[fc00::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: fc00::1"}},
+    {"label": "ipv6-fd00::1", "url": "http://[fd00::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: fd00::1"}},
+    {"label": "ipv6-fd00:ec2::254", "url": "http://[fd00:ec2::254]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: fd00:ec2::254"}},
+    {"label": "ipv6-2001:db8::1", "url": "http://[2001:db8::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 2001:db8::1"}},
+    {"label": "ipv6-2001::1", "url": "http://[2001::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 2001::1"}},
+    {"label": "ipv6-2001:2::1", "url": "http://[2001:2::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 2001:2::1"}},
+    {"label": "ipv6-2001:1::1", "url": "http://[2001:1::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://[2001:1::1]/x"}},
+    {"label": "ipv6-2001:3::1", "url": "http://[2001:3::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://[2001:3::1]/x"}},
+    {"label": "ipv6-3fff::1", "url": "http://[3fff::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 3fff::1"}},
+    {"label": "ipv6-5f00::1", "url": "http://[5f00::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 5f00::1"}},
+    {"label": "ipv6-100::1", "url": "http://[100::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 100::1"}},
+    {"label": "ipv6-64:ff9b::7f00:1", "url": "http://[64:ff9b::7f00:1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 64:ff9b::7f00:1"}},
+    {"label": "ipv6-64:ff9b:1::1", "url": "http://[64:ff9b:1::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 64:ff9b:1::1"}},
+    {"label": "ipv6-2002:7f00:1::", "url": "http://[2002:7f00:1::]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 2002:7f00:1::"}},
+    {"label": "ipv6-2002:808:808::", "url": "http://[2002:808:808::]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://[2002:808:808::]/x"}},
+    {"label": "ipv6-::ffff:127.0.0.1", "url": "http://[::ffff:127.0.0.1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: ::ffff:127.0.0.1"}},
+    {"label": "ipv6-::ffff:8.8.8.8", "url": "http://[::ffff:8.8.8.8]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://[::ffff:8.8.8.8]/x"}},
+    {"label": "ipv6-::ffff:169.254.169.254", "url": "http://[::ffff:169.254.169.254]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: ::ffff:169.254.169.254"}},
+    {"label": "ipv6-::ffff:0.0.0.0", "url": "http://[::ffff:0.0.0.0]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: ::ffff:0.0.0.0"}},
+    {"label": "ipv6-ff02::1", "url": "http://[ff02::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: ff02::1"}},
+    {"label": "ipv6-fec0::1", "url": "http://[fec0::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://[fec0::1]/x"}},
+    {"label": "ipv6-2001:4860:4860::8888", "url": "http://[2001:4860:4860::8888]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://[2001:4860:4860::8888]/x"}},
+    {"label": "ipv6-2606:4700:4700::1111", "url": "http://[2606:4700:4700::1111]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://[2606:4700:4700::1111]/x"}},
+    {"label": "ipv6-zone-id-link-local", "url": "http://[fe80::1%eth0]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: fe80::1%eth0"}},
+    {"label": "ipv6-zone-id-percent-encoded", "url": "http://[fe80::1%25eth0]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: fe80::1%25eth0"}},
+    {"label": "ipv6-zone-id-uppercase-zone", "url": "http://[FE80::1%ETH0]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: fe80::1%ETH0"}},
+    {"label": "ipv6-zone-id-public", "url": "http://[2001:4860:4860::8888%eth0]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://[2001:4860:4860::8888%eth0]/x"}},
+    {"label": "bracket-unclosed", "url": "http://[::1", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "bracket-trailing-data", "url": "http://[::1]x/", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "bracket-empty", "url": "http://[]/", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "bracket-not-an-address", "url": "http://[not-an-ip]/", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "bracket-ipv4", "url": "http://[1.2.3.4]/", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "bracket-ipvfuture-valid", "url": "http://[v1.foo]/", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"v1.foo": null}, "resolved": ["v1.foo"], "outcome": {"ok": false, "error": "Could not resolve host: v1.foo"}},
+    {"label": "bracket-ipvfuture-valid-public", "url": "http://[v1.foo]/", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"v1.foo": ["93.184.216.34"]}, "resolved": ["v1.foo"], "outcome": {"ok": true, "value": "http://[v1.foo]/"}},
+    {"label": "bracket-ipvfuture-invalid", "url": "http://[vz.foo]/", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "bracket-ipvfuture-no-dot", "url": "http://[v1]/", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "bracket-close-without-open", "url": "http://::1]/", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "bracket-data-before-open", "url": "http://x[::1]/", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "bracket-port-after", "url": "http://[::1]:8080/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: ::1"}},
+    {"label": "bracket-empty-port", "url": "http://[::1]:/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: ::1"}},
+    {"label": "port-default", "url": "http://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1/x"}},
+    {"label": "port-80", "url": "http://1.1.1.1:80/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1:80/x"}},
+    {"label": "port-443", "url": "https://1.1.1.1:443/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "https://1.1.1.1:443/x"}},
+    {"label": "port-8080", "url": "http://1.1.1.1:8080/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1:8080/x"}},
+    {"label": "port-zero", "url": "http://1.1.1.1:0/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1:0/x"}},
+    {"label": "port-max", "url": "http://1.1.1.1:65535/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1:65535/x"}},
+    {"label": "port-out-of-range", "url": "http://1.1.1.1:65536/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "port-huge", "url": "http://1.1.1.1:999999999999999999999999/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "port-non-numeric", "url": "http://1.1.1.1:abc/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "port-signed", "url": "http://1.1.1.1:+80/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "port-leading-zeros", "url": "http://1.1.1.1:00080/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1:00080/x"}},
+    {"label": "port-double-colon", "url": "http://1.1.1.1:8080:90/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "port-empty", "url": "http://1.1.1.1:/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1:/x"}},
+    {"label": "port-allowed-exact", "url": "http://1.1.1.1:8080/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": [8080], "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1:8080/x"}},
+    {"label": "port-allowed-list", "url": "http://1.1.1.1:443/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": [80, 443], "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1:443/x"}},
+    {"label": "port-not-allowed", "url": "http://1.1.1.1:8443/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": [80, 443], "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Port not allowed: 8443"}},
+    {"label": "port-absent-with-allow-ports", "url": "http://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": [443], "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1/x"}},
+    {"label": "port-empty-with-allow-ports", "url": "http://1.1.1.1:/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": [443], "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1:/x"}},
+    {"label": "port-allowed-empty-list", "url": "http://1.1.1.1:80/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": [], "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Port not allowed: 80"}},
+    {"label": "port-checked-before-allow-private", "url": "http://127.0.0.1:8443/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": true, "allow_ports": [443], "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Port not allowed: 8443"}},
+    {"label": "port-checked-before-allow-hosts", "url": "http://127.0.0.1:8443/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": ["127.0.0.1"], "allow_private": false, "allow_ports": [443], "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Port not allowed: 8443"}},
+    {"label": "credentials-user-and-password", "url": "http://user:pass@1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL must not embed credentials"}},
+    {"label": "credentials-user-only", "url": "http://user@1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL must not embed credentials"}},
+    {"label": "credentials-password-only", "url": "http://:pass@1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL must not embed credentials"}},
+    {"label": "credentials-empty-user-and-password", "url": "http://:@1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://:@1.1.1.1/x"}},
+    {"label": "credentials-bare-at", "url": "http://@1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://@1.1.1.1/x"}},
+    {"label": "credentials-with-private-host", "url": "http://user:pass@127.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL must not embed credentials"}},
+    {"label": "credentials-with-blocked-hostname", "url": "http://user:pass@localhost/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL must not embed credentials"}},
+    {"label": "credentials-before-allow-private", "url": "http://user:pass@127.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": true, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL must not embed credentials"}},
+    {"label": "credentials-before-allow-hosts", "url": "http://user:pass@127.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": ["127.0.0.1"], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL must not embed credentials"}},
+    {"label": "credentials-backslash-userinfo", "url": "http://1.1.1.1\\@127.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL must not embed credentials"}},
+    {"label": "credentials-backslash-userinfo-public", "url": "http://127.0.0.1\\@1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL must not embed credentials"}},
+    {"label": "no-host-empty-netloc", "url": "http:///path", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL has no host"}},
+    {"label": "no-host-bare-scheme", "url": "http://", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL has no host"}},
+    {"label": "no-host-scheme-only", "url": "http:", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL has no host"}},
+    {"label": "no-host-query-only", "url": "http://?q=1", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL has no host"}},
+    {"label": "no-host-fragment-only", "url": "http://#f", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL has no host"}},
+    {"label": "unsafe-tab-in-host", "url": "http://127.0.0.1\t/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 127.0.0.1"}},
+    {"label": "unsafe-crlf-in-host", "url": "http://127.0.0.1\r\n/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 127.0.0.1"}},
+    {"label": "unsafe-tab-before-port", "url": "http://127.0.0.1\t:8080/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 127.0.0.1"}},
+    {"label": "unsafe-newline-in-scheme", "url": "ht\ntp://127.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 127.0.0.1"}},
+    {"label": "unsafe-tab-splits-nothing", "url": "http://1.1.1.1\t/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1\t/x"}},
+    {"label": "hostname-localhost", "url": "http://localhost/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: localhost"}},
+    {"label": "hostname-LOCALHOST", "url": "http://LOCALHOST/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: localhost"}},
+    {"label": "hostname-LocalHost", "url": "http://LocalHost/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: localhost"}},
+    {"label": "hostname-localhost-", "url": "http://localhost./x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: localhost."}},
+    {"label": "hostname-localhost-localdomain", "url": "http://localhost.localdomain/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: localhost.localdomain"}},
+    {"label": "hostname-ip6-localhost", "url": "http://ip6-localhost/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: ip6-localhost"}},
+    {"label": "hostname-ip6-loopback", "url": "http://ip6-loopback/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: ip6-loopback"}},
+    {"label": "hostname-metadata", "url": "http://metadata/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: metadata"}},
+    {"label": "hostname-metadata-google-internal", "url": "http://metadata.google.internal/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: metadata.google.internal"}},
+    {"label": "hostname-metadata-goog", "url": "http://metadata.goog/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: metadata.goog"}},
+    {"label": "hostname-instance-data", "url": "http://instance-data/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: instance-data"}},
+    {"label": "hostname-foo-localhost", "url": "http://foo.localhost/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: foo.localhost"}},
+    {"label": "hostname-a-b-localhost", "url": "http://a.b.localhost/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: a.b.localhost"}},
+    {"label": "hostname-localhost-suffix-trailing-dot", "url": "http://foo.localhost./x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: foo.localhost."}},
+    {"label": "hostname-localhost-not-a-suffix", "url": "http://localhost.example.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"localhost.example.test": ["93.184.216.34"]}, "resolved": ["localhost.example.test"], "outcome": {"ok": true, "value": "http://localhost.example.test/x"}},
+    {"label": "hostname-localhost-not-a-prefix", "url": "http://notlocalhost.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"notlocalhost.test": ["93.184.216.34"]}, "resolved": ["notlocalhost.test"], "outcome": {"ok": true, "value": "http://notlocalhost.test/x"}},
+    {"label": "resolve-public", "url": "http://example.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"example.test": ["93.184.216.34"]}, "resolved": ["example.test"], "outcome": {"ok": true, "value": "http://example.test/x"}},
+    {"label": "resolve-public-v6", "url": "http://example.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"example.test": ["2606:4700:4700::1111"]}, "resolved": ["example.test"], "outcome": {"ok": true, "value": "http://example.test/x"}},
+    {"label": "resolve-private", "url": "http://private.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"private.test": ["10.0.0.5"]}, "resolved": ["private.test"], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: private.test"}, "//": "public-safety: allow-private-ip"},
+    {"label": "resolve-loopback", "url": "http://loopback.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"loopback.test": ["127.0.0.1"]}, "resolved": ["loopback.test"], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: loopback.test"}},
+    {"label": "resolve-link-local", "url": "http://linklocal.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"linklocal.test": ["169.254.169.254"]}, "resolved": ["linklocal.test"], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: linklocal.test"}},
+    {"label": "resolve-metadata-v6", "url": "http://metadata6.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"metadata6.test": ["fd00:ec2::254"]}, "resolved": ["metadata6.test"], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: metadata6.test"}},
+    {"label": "resolve-mixed-public-and-private", "url": "http://mixed.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"mixed.test": ["93.184.216.34", "10.0.0.5"]}, "resolved": ["mixed.test"], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: mixed.test"}, "//": "public-safety: allow-private-ip"},
+    {"label": "resolve-mixed-private-and-public", "url": "http://mixed.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"mixed.test": ["10.0.0.5", "93.184.216.34"]}, "resolved": ["mixed.test"], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: mixed.test"}, "//": "public-safety: allow-private-ip"},
+    {"label": "resolve-nxdomain", "url": "http://nxdomain.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"nxdomain.test": null}, "resolved": ["nxdomain.test"], "outcome": {"ok": false, "error": "Could not resolve host: nxdomain.test"}},
+    {"label": "resolve-empty-answer", "url": "http://empty.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"empty.test": []}, "resolved": ["empty.test"], "outcome": {"ok": true, "value": "http://empty.test/x"}},
+    {"label": "resolve-decimal-integer", "url": "http://2130706433/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"2130706433": ["127.0.0.1"]}, "resolved": ["2130706433"], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 2130706433"}},
+    {"label": "resolve-hex-integer", "url": "http://0x7f000001/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"0x7f000001": ["127.0.0.1"]}, "resolved": ["0x7f000001"], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 0x7f000001"}},
+    {"label": "resolve-short-form", "url": "http://127.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"127.1": ["127.0.0.1"]}, "resolved": ["127.1"], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 127.1"}},
+    {"label": "resolve-bare-zero", "url": "http://0/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"0": ["0.0.0.0"]}, "resolved": ["0"], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 0"}},
+    {"label": "resolve-octal-looking", "url": "http://010.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"010.0.0.1": ["8.0.0.1"]}, "resolved": ["010.0.0.1"], "outcome": {"ok": true, "value": "http://010.0.0.1/x"}, "//": "public-safety: allow-private-ip"},
+    {"label": "resolve-uppercase-host", "url": "http://EXAMPLE.TEST/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"example.test": ["93.184.216.34"]}, "resolved": ["example.test"], "outcome": {"ok": true, "value": "http://EXAMPLE.TEST/x"}},
+    {"label": "resolve-trailing-dot", "url": "http://example.test./x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"example.test.": ["93.184.216.34"]}, "resolved": ["example.test."], "outcome": {"ok": true, "value": "http://example.test./x"}},
+    {"label": "resolve-non-ascii", "url": "http://exämple.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"exämple.test": null}, "resolved": ["exämple.test"], "outcome": {"ok": false, "error": "Could not resolve host: exämple.test"}},
+    {"label": "resolve-percent-in-host", "url": "http://127.0.0.1%00/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"127.0.0.1%00": null}, "resolved": ["127.0.0.1%00"], "outcome": {"ok": false, "error": "Could not resolve host: 127.0.0.1%00"}},
+    {"label": "no-resolve-public-name", "url": "http://example.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": false}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://example.test/x"}},
+    {"label": "no-resolve-private-name", "url": "http://private.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": false}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://private.test/x"}},
+    {"label": "no-resolve-nxdomain", "url": "http://nxdomain.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": false}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://nxdomain.test/x"}},
+    {"label": "no-resolve-literal-loopback", "url": "http://127.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": false}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 127.0.0.1"}},
+    {"label": "no-resolve-literal-metadata", "url": "http://169.254.169.254/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": false}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 169.254.169.254"}},
+    {"label": "no-resolve-literal-public", "url": "http://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": false}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1/x"}},
+    {"label": "no-resolve-localhost", "url": "http://localhost/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": false}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: localhost"}},
+    {"label": "no-resolve-localhost-suffix", "url": "http://foo.localhost/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": false}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: foo.localhost"}},
+    {"label": "no-resolve-metadata-hostname", "url": "http://metadata.google.internal/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": false}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host is not a public destination: metadata.google.internal"}},
+    {"label": "no-resolve-bad-scheme", "url": "ftp://1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": false}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: ftp"}},
+    {"label": "no-resolve-credentials", "url": "http://user:pass@1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": false}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL must not embed credentials"}},
+    {"label": "no-resolve-malformed", "url": "http://[::1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": false}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "allow-hosts-exact-literal", "url": "http://127.0.0.1:8080/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": ["127.0.0.1"], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://127.0.0.1:8080/x"}},
+    {"label": "allow-hosts-case-insensitive", "url": "http://private.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": ["PRIVATE.TEST"], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"private.test": ["10.0.0.5"]}, "resolved": [], "outcome": {"ok": true, "value": "http://private.test/x"}, "//": "public-safety: allow-private-ip"},
+    {"label": "allow-hosts-name-blocklist", "url": "http://localhost/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": ["localhost"], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://localhost/x"}},
+    {"label": "allow-hosts-metadata", "url": "http://169.254.169.254/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": ["169.254.169.254"], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://169.254.169.254/x"}},
+    {"label": "allow-hosts-no-match", "url": "http://private.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": ["other.test"], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"private.test": ["10.0.0.5"]}, "resolved": ["private.test"], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: private.test"}, "//": "public-safety: allow-private-ip"},
+    {"label": "allow-hosts-empty", "url": "http://127.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: 127.0.0.1"}},
+    {"label": "allow-hosts-trailing-dot-not-normalised", "url": "http://private.test./x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": ["private.test"], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"private.test.": ["10.0.0.5"]}, "resolved": ["private.test."], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: private.test."}, "//": "public-safety: allow-private-ip"},
+    {"label": "allow-hosts-ipv6-literal", "url": "http://[::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": ["::1"], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://[::1]/x"}},
+    {"label": "allow-hosts-ipv6-bracketed-entry", "url": "http://[::1]/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": ["[::1]"], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Host resolves to a non-public address and was refused: ::1"}},
+    {"label": "allow-hosts-bad-scheme", "url": "ftp://127.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": ["127.0.0.1"], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: ftp"}},
+    {"label": "allow-hosts-malformed", "url": "http://[::1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": ["::1"], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "allow-private-loopback", "url": "http://127.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": true, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://127.0.0.1/x"}},
+    {"label": "allow-private-metadata", "url": "http://169.254.169.254/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": true, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://169.254.169.254/x"}},
+    {"label": "allow-private-rfc1918", "url": "http://10.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": true, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://10.0.0.1/x"}, "//": "public-safety: allow-private-ip"},
+    {"label": "allow-private-cgnat", "url": "http://100.64.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": true, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://100.64.0.1/x"}, "//": "public-safety: allow-private-ip"},
+    {"label": "allow-private-localhost", "url": "http://localhost/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": true, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://localhost/x"}},
+    {"label": "allow-private-metadata-hostname", "url": "http://metadata.google.internal/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": true, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://metadata.google.internal/x"}},
+    {"label": "allow-private-resolving-private", "url": "http://private.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": true, "allow_ports": null, "resolve": true}, "dns": {"private.test": ["10.0.0.5"]}, "resolved": [], "outcome": {"ok": true, "value": "http://private.test/x"}, "//": "public-safety: allow-private-ip"},
+    {"label": "allow-private-bad-scheme", "url": "ftp://127.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": true, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Scheme not allowed: ftp"}},
+    {"label": "allow-private-credentials", "url": "http://user:pass@127.0.0.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": true, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL must not embed credentials"}},
+    {"label": "allow-private-malformed", "url": "http://[::1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": true, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "allow-private-empty", "url": "", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": true, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "URL is empty"}},
+    {"label": "nfkc-fullwidth-solidus", "url": "http://example.test／evil/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "nfkc-fullwidth-colon", "url": "http://example.test：8080/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "nfkc-fullwidth-at", "url": "http://user＠example.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "nfkc-small-colon", "url": "http://example.test﹕/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "nfkc-account-of", "url": "http://example.test℀/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": false, "error": "Malformed URL"}},
+    {"label": "nfkc-non-ascii-host", "url": "http://exämple.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"exämple.test": ["93.184.216.34"]}, "resolved": ["exämple.test"], "outcome": {"ok": true, "value": "http://exämple.test/x"}},
+    {"label": "nfkc-fullwidth-letters", "url": "http://ｅｘａｍｐｌｅ.test/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"ｅｘａｍｐｌｅ.test": ["93.184.216.34"]}, "resolved": ["ｅｘａｍｐｌｅ.test"], "outcome": {"ok": true, "value": "http://ｅｘａｍｐｌｅ.test/x"}},
+    {"label": "returned-value-keeps-case", "url": "http://EXAMPLE.TEST/Path?Q=1#F", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {"example.test": ["93.184.216.34"]}, "resolved": ["example.test"], "outcome": {"ok": true, "value": "http://EXAMPLE.TEST/Path?Q=1#F"}},
+    {"label": "returned-value-keeps-percent-escapes", "url": "http://1.1.1.1/a%2Fb?q=%zz#f", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1/a%2Fb?q=%zz#f"}},
+    {"label": "returned-value-keeps-userinfo-free-at", "url": "http://@1.1.1.1/x", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://@1.1.1.1/x"}},
+    {"label": "returned-value-strips-outer-space", "url": "   http://1.1.1.1/x   ", "options": {"allowed_schemes": ["http", "https"], "allow_hosts": [], "allow_private": false, "allow_ports": null, "resolve": true}, "dns": {}, "resolved": [], "outcome": {"ok": true, "value": "http://1.1.1.1/x"}}
+  ]
+}

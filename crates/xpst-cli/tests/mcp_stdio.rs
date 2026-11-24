@@ -748,6 +748,73 @@ fn the_rust_server_speaks_the_python_wire() {
     }
 }
 
+/// The URL half of the argument-shape guard, on the wire: a blocked `source`
+/// answers `Blocked: …` and an allowed one reaches the handler.
+///
+/// **Rust-only, deliberately.** The blocked half is byte-compared against the
+/// Python capture in `the_rust_server_speaks_the_python_wire` (the `mutations`
+/// scenario carries nine `kb_add`/`xpst_backfill` rows). The allowed half cannot
+/// be captured: Python's `kb_add` would really fetch the URL through yt-dlp, and
+/// the capture must not touch the network. So this test drives the Rust server
+/// alone and asserts the allowed URL reaches the *stub* — the body is
+/// `kb_add is not implemented yet: …`, not `Blocked: …`. That is exactly what
+/// "the guard let it through to dispatch" looks like while `kb_add` is unported,
+/// and it is the assertion that would catch a guard that refused everything.
+#[test]
+fn an_allowed_url_reaches_the_handler() {
+    let dir = profile("url-guard", &json!({}));
+    let mut server = Server::start(
+        binary(),
+        &["mcp", "start"],
+        &dir,
+        &json!({"XPST_MCP_ALLOW_MUTATIONS": "1"}),
+    );
+    server.request(
+        1,
+        "initialize",
+        json!({
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "url-guard", "version": "0"},
+        }),
+    );
+
+    let blocked = server.request(
+        2,
+        "tools/call",
+        json!({"name": "kb_add", "arguments": {"source": "http://127.0.0.1:8080/x"}}),
+    );
+    assert_eq!(blocked["result"]["isError"], json!(true));
+    assert_eq!(
+        blocked["result"]["content"][0]["text"],
+        json!(
+            "Blocked: kb_add argument 'source' was refused — Host resolves to a non-public \
+             address and was refused: 127.0.0.1. Media paths must live inside the xPST config \
+             dir or a user media folder (override with XPST_MEDIA_ROOTS); URLs must be public \
+             http(s)."
+        )
+    );
+
+    // A literal public address: no DNS, so this is offline and deterministic.
+    let allowed = server.request(
+        3,
+        "tools/call",
+        json!({"name": "kb_add", "arguments": {"source": "http://1.1.1.1/clip.mp4"}}),
+    );
+    assert_eq!(allowed["result"]["isError"], json!(true));
+    let body = allowed["result"]["content"][0]["text"]
+        .as_str()
+        .expect("a text body");
+    assert!(
+        !body.starts_with("Blocked:"),
+        "the guard refused an allowed URL: {body}"
+    );
+    assert_eq!(
+        body,
+        "kb_add is not implemented yet: ingests into the knowledge store, which is not ported"
+    );
+}
+
 /// A bare `xpst mcp` starts the server, because the shipped Click group is
 /// `invoke_without_command=True` and `python -m xpst mcp` is the documented
 /// stdio entry point. The Rust group used to print usage instead.
