@@ -1056,6 +1056,64 @@ pub fn search(
     exit::SUCCESS
 }
 
+/// `xpst kb migrate-store` — copy the JSON store into LanceDB.
+///
+/// Parity target: `src/xpst/knowledge/cli_kb.py::kb_migrate_store`.
+///
+/// Two of the three branches are local and deterministic: a workspace with no
+/// `nuggets.json` answers `{"ok": true, "migrated": 0, "reason": "no JSON store
+/// found"}`, and a store that exists but has no LanceDB answers
+/// `{"ok": false, "error": "lancedb is not installed", "hint": "uv sync --extra
+/// knowledge"}` with exit 1.
+///
+/// **Divergence, recorded in the ledger note:** the vector store is not ported,
+/// so the Rust engine always takes the "lancedb is not installed" branch. On a
+/// machine with the knowledge extra installed Python would migrate the nuggets
+/// and areas and report the counts; here the answer is the honest refusal.
+pub fn migrate_store(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let json = json_flag(global, leaf);
+    let workspace = leaf_string(leaf, "opt:workspace").unwrap_or_else(|| "default".to_string());
+    // `create=False`: probing a workspace that was never used must not create it.
+    let root = match resolve_workspace(&workspace, false) {
+        Ok(root) => root,
+        Err(error) => return workspace_failure(error, json, out, err),
+    };
+
+    if !root.join("nuggets.json").exists() {
+        if json {
+            let payload = object(vec![
+                ("ok", boolean(true)),
+                ("migrated", integer(0)),
+                ("reason", string("no JSON store found")),
+            ]);
+            let _ = write_python_json(out, &payload);
+        } else {
+            let _ = write_text(out, "No JSON store to migrate.");
+        }
+        return exit::SUCCESS;
+    }
+
+    if json {
+        let payload = object(vec![
+            ("ok", boolean(false)),
+            ("error", string("lancedb is not installed")),
+            ("hint", string("uv sync --extra knowledge")),
+        ]);
+        let _ = write_python_json(out, &payload);
+    } else {
+        let _ = write_text(
+            out,
+            "lancedb is not installed — `uv sync --extra knowledge`",
+        );
+    }
+    exit::GENERAL
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,7 +4,7 @@
 
 One row per leaf command of the shipped CLI. `status` is `implemented` when the Rust engine runs the command and `stub` when it answers `not implemented in the Rust engine yet`. The two columns either side are the questions a reader actually has: which crate owns the behaviour, and whether the Python implementation they are comparing against makes an outbound network call.
 
-**43 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
+**48 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
 
 ## Columns
 
@@ -19,10 +19,10 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `app` | implemented | xpst-app | none |
 | `auth` | stub | xpst-auth | yes |
 | `backfill` | stub | xpst-core | yes |
-| `best-time` | stub | xpst-store | none |
+| `best-time` | implemented | xpst-store | none |
 | `bio` | implemented | xpst-cli | none |
 | `byo clear` | implemented | xpst-auth | none |
-| `byo set` | stub | xpst-auth | possible |
+| `byo set` | implemented | xpst-auth | possible |
 | `byo status` | implemented | xpst-auth | none |
 | `capabilities` | implemented | xpst-provider | none |
 | `chat platforms` | implemented | xpst-provider | none |
@@ -44,14 +44,14 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `failures list` | implemented | xpst-state | none |
 | `failures retry` | stub | xpst-core | yes |
 | `followers` | stub | xpst-provider | yes |
-| `generate caption` | stub | xpst-core | possible |
-| `generate ideas` | stub | xpst-core | possible |
+| `generate caption` | implemented | xpst-core | possible |
+| `generate ideas` | implemented | xpst-core | possible |
 | `health` | stub | xpst-provider | yes |
 | `kb add` | stub | xpst-store | possible |
 | `kb areas` | implemented | xpst-store | none |
 | `kb course` | implemented | xpst-store | none |
 | `kb doctor` | implemented | xpst-store | none |
-| `kb migrate-store` | stub | xpst-store | none |
+| `kb migrate-store` | implemented | xpst-store | none |
 | `kb organize` | stub | xpst-store | possible |
 | `kb query` | implemented | xpst-store | none |
 | `kb reembed` | stub | xpst-store | possible |
@@ -110,6 +110,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 |---|---|---|
 | `config show` | xpst-config | Masked YAML/JSON document; byte-compared with the Python output. |
 | `byo clear` | xpst-auth | Deletes the stored app pair and clears the config mirror; payload byte-compared with the Python CLI (the config file is edited in place, not rewritten from the model). |
+| `byo set` | xpst-auth | Validates the app id/secret with Python's two patterns, stores the pair in the Fernet credential store, mirrors the id into `accounts.<platform>` and reports the masked `byo status` view; payload byte-compared with the Python CLI (the config file is edited in place, not rewritten from the model). |
 | `byo status` | xpst-auth | Reads the Fernet credential store the Python engine writes (scrypt + AES-128-CBC + HMAC-SHA256) and the config/env fallbacks; payload byte-compared with the Python CLI. |
 | `capabilities` | xpst-provider | Serves the capability document captured from `xpst.content.capability_document()`; the payload is diffed against a live `python -m xpst capabilities --json` by the local-surface check. |
 | `chat platforms` | xpst-provider | Readiness rows from the captured chat read-path registry plus the config channels and the YouTube token check; payload byte-compared with the Python CLI (checked_at masked). |
@@ -128,6 +129,8 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `schedule pause` | xpst-state | Writes the same `schedule.paused.json` marker (0600, `json.dumps(indent=2)`) under the same `.schedule.lock`; payload byte-compared with the Python CLI. |
 | `schedule resume` | xpst-state | Removes only the pause marker (snapshots survive) and reports `was_paused`; payload byte-compared with the Python CLI. |
 | `failures list` | xpst-state | Dead-letter rows with status/resolved/age_hours, byte-compared with `failures_list --json`. |
+| `generate caption` | xpst-core | The deterministic caption generator (`generate_caption_deterministic`): sentence split, keyword hashtags, three variants and Python's per-platform truncation; payload byte-compared with the Python CLI. The LLM path is not ported, so a configured `XPST_KB_LLM_ENABLED` endpoint is a named divergence. |
+| `generate ideas` | xpst-core | The deterministic idea templates (`generate_ideas_deterministic`) with the shipped rotation, and the payload echoing the raw `--topic`; payload byte-compared with the Python CLI. The LLM path is not ported (named divergence). |
 | `failures clear` | xpst-state | Clears the dead-letter queue through the same tolerant loader `status` uses (v1 migration included) and writes Python's `json.dump` separators, keeping `errors: {}` for the per-video form; payload byte-compared with the Python CLI (written keys keep the read order). |
 | `state export` | xpst-state | Validates `state.json` as JSON and copies it byte-for-byte (mode preserved); payload and exported file byte-compared with the Python CLI. |
 | `state import` | xpst-state | Validates `posted_videos`, backs the current file up as `state.json.pre-import-<stamp>` and copies the source in; payload and resulting `state.json` byte-compared with the Python CLI. An explicit `n` at the prompt exits 0 with empty stderr (Click's `confirm()` returns False); only EOF aborts with `Aborted!` and exit 1. |
@@ -145,10 +148,12 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `security-audit` | xpst-cli | The six live checks (credential file modes, dashboard bind, MCP readonly, provider mode, ffmpeg, encrypted storage) with `indent=2` ASCII-escaped JSON; payload byte-compared with the Python CLI. |
 | `mcp list` | xpst-mcp | The captured Python tool registry in Python's order, rendered with `json.dumps(indent=2)`; payload byte-compared with the Python CLI. |
 | `app` | xpst-app | Locates the installed desktop shell in the same preference order and prints the same not-found guidance (exit 1); byte-compared with the Python CLI. |
+| `best-time` | xpst-store | Hour-of-week engagement buckets from `analytics.db` (`BestTimeAnalyzer.analyze`), ranked by Python's rounded average with the first snapshot per post and `collection_status: failed` rows excluded; payload byte-compared with the Python CLI on empty, seeded and platform-filtered ledgers. |
 | `kb areas` | xpst-store | Discovered knowledge areas in course order (`order_index`, label, id) with their nugget counts, read from the workspace's `areas.json`; payload byte-compared with the Python CLI. The reader reproduces `JsonKnowledgeStore._load_file`: a decode failure, an unknown key or a missing required key renames the file to `<name>.corrupt` and starts empty, while a non-object document escapes as Python's `AttributeError`. An invalid `--workspace` reproduces Python's uncaught `ValueError` contract — empty stdout, exit 1 — with the exception line on stderr instead of the traceback frames. |
 | `schedule remove` | xpst-state | Cancels one entry through the same local-store contract (`operation`/`scope`/`found`/`cancelled`/`entry`, `POST_NOT_FOUND` on an unknown id) with `--dry-run`; payload and resulting `schedule.json` byte-compared with the Python CLI. Control characters in a caption are escaped (`\u0001`) in the written file, so both engines can read it back. |
 | `kb course` | xpst-store | The assembled course outline (`assemble_course`): areas in course order, each with its nuggets in beginner->advanced order and a trailing `Unassigned` module for unclaimed nuggets; payload byte-compared with the Python CLI. The store reader is strict like `Nugget.from_dict`/`Area.from_dict`, so an unknown or missing key quarantines the file exactly as Python does. |
 | `kb doctor` | xpst-store | The read-only health report (`doctor.diagnose`): dependency probe, store integrity, embedding widths, orphaned areas/nuggets, queue counts and the manifest source count, with the same severities, messages and exit code; payload byte-compared with the Python CLI. The optional-dependency probe asks an interpreter out-of-process (`XPST_PYTHON`, else `python3`), because a Rust binary has no `sys.path`. |
+| `kb migrate-store` | xpst-store | The JSON-store probe and the honest LanceDB refusal (`{"ok": false, "error": "lancedb is not installed"}`, exit 1) plus the `no JSON store found` answer; payload byte-compared with the Python CLI. The vector store is not ported, so a machine with the knowledge extra would migrate in Python (named divergence). |
 | `kb query` | xpst-store | Substring search over the JSON store (`query_nuggets`): `workspace`/`query`/`mode`/`count`/`nuggets` with citation, timestamps, a null score and the area id; payload byte-compared with the Python CLI. The embedding stack is not ported, so the semantic path is not taken — the same answer Python gives without the knowledge extra or on an unembedded store. |
 | `search` | xpst-store | `kb query` on the `default` workspace rendered with `json.dumps(indent=2)` (ASCII-escaped), including Python's text-mode quirk of reading a `hits` key the payload never carries; payload byte-compared with the Python CLI. |
 
@@ -165,6 +170,10 @@ Named on purpose: a difference that is not written down is a bug nobody found.
 * `kb areas`/`kb course`/`kb doctor`/`kb query`/`search` with an invalid `--workspace` reproduce Python's uncaught `ValueError` contract — empty stdout, exit 1 — but print the exception line (`ValueError: Invalid workspace name: …`) instead of the traceback frames, which name Python files and line numbers. The same applies to a store the Python loader raises out of: a non-object document (`AttributeError`) or a non-coercible value (`ValueError`) prints the exception line and exits 1.
 * Usage errors print `xpst` as the program name where Click prints `python -m xpst` (the harness invokes the Python engine as a module). The message body — `Usage:`, `Try '… --help'`, `Error: Invalid value for '--port' / '-p': 'abc' is not a valid integer.` — is byte-identical.
 * `version`, `doctor` and `config validate` print a different `--json` payload from the Python engine, not a differently-rendered one: `version` reports the Rust engine's identity where Python lists its own dependency versions, `doctor` is local-only diagnostics where Python probes every platform live, and `config validate` runs the schema checks where Python also checks the download and log directories, the per-platform credential files and the rate limits. The renderer is shared (Python's `json.dumps` separators and insertion order), so the difference is the payload itself; porting the live doctor and the full validate check list are separate slices.
+* `generate caption` and `generate ideas` always take the deterministic path. Python tries the KB LLM first (`XPST_KB_LLM_ENABLED` plus a base URL) and only falls back to the templates when none is configured; the LLM client is not ported, so a machine with the knowledge extra and an endpoint gets model-written text from Python and template text here. The templates, hashtag table, character limits, truncation rules and payload shape are the shipped behaviour.
+* `kb migrate-store` always answers `{"ok": false, "error": "lancedb is not installed"}` (exit 1) when a JSON store exists: the vector store is not ported. On a machine without the knowledge extra that is exactly Python's answer; with it installed Python migrates the nuggets and areas and reports the counts. The `no JSON store found` branch is identical.
+* `byo set` edits the app-id field in the raw `config.yaml` instead of rewriting the whole document from the Pydantic model (the same choice `byo clear` makes), so the file differs from Python's while the payload does not. Its interactive secret prompt reads a line from stdin rather than `getpass`, so the secret is echoed; the non-interactive path (`--app-id` plus the platform's `XPST_*_APP_SECRET`) is identical.
+* `best-time` skips a `metric_snapshots` row whose `views`/`likes`/`comments`/`shares` column holds text, where Python raises `TypeError` out of `analyze()` (its `try` only wraps the query) and exits 1. A ledger the shipped writer produced is integer-typed, so only a hand-edited database can observe the difference.
 * `kb query` and `search` always take `query_nuggets`' substring path: the embedding stack (fastembed + the vector stores) is not ported, so `mode` is always `substring` and `score` is always null. That is the same answer Python gives without the knowledge extra and on any store that holds no vectors; a machine with the extra and an embedded store would get `mode: semantic` from Python and substring hits from the Rust engine. The JSON store is the only backend read — a workspace whose nuggets live only in sqlite-vec or LanceDB reads as empty.
 * `kb doctor`'s optional-dependency probe asks an interpreter out-of-process (`XPST_PYTHON`, else `python3`, else `python`) with `importlib.util.find_spec`, because a Rust binary has no `sys.path`. With no interpreter at all the knowledge extra is reported absent. The finding is therefore a property of the machine, which is why the checked-in fixture masks it (`mask_findings`) and the two-engine harness pins `XPST_PYTHON` so both engines answer from the same interpreter.
 * `kb course`/`kb doctor` order mixed-type values (a hand-edited `order_index` that is a string beside an integer, a non-numeric `timestamp_start`) with numbers before strings instead of raising the `TypeError` Python's `sorted` raises. A store the shipped writer produced is homogeneous, so the order is identical; only a hand-corrupted file can observe the difference.

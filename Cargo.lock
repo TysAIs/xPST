@@ -3931,6 +3931,7 @@ dependencies = [
  "clap",
  "getrandom 0.4.3",
  "jiff",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3939,6 +3940,7 @@ dependencies = [
  "xpst-config",
  "xpst-media",
  "xpst-state",
+ "xpst-store",
 ]
 
 [[package]]

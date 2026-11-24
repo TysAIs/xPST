@@ -27,7 +27,7 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 105;
+const EXPECTED_SCENARIOS: usize = 121;
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -80,6 +80,29 @@ impl Profile {
                 std::fs::create_dir_all(parent).expect("seed directory");
             }
             std::fs::write(&path, content.as_str().expect("seed is text")).expect("seed file");
+        }
+    }
+
+    /// Seed a SQLite ledger (`analytics.db`) from the recorded statements.
+    ///
+    /// A database cannot be checked in as text, so the fixture carries the DDL
+    /// and the rows and both engines build the file from them — the capture
+    /// script with `sqlite3`, this test with `rusqlite`.
+    fn seed_sqlite(&self, databases: &Value) {
+        let Some(entries) = databases.as_object() else {
+            return;
+        };
+        for (relative, statements) in entries {
+            let path = self.dir.join(relative);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("seed directory");
+            }
+            let connection = rusqlite::Connection::open(&path).expect("seed ledger");
+            for statement in statements.as_array().expect("statements are a list") {
+                connection
+                    .execute(statement.as_str().expect("statement is text"), [])
+                    .expect("seed statement");
+            }
         }
     }
 
@@ -427,6 +450,7 @@ fn every_recorded_scenario_matches_the_python_engine() {
         let name = row["name"].as_str().expect("scenario name");
         let profile = Profile::new(name);
         profile.seed(&row["seed"]);
+        profile.seed_sqlite(&row["sqlite"]);
         profile.seed_credentials(&row["credential"]);
         profile.seed_credential_json(&row["credential_json"]);
         let argv = argv_for(row, &profile);
