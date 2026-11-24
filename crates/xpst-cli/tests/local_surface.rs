@@ -27,7 +27,7 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 149;
+const EXPECTED_SCENARIOS: usize = 169;
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -432,6 +432,49 @@ fn mask_for(row: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn mask_file_keys_for(row: &Value) -> Vec<String> {
+    row.get("mask_file_keys")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Replace the *values* of named top-level keys inside a written JSON file.
+///
+/// `schedule add` writes a `uuid4` id, an operation id and a wall-clock
+/// `created_at`; two runs never agree on them. Only those values are
+/// substituted — every other byte, including the key order and the
+/// `json.dump(indent=2)` separators, is still compared, which is the contract
+/// the fire path reads back.
+fn mask_file_keys(text: &str, keys: &[String]) -> String {
+    if keys.is_empty() {
+        return text.to_owned();
+    }
+    let Ok(Value::Array(entries)) = serde_json::from_str::<Value>(text) else {
+        return text.to_owned();
+    };
+    let mut out = text.to_owned();
+    for entry in &entries {
+        let Some(object) = entry.as_object() else {
+            continue;
+        };
+        for key in keys {
+            let Some(value) = object.get(key) else {
+                continue;
+            };
+            let literal = serde_json::to_string(value).unwrap_or_default();
+            out = out.replace(&literal, "\"<TS>\"");
+        }
+    }
+    out
+}
+
 fn argv_for(row: &Value, profile: &Profile) -> Vec<String> {
     let mut argv: Vec<String> = row["argv"]
         .as_array()
@@ -533,11 +576,13 @@ fn assert_files_match(row: &Value, profile: &Profile, scenario: &str) {
         !expected.is_empty(),
         "scenario `{scenario}` records an empty files map"
     );
+    let mask_keys = mask_file_keys_for(row);
     for (relative, want) in expected {
         let path = profile.path().join(relative);
         let actual = std::fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("scenario `{scenario}`: {relative} unreadable: {error}"))
             .replace(&profile.path().display().to_string(), "<PROFILE>");
+        let actual = mask_file_keys(&actual, &mask_keys);
         let want = want.as_str().unwrap_or_default();
         if let (Ok(actual_json), Ok(want_json)) = (
             serde_json::from_str::<Value>(&actual),

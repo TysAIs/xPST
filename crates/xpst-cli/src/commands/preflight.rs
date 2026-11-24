@@ -33,8 +33,9 @@ use xpst_authflow::AuthMode;
 use xpst_config::Value as YamlValue;
 use xpst_core::content::content_profile;
 use xpst_core::preflight::{
-    self, AuthReadiness, Constraints, Envelope, MediaVerdict, Number, PlanRequest, PreflightHost,
-    PreflightIssue, QuotaReadiness, RouteDestination, RoutePlan, TransformPlan,
+    self, AuthReadiness, CheckStatus, Constraints, Envelope, MediaFilePlan, MediaVerdict, Number,
+    PlanRequest, PreflightHost, PreflightIssue, QuotaReadiness, RouteDestination, RoutePlan,
+    TransformPlan,
 };
 use xpst_core::visibility;
 
@@ -51,7 +52,39 @@ use crate::{exit, flag, GlobalOptions};
 /// It is NOT the dataclass default: `XPSTConfig.load` merges `DEFAULT_CONFIG`
 /// over a fresh instance, and that table turns Threads off. Measured against
 /// `XPSTConfig.load()` on a `version: 4`-only profile.
-const DEFAULT_ENABLED: [&str; 4] = ["youtube", "x", "instagram", "tiktok"];
+pub(crate) const DEFAULT_ENABLED: [&str; 4] = ["youtube", "x", "instagram", "tiktok"];
+
+/// `post_preflight.DESTINATION_ORDER` — the six destinations `-p all` resolves
+/// to.
+///
+/// Deliberately NOT `PUBLISH_DESTINATIONS` (eight): Rumble and Bluesky are
+/// publish targets but not ingest destinations, so `verify-media -p all` never
+/// verifies against them, while an explicit `-p` can still name any of the
+/// five the Click choice allows.
+pub(crate) const DESTINATION_ORDER: [&str; 6] =
+    ["youtube", "x", "instagram", "tiktok", "threads", "facebook"];
+
+/// `post_preflight.enabled_destinations(config)`: the destinations `-p all`
+/// means, in the canonical order.
+pub(crate) fn enabled_destinations(view: &ConfigView) -> Vec<String> {
+    DESTINATION_ORDER
+        .iter()
+        .filter(|platform| platform_enabled(view, platform))
+        .map(|platform| (*platform).to_owned())
+        .collect()
+}
+
+/// `bool(getattr(getattr(config, platform, None), "enabled", False))`, with
+/// `DEFAULT_CONFIG`'s defaults for a key the file omits.
+///
+/// The same rule [`PreflightHost::enabled`] applies, so `-p all` and the route
+/// plan can never disagree about which destinations are on.
+pub(crate) fn platform_enabled(view: &ConfigView, platform: &str) -> bool {
+    match view.raw(platform, "enabled") {
+        Some(value) => config_view::truthy(value),
+        None => DEFAULT_ENABLED.contains(&platform),
+    }
+}
 
 /// `QuotaManager.DEFAULT_QUOTAS` — the operator caps a fresh profile starts with.
 const DEFAULT_QUOTAS: [(&str, i64); 4] =
@@ -131,6 +164,9 @@ pub fn run(
         include_readiness: true,
         probe_media: true,
         visibility,
+        // `build_route_plan` pins this off, so the route plan never spawns the
+        // loudness pass; `verify-media` is the command that turns it on.
+        check_loudness: false,
     };
     let plan = preflight::build_route_plan(&host, &request);
     let payload = plan_value(&plan);
@@ -204,7 +240,7 @@ pub fn run(
 
 /// The machine-dependent half of the plan: config, credentials, quota ledger,
 /// ffprobe and the ban-risk registry.
-struct Host<'a> {
+pub(crate) struct Host<'a> {
     view: &'a ConfigView,
     config_dir: PathBuf,
     env: &'a dyn Fn(&str) -> Option<String>,
@@ -224,7 +260,7 @@ struct QuotaRow {
 }
 
 impl<'a> Host<'a> {
-    fn new(
+    pub(crate) fn new(
         view: &'a ConfigView,
         config_dir: &Path,
         env: &'a dyn Fn(&str) -> Option<String>,
@@ -1130,7 +1166,7 @@ fn plan_transform(path: &str, platform: &str, encoding: &Encoding) -> TransformP
 // ── The payload ─────────────────────────────────────────────────────────────
 
 /// `RoutePlan.to_dict()`, in Python's key order.
-fn plan_value(plan: &RoutePlan) -> YamlValue {
+pub(crate) fn plan_value(plan: &RoutePlan) -> YamlValue {
     let posting = plan.posting_destinations();
     let skipped = plan.skipped_unconnected();
     let unsupported = plan.unsupported();
@@ -1186,7 +1222,7 @@ fn reason_value(reason: &preflight::Reason) -> YamlValue {
     ])
 }
 
-fn issue_value(issue: &PreflightIssue) -> YamlValue {
+pub(crate) fn issue_value(issue: &PreflightIssue) -> YamlValue {
     object(vec![
         ("code", string(issue.code.clone())),
         ("message", string(issue.message.clone())),
@@ -1340,7 +1376,7 @@ fn envelope_value(envelope: &Envelope) -> YamlValue {
     ])
 }
 
-fn constraints_value(constraints: &Constraints) -> YamlValue {
+pub(crate) fn constraints_value(constraints: &Constraints) -> YamlValue {
     object(vec![
         (
             "duration",
@@ -1421,7 +1457,7 @@ fn constraints_value(constraints: &Constraints) -> YamlValue {
     ])
 }
 
-fn transform_value(transform: &TransformPlan) -> YamlValue {
+pub(crate) fn transform_value(transform: &TransformPlan) -> YamlValue {
     object(vec![
         ("platform", string(transform.platform.clone())),
         ("action", string(transform.action.clone())),
@@ -1472,6 +1508,236 @@ fn visibility_value(entry: &visibility::PlanEntry) -> YamlValue {
         ("route", string(entry.route.clone())),
         ("enforced", string(entry.enforced.clone())),
         ("note", entry.note.as_deref().map_or_else(null, string)),
+    ])
+}
+
+// ── `PostPlanResult.to_dict()` ──────────────────────────────────────────────
+//
+// `verify-media` reports the post plan itself (`--plan`), and `schedule add`
+// reports the route plan; both are Python dataclass `to_dict()` documents, so
+// the key order below is the dataclass field order, not a choice.
+
+/// `PreflightIssue.to_dict()` — the four-key form the post-plan document uses.
+///
+/// The route plan renders its blockers as plain `{code, message}` dicts
+/// (`RouteDestination.to_dict` does `dict(item)`), so the two documents
+/// genuinely differ and both renderers are needed.
+pub(crate) fn preflight_issue_value(issue: &PreflightIssue) -> YamlValue {
+    object(vec![
+        ("code", string(issue.code.clone())),
+        ("message", string(issue.message.clone())),
+        ("severity", string(issue.severity.as_str())),
+        (
+            "media_path",
+            issue.media_path.as_deref().map_or_else(null, string),
+        ),
+    ])
+}
+
+/// `PlatformReadiness.to_dict()`.
+pub(crate) fn readiness_value(readiness: &preflight::PlatformReadiness) -> YamlValue {
+    object(vec![
+        ("enabled", boolean(readiness.enabled)),
+        (
+            "auth",
+            object(vec![
+                ("ready", boolean(readiness.auth.ready)),
+                ("status", string(readiness.auth.status.clone())),
+                ("detail", string(readiness.auth.detail.clone())),
+                ("auth_mode", string(readiness.auth.auth_mode.clone())),
+            ]),
+        ),
+        (
+            "quota",
+            object(vec![
+                ("ready", boolean(readiness.quota.ready)),
+                (
+                    "remaining",
+                    object(vec![
+                        ("daily", readiness.quota.daily.map_or_else(null, integer)),
+                        ("hourly", readiness.quota.hourly.map_or_else(null, integer)),
+                    ]),
+                ),
+                ("detail", string(readiness.quota.detail.clone())),
+            ]),
+        ),
+        ("ready", boolean(readiness.ready())),
+    ])
+}
+
+/// `MediaReport.to_dict(include_probe=True)` — the `media_spec` block.
+///
+/// The probe is the raw `ffprobe` document, re-parsed into an order-preserving
+/// value so its keys stay in ffprobe's order.
+pub(crate) fn media_spec_value(item: &MediaFilePlan, platform: &str) -> YamlValue {
+    let checks = item
+        .checks
+        .iter()
+        .map(|check| {
+            object(vec![
+                ("name", string(check.name.clone())),
+                ("status", string(check.status.as_str())),
+                ("detail", string(check.detail.clone())),
+            ])
+        })
+        .collect();
+    object(vec![
+        ("path", string(item.path.clone())),
+        ("platform", string(platform)),
+        (
+            "ok",
+            boolean(item.checks.iter().all(|c| c.status != CheckStatus::Error)),
+        ),
+        ("checks", array(checks)),
+        ("probe", probe_value(item.probe.as_deref())),
+    ])
+}
+
+/// The raw probe text as an ordered document, or `null`.
+fn probe_value(raw: Option<&str>) -> YamlValue {
+    match raw {
+        Some(text) => serde_json::from_str::<YamlValue>(text).unwrap_or(YamlValue::Null),
+        None => null(),
+    }
+}
+
+/// `MediaFilePlan.to_dict()`.
+pub(crate) fn media_file_value(item: &MediaFilePlan, platform: &str) -> YamlValue {
+    object(vec![
+        ("path", string(item.path.clone())),
+        ("file_type", string(item.file_type.clone())),
+        ("exists", item.exists.map_or_else(null, boolean)),
+        ("file_exists", item.exists.map_or_else(null, boolean)),
+        ("is_file", item.is_file.map_or_else(null, boolean)),
+        (
+            "size_bytes",
+            item.size_bytes
+                .map_or_else(null, |value| integer(value as i64)),
+        ),
+        ("ffprobe", probe_value(item.probe.as_deref())),
+        ("media_spec", media_spec_value(item, platform)),
+        (
+            "duration_seconds",
+            item.duration_seconds.map_or_else(null, number),
+        ),
+        ("aspect_ratio", item.aspect_ratio.map_or_else(null, number)),
+        (
+            "transform",
+            item.transform.as_ref().map_or_else(null, transform_value),
+        ),
+        (
+            "warnings",
+            array(item.warnings.iter().map(preflight_issue_value).collect()),
+        ),
+        (
+            "hard_blockers",
+            array(
+                item.hard_blockers
+                    .iter()
+                    .map(preflight_issue_value)
+                    .collect(),
+            ),
+        ),
+        ("ok", boolean(item.ok())),
+    ])
+}
+
+/// `PlatformPlan.to_dict()`.
+pub(crate) fn platform_plan_value(plan: &preflight::PlatformPlan) -> YamlValue {
+    object(vec![
+        ("platform", string(plan.platform.clone())),
+        ("effective_caption", string(plan.effective_caption.clone())),
+        ("caption", string(plan.effective_caption.clone())),
+        (
+            "media",
+            array(
+                plan.media
+                    .iter()
+                    .map(|item| media_file_value(item, &plan.platform))
+                    .collect(),
+            ),
+        ),
+        (
+            "transform",
+            plan.transform().map_or_else(null, transform_value),
+        ),
+        (
+            "transforms",
+            array(plan.transforms().into_iter().map(transform_value).collect()),
+        ),
+        (
+            "constraints",
+            plan.constraints
+                .as_ref()
+                .map_or_else(|| object(Vec::new()), constraints_value),
+        ),
+        ("readiness", readiness_value(&plan.readiness)),
+        ("enabled", boolean(plan.readiness.enabled)),
+        ("auth_ready", boolean(plan.readiness.auth.ready)),
+        ("quota_ready", boolean(plan.readiness.quota.ready)),
+        (
+            "warnings",
+            array(plan.warnings.iter().map(preflight_issue_value).collect()),
+        ),
+        (
+            "hard_blockers",
+            array(
+                plan.hard_blockers
+                    .iter()
+                    .map(preflight_issue_value)
+                    .collect(),
+            ),
+        ),
+        ("ready", boolean(plan.ready())),
+        ("ok", boolean(plan.ready())),
+    ])
+}
+
+/// `PostPlanResult.to_dict()`.
+pub(crate) fn post_plan_value(plan: &preflight::PostPlanResult) -> YamlValue {
+    object(vec![
+        ("ok", boolean(plan.ok())),
+        ("ready", boolean(plan.ready())),
+        (
+            "platforms",
+            object(
+                plan.platforms
+                    .iter()
+                    .map(|item| (item.platform.as_str(), platform_plan_value(item)))
+                    .collect(),
+            ),
+        ),
+        (
+            "hard_blockers",
+            array(
+                plan.hard_blockers()
+                    .into_iter()
+                    .map(preflight_issue_value)
+                    .collect(),
+            ),
+        ),
+        (
+            "warnings",
+            array(
+                plan.warnings()
+                    .into_iter()
+                    .map(preflight_issue_value)
+                    .collect(),
+            ),
+        ),
+        (
+            "request_blockers",
+            array(
+                plan.request_blockers
+                    .iter()
+                    .map(preflight_issue_value)
+                    .collect(),
+            ),
+        ),
+        (
+            "error",
+            plan.error().map_or_else(null, preflight_issue_value),
+        ),
     ])
 }
 

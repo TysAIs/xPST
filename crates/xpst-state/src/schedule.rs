@@ -145,6 +145,145 @@ fn local_time(entry: &Value) -> Option<String> {
     )
 }
 
+// ── `schedule add` ──────────────────────────────────────────────────────────
+
+/// Everything `ScheduleManager.add()` persists, already resolved by the caller.
+///
+/// The caller owns the clock, the zone and the randomness (a Rust `xpst-state`
+/// has no RNG and no wall clock of its own); this type owns the *document* —
+/// the key order, the UTC storage and the local view — because that is the
+/// contract the fire path and every reader depend on.
+pub struct NewEntry {
+    /// `str(uuid.uuid4())[:8]`.
+    pub id: String,
+    /// `str(uuid.uuid4())` — also stored as `idempotency_key`.
+    pub operation_id: String,
+    /// The resolved absolute media path, or `""` for a text post.
+    pub video_path: String,
+    pub caption: String,
+    /// `{platform: caption}` overrides, in the order the caller supplied them.
+    pub per_platform_captions: Vec<(String, String)>,
+    pub platforms: Vec<String>,
+    /// `to_utc(scheduled_time).isoformat()` — always `+00:00`.
+    pub scheduled_time_utc: String,
+    /// The IANA name of the zone the entry was entered in.
+    pub timezone: String,
+    /// `datetime.now().isoformat()` — naive local wall clock.
+    pub created_at: String,
+    pub repeat_rule: Option<String>,
+    pub content_type: Option<String>,
+    pub media_paths: Vec<String>,
+}
+
+/// `ScheduleManager.add()`'s entry document, in Python's key order.
+///
+/// `content_type` and `media_paths` are appended only when set, exactly as the
+/// Python `if content_type:` / `if media_paths:` blocks do — a legacy-shaped
+/// entry must not gain empty keys.
+#[must_use]
+pub fn new_entry(spec: &NewEntry) -> Value {
+    let mut entry = Map::new();
+    entry.insert("id".to_string(), Value::String(spec.id.clone()));
+    entry.insert(
+        "operation_id".to_string(),
+        Value::String(spec.operation_id.clone()),
+    );
+    entry.insert(
+        "idempotency_key".to_string(),
+        Value::String(spec.operation_id.clone()),
+    );
+    entry.insert(
+        "video_path".to_string(),
+        Value::String(spec.video_path.clone()),
+    );
+    entry.insert("caption".to_string(), Value::String(spec.caption.clone()));
+    let mut captions = Map::new();
+    for (platform, text) in &spec.per_platform_captions {
+        captions.insert(platform.clone(), Value::String(text.clone()));
+    }
+    entry.insert("per_platform_captions".to_string(), Value::Object(captions));
+    entry.insert(
+        "platforms".to_string(),
+        Value::Array(
+            spec.platforms
+                .iter()
+                .map(|name| Value::String(name.clone()))
+                .collect(),
+        ),
+    );
+    entry.insert(
+        "scheduled_time".to_string(),
+        Value::String(spec.scheduled_time_utc.clone()),
+    );
+    entry.insert("timezone".to_string(), Value::String(spec.timezone.clone()));
+    entry.insert("status".to_string(), Value::String("pending".to_string()));
+    entry.insert(
+        "created_at".to_string(),
+        Value::String(spec.created_at.clone()),
+    );
+    entry.insert("completed_at".to_string(), Value::Null);
+    entry.insert("error".to_string(), Value::Null);
+    entry.insert("post_results".to_string(), Value::Object(Map::new()));
+    entry.insert(
+        "repeat_rule".to_string(),
+        spec.repeat_rule
+            .as_ref()
+            .map_or(Value::Null, |rule| Value::String(rule.clone())),
+    );
+    if let Some(content_type) = &spec.content_type {
+        entry.insert(
+            "content_type".to_string(),
+            Value::String(content_type.clone()),
+        );
+    }
+    if !spec.media_paths.is_empty() {
+        entry.insert(
+            "media_paths".to_string(),
+            Value::Array(
+                spec.media_paths
+                    .iter()
+                    .map(|path| Value::String(path.clone()))
+                    .collect(),
+            ),
+        );
+    }
+    Value::Object(entry)
+}
+
+/// `ScheduleManager.add()`'s store half: reload under the process lock, append,
+/// and write the whole list back.
+///
+/// The lock spans the read and the write, which is the whole point: two
+/// concurrent adds that each loaded before the other saved would drop one
+/// entry. `render` is the caller's `json.dump(indent=2, ensure_ascii=False)`
+/// equivalent, so the byte contract stays with the renderer that owns it.
+pub fn append(
+    dir: &Path,
+    entry: Value,
+    render: &dyn Fn(&Value) -> String,
+) -> Result<(), StateError> {
+    let lock_path = dir.join(PAUSE_LOCK_FILE_NAME);
+    crate::store::with_exclusive_lock(&lock_path, || {
+        let path = dir.join(SCHEDULE_FILE_NAME);
+        let mut entries: Vec<Value> = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .and_then(|value| match value {
+                Value::Array(items) => Some(items),
+                _ => None,
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .filter(Value::is_object)
+            .collect();
+        entries.push(entry);
+        let text = render(&Value::Array(entries));
+        crate::store::write_atomic_bytes(&path, text.as_bytes())?;
+        restrict_to_owner(&path);
+        Ok(())
+    })
+}
+
 /// `ScheduleManager.pause_state()`. An unreadable marker fails closed: it still
 /// reports paused, because releasing a queue an operator paused is worse than
 /// refusing to post.

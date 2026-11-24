@@ -25,6 +25,7 @@
 use std::path::{Path, PathBuf};
 
 /// The binaries the engine can use, in the order `media status` reports them.
+pub mod loudness;
 pub mod specs;
 
 pub const MEDIA_BINARIES: [&str; 2] = ["ffmpeg", "ffprobe"];
