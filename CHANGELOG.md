@@ -321,6 +321,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (which now accepts `visibility` at all). `xpst preflight` gained the same
   flag. Evidence per case is in `tests/test_tiktok_visibility.py`.
 
+### Security
+- **Two dependency advisories cleared by version bump, not by ignore.** `url`
+  2.5.8 → 2.5.9 (RUSTSEC-2026-0592: `Url::origin()` recursed into nested
+  `blob:` URLs with no depth limit, so a crafted URL aborted the process with a
+  stack overflow that `catch_unwind()` cannot catch) and `cookie` 0.18.2 → 0.18.3
+  in the Tauri shell (RUSTSEC-2026-0594: private-cookie AEAD nonces could repeat
+  across a `fork()`). `url` 2.5.9 declares `form_urlencoded ^1.2.3`, so that
+  moved with it. The shell never calls the affected `PrivateJar::add` /
+  `add_original` — `cookie` reaches it only through `tauri` 2.12.7 — but the
+  patch exists, so the version moved instead of an ignore being argued.
+  `cargo deny check licenses bans sources advisories` is green on both lockfiles
+  again.
+
 ## [1.3.0] - 2026-11-14
 
 ### Added

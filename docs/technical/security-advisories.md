@@ -46,6 +46,12 @@ Measured, not remembered:
 
 Both now exit 0 on `cargo deny check licenses bans sources advisories`.
 
+Two advisories published after that pass turned both lockfiles red again on
+2026-11-23 — RUSTSEC-2026-0592 (`url` 2.5.8) and RUSTSEC-2026-0594 (`cookie`
+0.18.2, shell only). Both had upstream patches, so both were cleared by moving
+the version (rows in *Cleared by upgrading* below) rather than by adding an
+ignore; the counts above hold again.
+
 The last two engine vulnerabilities were the rmcp pair; they cleared when the
 MCP SDK moved 0.11.0 → 3.11.0 (see the rmcp row below for what a client sees).
 
@@ -73,6 +79,8 @@ leaves this table is by the crate leaving the graph.
 | (yanked) | `async-executor` 1.14.0 | yanked release | → 1.14.1 |
 | RUSTSEC-2026-0189 | `rmcp` 0.11.0 | DNS rebinding in the Streamable HTTP **server** transport; fixed in 1.4.0 | `rmcp` 0.11.0 → 3.11.0 |
 | RUSTSEC-2026-0462 | `rmcp` 0.11.0 | unbounded response buffering in the Streamable HTTP **clients**; fixed in 3.9.0 | same move |
+| RUSTSEC-2026-0592 | `url` 2.5.8 | `Url::origin()` recursed into nested `blob:` URLs with no depth limit, so a crafted URL aborts the process with a stack overflow that `catch_unwind()` cannot catch; fixed in 2.5.9 | `url` 2.5.8 → 2.5.9 in **both** lockfiles, which requires `form_urlencoded` 1.2.2 → 1.2.3 (`url` 2.5.9 declares `^1.2.3`). |
+| RUSTSEC-2026-0594 | `cookie` 0.18.2 | private-cookie AEAD nonces can repeat across a `fork()`: the nonce counter is copied into each child, so two processes can encrypt under the same key/nonce pair; fixed in 0.18.3 | `cookie` 0.18.2 → 0.18.3 in `src-tauri/Cargo.lock`. It is reached only through `tauri` 2.12.7 — the shell has no direct `cookie` dependency and no `PrivateJar`/`cookie::` reference in `src-tauri/src/`, so the affected `PrivateJar::add`/`add_original` were never called here. The patch exists, so the version moved instead of an ignore being argued. |
 
 The shell movement is one change: `tauri` 2.11.5 → 2.12.7 with its first-party
 plugins (`tauri-plugin-updater` 2.14.1, `tauri-plugin-single-instance` 2.5.5,
