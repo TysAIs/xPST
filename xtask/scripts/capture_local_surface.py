@@ -908,14 +908,14 @@ SCENARIOS = [
         "name": "bio_masked",
         "argv": ["bio", "--json"],
         "seed": {"config.yaml": "version: 4\n"},
-        "credential": {"dashboard_api_token": "yaF492IK4gZE95x5WpxLeu53JSp2n3PK8s7EjfvkGso"},
+        "credential": {"dashboard_api_token": "SYNTHETIC_dashboard_api_token_0001"},
         "compare": "json",
     },
     {
         "name": "bio_reveal",
         "argv": ["bio", "--reveal", "--json"],
         "seed": {"config.yaml": "version: 4\n"},
-        "credential": {"dashboard_api_token": "yaF492IK4gZE95x5WpxLeu53JSp2n3PK8s7EjfvkGso"},
+        "credential": {"dashboard_api_token": "SYNTHETIC_dashboard_api_token_0001"},
         "compare": "json",
     },
     {

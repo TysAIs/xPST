@@ -4481,11 +4481,11 @@
       "compare": "json",
       "exit_code": 0,
       "credential": {
-        "dashboard_api_token": "yaF492IK4gZE95x5WpxLeu53JSp2n3PK8s7EjfvkGso"
+        "dashboard_api_token": "SYNTHETIC_dashboard_api_token_0001"
       },
       "stdout_json": {
         "url": "http://127.0.0.1:8080/bio",
-        "edit_url": "http://127.0.0.1:8080/bio/edit?token=yaF492IK%E2%80%A6vkGso",
+        "edit_url": "http://127.0.0.1:8080/bio/edit?token=SYNTHETI%E2%80%A6_0001",
         "edit_url_reveal_flag": "--reveal"
       }
     },
@@ -4502,12 +4502,12 @@
       "compare": "json",
       "exit_code": 0,
       "credential": {
-        "dashboard_api_token": "yaF492IK4gZE95x5WpxLeu53JSp2n3PK8s7EjfvkGso"
+        "dashboard_api_token": "SYNTHETIC_dashboard_api_token_0001"
       },
       "stdout_json": {
         "url": "http://127.0.0.1:8080/bio",
-        "edit_url": "http://127.0.0.1:8080/bio/edit?token=yaF492IK4gZE95x5WpxLeu53JSp2n3PK8s7EjfvkGso",
-        "edit_url_masked": "http://127.0.0.1:8080/bio/edit?token=yaF492IK%E2%80%A6vkGso"
+        "edit_url": "http://127.0.0.1:8080/bio/edit?token=SYNTHETIC_dashboard_api_token_0001",
+        "edit_url_masked": "http://127.0.0.1:8080/bio/edit?token=SYNTHETI%E2%80%A6_0001"
       }
     },
     {
