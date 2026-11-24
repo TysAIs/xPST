@@ -305,3 +305,230 @@ pub fn status(config: &YamlValue, store: &CredentialStore) -> Result<YamlValue, 
 
 /// The note `byo_status()` carries, verbatim.
 pub const NOTE: &str = "One Meta app covers Instagram, Threads and Messenger: enter it once and both platforms pick it up. Secrets live only in the encrypted store under the xPST config dir and are never echoed back.";
+
+// ── the two writers ─────────────────────────────────────────────────────────
+
+/// `ByoAppError`: a refusal, with per-field messages for a form.
+///
+/// Python raises this from `validate_byo_app` (per-field `errors`) and from
+/// `store_byo_app` (a store failure, no fields). Both surfaces render it the
+/// same way, so it is a value here rather than an exception.
+#[derive(Debug, Clone)]
+pub struct ByoError {
+    pub message: String,
+    pub errors: Vec<(String, String)>,
+}
+
+impl ByoError {
+    fn fields(message: &str, errors: Vec<(String, String)>) -> Self {
+        Self {
+            message: message.to_string(),
+            errors,
+        }
+    }
+}
+
+/// `_APP_ID_RE = ^[0-9]{4,24}$`.
+fn valid_meta_app_id(text: &str) -> bool {
+    (4..=24).contains(&text.len()) && text.chars().all(|character| character.is_ascii_digit())
+}
+
+/// `_TIKTOK_KEY_RE = ^aw[0-9a-z]{6,32}$` (case-insensitive).
+fn valid_tiktok_key(text: &str) -> bool {
+    let lowered = text.to_lowercase();
+    let Some(rest) = lowered.strip_prefix("aw") else {
+        return false;
+    };
+    (6..=32).contains(&rest.len())
+        && rest
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+}
+
+/// `_SECRET_RE = ^[A-Za-z0-9_\-\.]{8,256}$`.
+fn valid_secret(text: &str) -> bool {
+    (8..=256).contains(&text.len())
+        && text.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.')
+        })
+}
+
+/// `validate_byo_app()`: the stripped pair, or the per-field refusals.
+pub fn validate(spec: &Spec, app_id: &str, app_secret: &str) -> Result<(String, String), ByoError> {
+    let app_id = app_id.trim().to_string();
+    let app_secret = app_secret.trim().to_string();
+    let mut errors: Vec<(String, String)> = Vec::new();
+
+    let id_ok = if spec.platform == "tiktok" {
+        valid_tiktok_key(&app_id)
+    } else {
+        valid_meta_app_id(&app_id)
+    };
+    if app_id.is_empty() {
+        errors.push((
+            "app_id".to_string(),
+            format!("{} is required.", spec.id_label),
+        ));
+    } else if !id_ok {
+        let expected = if spec.platform == "tiktok" {
+            "starts with 'aw' followed by letters/digits"
+        } else {
+            "must be digits"
+        };
+        errors.push((
+            "app_id".to_string(),
+            format!("{} looks wrong ({expected}).", spec.id_label),
+        ));
+    }
+    if app_secret.is_empty() {
+        errors.push((
+            "app_secret".to_string(),
+            format!("{} is required.", spec.secret_label),
+        ));
+    } else if !valid_secret(&app_secret) {
+        errors.push((
+            "app_secret".to_string(),
+            format!(
+                "{} looks wrong (8–256 chars, no spaces).",
+                spec.secret_label
+            ),
+        ));
+    }
+    if !errors.is_empty() {
+        return Err(ByoError::fields(
+            "Those app credentials were not accepted.",
+            errors,
+        ));
+    }
+    Ok((app_id, app_secret))
+}
+
+/// Mirror the (non-secret) app id into `accounts.<platform>.<id field>`.
+///
+/// Python assigns onto the Pydantic model and rewrites the whole file; this
+/// edits the one field in the raw document, which is the divergence both
+/// writers already carried. Returns whether the document changed.
+fn mirror_id(config: &mut YamlValue, spec: &Spec, app_id: &str) -> bool {
+    if spec.config_id_field.is_empty() {
+        return false;
+    }
+    let YamlValue::Mapping(root) = config else {
+        return false;
+    };
+    if !root.contains_key("accounts") {
+        root.insert(
+            YamlValue::from("accounts"),
+            YamlValue::Mapping(Mapping::new()),
+        );
+    }
+    let Some(YamlValue::Mapping(accounts)) = root.get_mut("accounts") else {
+        return false;
+    };
+    if !accounts.contains_key(spec.platform.as_str()) {
+        accounts.insert(
+            YamlValue::from(spec.platform.as_str()),
+            YamlValue::Mapping(Mapping::new()),
+        );
+    }
+    let Some(YamlValue::Mapping(section)) = accounts.get_mut(spec.platform.as_str()) else {
+        return false;
+    };
+    section.insert(
+        YamlValue::from(spec.config_id_field.as_str()),
+        string(app_id.to_string()),
+    );
+    true
+}
+
+/// `store_byo_app()`: validate, store encrypted, mirror the id, and return the
+/// masked status.
+///
+/// The secret is written ONLY to the credential store — never to `config.yaml`
+/// — so a plaintext config file keeps holding at most the non-secret app id.
+/// The caller writes the document back; this only mutates it.
+pub fn store(
+    config: &mut YamlValue,
+    spec: &Spec,
+    store: &CredentialStore,
+    app_id: &str,
+    app_secret: &str,
+) -> Result<YamlValue, ByoError> {
+    let (app_id, app_secret) = validate(spec, app_id, app_secret)?;
+    if let Err(message) = store
+        .store(&spec.store_id_key, &app_id)
+        .and_then(|()| store.store(&spec.store_secret_key, &app_secret))
+    {
+        return Err(ByoError::fields(
+            &format!("Could not store the app credential encrypted: {message}"),
+            Vec::new(),
+        ));
+    }
+    mirror_id(config, spec, &app_id);
+    Ok(status_for(spec, config, store))
+}
+
+/// `clear_byo_app()`: remove the stored pair and the config mirror.
+///
+/// Returns the payload `clear_byo_app` returns, plus whether the config
+/// document changed (the caller writes it back only then — Python's
+/// `config.save()` runs inside the same `if`).
+pub fn clear(config: &mut YamlValue, spec: &Spec, store: &CredentialStore) -> (YamlValue, bool) {
+    let mut removed: Vec<YamlValue> = Vec::new();
+    for store_key in [&spec.store_id_key, &spec.store_secret_key] {
+        if store.delete(store_key) {
+            removed.push(string(store_key.clone()));
+        }
+    }
+
+    let mut changed = false;
+    if !spec.config_id_field.is_empty() {
+        if let YamlValue::Mapping(root) = &mut *config {
+            let section = root
+                .get_mut("accounts")
+                .and_then(|accounts| match accounts {
+                    YamlValue::Mapping(map) => map.get_mut(spec.platform.as_str()),
+                    _ => None,
+                });
+            if let Some(YamlValue::Mapping(section)) = section {
+                section.insert(YamlValue::from(spec.config_id_field.as_str()), string(""));
+                if !spec.config_secret_field.is_empty() {
+                    section.insert(
+                        YamlValue::from(spec.config_secret_field.as_str()),
+                        string(""),
+                    );
+                }
+                changed = true;
+            }
+        }
+    }
+
+    let payload = object(vec![
+        ("platform", string(spec.platform.clone())),
+        ("configured", boolean(false)),
+        ("removed", array(removed)),
+        ("sign_in_available", boolean(false)),
+        ("docs_url", string(spec.docs_url.clone())),
+        ("note", string(clear_note(spec))),
+    ]);
+    (payload, changed)
+}
+
+/// The sentence `clear_byo_app()` returns.
+pub fn clear_note(spec: &Spec) -> String {
+    format!(
+        "{} no longer has an app on this machine; sign-in is off until one is added.",
+        spec.display_name
+    )
+}
+
+/// Write the config document with the PyYAML-identical emitter, owner-only.
+pub fn write_config(path: &std::path::Path, document: &YamlValue) -> Result<(), String> {
+    std::fs::write(path, xpst_config::pyyaml::dump(document))
+        .map_err(|err| format!("cannot write {}: {err}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}

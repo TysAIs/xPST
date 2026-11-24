@@ -108,6 +108,45 @@ READ_ONLY_CALLS = [
     ("kb_areas", {}),
     ("xpst_transcript", {"video_id": "vid-parity"}),
     ("xpst_bio_get", {}),
+    # `xpst_byo_app`'s read paths. The store/clear calls are in MUTATING_CALLS
+    # because they write the profile, and they run after every read-only call.
+    ("xpst_byo_app", {}),
+    ("xpst_byo_app", {"platform": "instagram"}),
+    ("xpst_byo_app", {"platform": "nope"}),
+    ("xpst_byo_app", {"platform": "messenger", "app_id": "1234567890"}),
+    # `xpst_chat`'s readiness half (`read` false is the default: no network).
+    ("xpst_chat", {}),
+    ("xpst_chat", {"platforms": ["twitch"]}),
+    ("xpst_chat", {"platforms": ["nope"]}),
+    # `xpst_stream`'s registry and key-presence verdict (`include_live` false).
+    ("xpst_stream", {}),
+    ("xpst_stream", {"platform": "youtube"}),
+    ("xpst_stream", {"platform": "nope"}),
+]
+
+# Calls that write the local profile, in the `default` scenario only, after
+# every read-only call: a stored app changes what `xpst_providers`,
+# `xpst_capabilities` and a later `xpst_byo_app` status answer, so it must not
+# run before them. `xpst_byo_app` is NOT in Python's `_MUTATING_TOOLS` (it
+# writes only the local encrypted store and the config mirror), so these are
+# not consent-gated — the `readonly` scenario proves that by running one.
+MUTATING_CALLS = [
+    # A validation refusal: no store write, no config write.
+    (
+        "xpst_byo_app",
+        {"platform": "instagram", "app_id": "12", "app_secret": "short"},
+    ),
+    # The store write. `instagram` and `threads` share `byo_meta_app_id`, so the
+    # status after this pins the registry's store keys for both.
+    (
+        "xpst_byo_app",
+        {"platform": "instagram", "app_id": "1234567890", "app_secret": "parity-secret-1"},
+    ),
+    ("xpst_byo_app", {"platform": "instagram"}),
+    ("xpst_byo_app", {"platform": "threads"}),
+    # And back out, so the profile the scenario leaves behind is the one it
+    # started with.
+    ("xpst_byo_app", {"platform": "instagram", "clear": True}),
 ]
 
 # Readiness rows whose value is a property of the interpreter, not of the
@@ -115,6 +154,11 @@ READ_ONLY_CALLS = [
 # there. The row keeps its id/label/ok/severity; only the value is masked, the
 # same way `local_surface.json` masks it.
 MASK_CHECKS = {"xpst_readiness": ["python"]}
+
+# Top-level payload keys whose value is the wall clock. `xpst_chat` stamps
+# `checked_at` on every call, so two runs never agree on it; the key is replaced
+# with a fixed marker and the rest of the document is still byte-compared.
+MASK_FIELDS = {"xpst_chat": ["checked_at"]}
 
 # Helper scripts the readiness and security checks probe. Pinned so the
 # `ffmpeg_available` / helper rows are the fixture's, not the machine's.
@@ -224,7 +268,7 @@ def requests_for(scenario: str) -> list[dict]:
         steps.append(
             {
                 "jsonrpc": "2.0",
-                "id": 30,
+                "id": 40,
                 "method": "tools/call",
                 "params": {"name": "xpst_post", "arguments": POST_ARGUMENTS},
             }
@@ -232,20 +276,51 @@ def requests_for(scenario: str) -> list[dict]:
         steps.append(
             {
                 "jsonrpc": "2.0",
-                "id": 31,
+                "id": 41,
                 "method": "tools/call",
                 "params": {"name": "xpst_not_a_tool", "arguments": {}},
             }
         )
+        for index, (tool, arguments) in enumerate(MUTATING_CALLS, start=42):
+            steps.append(
+                {
+                    "jsonrpc": "2.0",
+                    "id": index,
+                    "method": "tools/call",
+                    "params": {"name": tool, "arguments": arguments},
+                }
+            )
     else:
         steps.append(
             {
                 "jsonrpc": "2.0",
-                "id": 30,
+                "id": 40,
                 "method": "tools/call",
                 "params": {"name": "xpst_post", "arguments": POST_ARGUMENTS},
             }
         )
+        if scenario == "readonly":
+            # `xpst_byo_app` is not consent-gated, so a store call still works
+            # under `XPST_MCP_READONLY=1`. Pinning that here is what keeps the
+            # tool out of `_MUTATING_TOOLS` on purpose rather than by accident.
+            steps.append(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 42,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "xpst_byo_app",
+                        "arguments": {
+                            "platform": "tiktok",
+                            "app_id": "awparity1234",
+                            "app_secret": "parity-secret-2",
+                        },
+                    },
+                }
+            )
+    ids = [step["id"] for step in steps if "id" in step]
+    if len(ids) != len(set(ids)):
+        raise SystemExit(f"scenario {scenario!r}: duplicate step ids {sorted(ids)}")
     return steps
 
 
@@ -353,6 +428,21 @@ def run_scenario(python: str, scenario: dict) -> dict:
         if step["method"] == "tools/call":
             tool = step["params"]["name"]
             text = result["content"][0]["text"].replace(str(profile), "<PROFILE>")
+            # The renderer's observable shape: `indent=2` is multi-line, compact
+            # is one line. Recorded from the RAW text, before any masking, because
+            # a masked body is re-rendered compact and would hide a renderer
+            # regression.
+            multiline = "\n" in text
+            mask_fields = MASK_FIELDS.get(tool, [])
+            if mask_fields:
+                try:
+                    payload = json.loads(text)
+                except json.JSONDecodeError:
+                    raise SystemExit(f"step {step['id']} ({tool}) is not JSON: {text[:400]!r}")
+                for field in mask_fields:
+                    if field in payload:
+                        payload[field] = "<CLOCK>"
+                text = json.dumps(payload, default=str)
             mask_checks = MASK_CHECKS.get(tool, [])
             if mask_checks:
                 payload = json.loads(text)
@@ -369,11 +459,8 @@ def run_scenario(python: str, scenario: dict) -> dict:
                     "arguments": step["params"]["arguments"],
                     "is_error": bool(result.get("isError")),
                     "mask_checks": mask_checks,
-                    # The renderer's observable shape: `indent=2` is multi-line,
-                    # compact is one line. Recorded separately because a masked
-                    # body is re-rendered for comparison, which would otherwise
-                    # hide a renderer regression.
-                    "multiline": "\n" in text,
+                    "mask_fields": mask_fields,
+                    "multiline": multiline,
                     "text": text,
                 }
             )

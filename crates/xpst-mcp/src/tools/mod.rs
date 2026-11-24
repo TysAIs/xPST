@@ -10,7 +10,9 @@
 pub mod activity;
 pub mod best_time;
 pub mod bio;
+pub mod byo_app;
 pub mod capabilities;
+pub mod chat;
 pub mod config_show;
 pub mod followers;
 pub mod kb;
@@ -21,6 +23,7 @@ pub mod schedule;
 pub mod security;
 mod stamp;
 pub mod status;
+pub mod stream;
 pub mod transcript;
 
 use std::sync::OnceLock;

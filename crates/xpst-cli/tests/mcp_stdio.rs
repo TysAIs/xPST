@@ -251,6 +251,21 @@ fn mask_checks(text: &str, ids: &[&str]) -> String {
     xpst_config::python_style_json_compact(&payload).expect("render the masked body")
 }
 
+/// Top-level payload keys whose value is the wall clock, replaced with a fixed
+/// marker exactly the way `capture_mcp_stdio.py` replaces them. `xpst_chat`
+/// stamps `checked_at` on every call, so the key cannot be byte-compared.
+fn mask_fields(text: &str, fields: &[&str]) -> String {
+    let mut payload: Value = serde_json::from_str(text).expect("the body is JSON");
+    if let Some(map) = payload.as_object_mut() {
+        for field in fields {
+            if map.contains_key(*field) {
+                map.insert((*field).to_string(), json!("<CLOCK>"));
+            }
+        }
+    }
+    xpst_config::python_style_json_compact(&payload).expect("render the masked body")
+}
+
 /// FNV-1a 64-bit, the same digest `capture_mcp_stdio.py` records.
 fn fnv1a64(text: &str) -> String {
     let mut value: u64 = 0xcbf2_9ce4_8422_2325;
@@ -372,6 +387,13 @@ fn the_rust_server_speaks_the_python_wire() {
                         step["multiline"].as_bool().expect("multiline"),
                         "scenario `{name}`: {tool} renderer drifted (multi-line vs compact)"
                     );
+                    let clock: Vec<&str> = step["mask_fields"]
+                        .as_array()
+                        .map(|fields| fields.iter().filter_map(Value::as_str).collect())
+                        .unwrap_or_default();
+                    if !clock.is_empty() {
+                        text = mask_fields(&text, &clock);
+                    }
                     let mask: Vec<&str> = step["mask_checks"]
                         .as_array()
                         .map(|ids| ids.iter().filter_map(Value::as_str).collect())

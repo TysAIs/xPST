@@ -13,6 +13,7 @@ publish = false
 # The payload builders both surfaces must share therefore live here, below both
 # of them — one implementation, two renderers, no second copy to drift.
 [dependencies]
+jiff.workspace = true
 serde_json.workspace = true
 xpst-auth = { path = "../xpst-auth" }
 xpst-authflow = { path = "../xpst-authflow" }
