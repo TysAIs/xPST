@@ -4,8 +4,14 @@
     "repo": "TysAIs/xPST",
     "source": "src/xpst/cli.py"
   },
-  "note": "Captured by running the shipped Python CLI against scratch profiles. scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent; snapshot modified_at is stripped and its epoch recorded instead.",
-  "scenario_count": 45,
+  "environment": {
+    "TZ": "UTC",
+    "LC_ALL": "C",
+    "LANG": "C",
+    "PYTHONHASHSEED": "0"
+  },
+  "note": "Captured by running the shipped Python CLI against scratch profiles. `environment` is the block both engines are run under (a scenario's `env` overrides it); scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent, and an entry without one renders in the pinned TZ; snapshot modified_at is stripped and its epoch recorded instead.",
+  "scenario_count": 47,
   "scenarios": [
     {
       "name": "status_empty_profile",
@@ -3027,6 +3033,57 @@
           ],
           "status": "pending",
           "scheduled_time_local": "2026-02-01T12:00:00+00:00"
+        }
+      ]
+    },
+    {
+      "name": "schedule_list_pinned_zone",
+      "argv": [
+        "schedule",
+        "list",
+        "--json"
+      ],
+      "seed": {
+        "schedule.json": "[{\"id\": \"id-zone\", \"video_path\": \"\", \"caption\": \"no timezone field\", \"scheduled_time\": \"2026-03-01T12:00:00+00:00\", \"platforms\": [], \"status\": \"pending\"}]"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": [
+        {
+          "id": "id-zone",
+          "video_path": "",
+          "caption": "no timezone field",
+          "scheduled_time": "2026-03-01T12:00:00+00:00",
+          "platforms": [],
+          "status": "pending",
+          "scheduled_time_local": "2026-03-01T12:00:00+00:00"
+        }
+      ]
+    },
+    {
+      "name": "schedule_list_machine_zone",
+      "argv": [
+        "schedule",
+        "list",
+        "--json"
+      ],
+      "seed": {
+        "schedule.json": "[{\"id\": \"id-zone\", \"video_path\": \"\", \"caption\": \"no timezone field\", \"scheduled_time\": \"2026-03-01T12:00:00+00:00\", \"platforms\": [], \"status\": \"pending\"}]"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "TZ": "Pacific/Kiritimati"
+      },
+      "stdout_json": [
+        {
+          "id": "id-zone",
+          "video_path": "",
+          "caption": "no timezone field",
+          "scheduled_time": "2026-03-01T12:00:00+00:00",
+          "platforms": [],
+          "status": "pending",
+          "scheduled_time_local": "2026-03-02T02:00:00+14:00"
         }
       ]
     }
