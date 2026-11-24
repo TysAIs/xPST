@@ -345,25 +345,25 @@ mod tests {
     use super::*;
 
     /// The exact stdout the shipped engine produced for an empty config at
-    /// `/home/ty/.hermes/profiles/swe/cache/scratch/tmp.6HAtLbz2D6/cfg/config.yaml`
+    /// `/tmp/xpst-parity-scratch-2026-11-24-long-directory-name/cfg/config.yaml`
     /// (captured with `COLUMNS` unset, i.e. width 80). Trailing spaces are part
     /// of the expectation: Rich keeps the space that belongs to the next word.
     const EMPTY_CONFIG_STDOUT: &[&str] = &[
         "Configuration error: XPST config file is empty or invalid: ",
-        "/home/ty/.hermes/profiles/swe/cache/scratch/tmp.6HAtLbz2D6/cfg/config.yaml. It ",
-        "may have been truncated by a crash or a full disk — the original file was backed",
-        "up to: ",
-        "/home/ty/.hermes/profiles/swe/cache/scratch/tmp.6HAtLbz2D6/cfg/backups/config.ya",
-        "ml.corrupt_1795466493.",
+        "/tmp/xpst-parity-scratch-2026-11-24-long-directory-name/cfg/config.yaml. It may ",
+        "have been truncated by a crash or a full disk — the original file was backed up ",
+        "to: ",
+        "/tmp/xpst-parity-scratch-2026-11-24-long-directory-name/cfg/backups/config.yaml.",
+        "corrupt_1795466493.",
     ];
 
     #[test]
     fn wraps_the_empty_config_message_exactly_like_rich() {
         let message = "XPST config file is empty or invalid: \
-                       /home/ty/.hermes/profiles/swe/cache/scratch/tmp.6HAtLbz2D6/cfg/config.yaml. \
+                       /tmp/xpst-parity-scratch-2026-11-24-long-directory-name/cfg/config.yaml. \
                        It may have been truncated by a crash or a full disk — the original file \
                        was backed up to: \
-                       /home/ty/.hermes/profiles/swe/cache/scratch/tmp.6HAtLbz2D6/cfg/backups/config.yaml.corrupt_1795466493.";
+                       /tmp/xpst-parity-scratch-2026-11-24-long-directory-name/cfg/backups/config.yaml.corrupt_1795466493.";
         let mut out: Vec<u8> = Vec::new();
         print_error(&mut out, "Configuration error: ", message).expect("writes");
         let text = String::from_utf8(out).unwrap();
