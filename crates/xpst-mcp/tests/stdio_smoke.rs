@@ -170,7 +170,7 @@ fn the_binary_serves_the_registry_over_stdio() {
     let stubbed = server.request(
         5,
         "tools/call",
-        json!({"name": "xpst_analytics", "arguments": {}}),
+        json!({"name": "xpst_health", "arguments": {}}),
     );
     assert_eq!(stubbed["result"]["isError"], json!(true));
     let text = stubbed["result"]["content"][0]["text"]

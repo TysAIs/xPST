@@ -800,3 +800,93 @@ fn stream_reports_the_registry_and_refuses_an_unknown_platform() {
     assert_eq!(body["platform"], Value::Null);
     assert!(body["known"].as_array().expect("known").len() == 10);
 }
+
+/// `xpst_analytics`'s `live: true` half runs a real collection against every
+/// platform API, so it answers a typed `not_implemented` rather than an empty
+/// report — "not collected" and "collected nothing" are different answers.
+#[test]
+fn analytics_refuses_the_live_half() {
+    let dir = profile("analytics_live");
+    let error = registry()
+        .dispatch(&ctx(&dir), "xpst_analytics", &json!({"live": true}))
+        .expect_err("the network half is not ported");
+    assert_eq!(error.code(), "not_implemented");
+    assert!(error.to_string().contains("xpst_analytics"));
+}
+
+/// A fresh profile has no ledger and no state: the report is the honest empty
+/// document — five platform rows, `totals: null` everywhere, `snapshot_count: 0`
+/// — and the store is created rather than reported missing.
+#[test]
+fn analytics_answers_an_empty_report_on_a_fresh_profile() {
+    let dir = profile("analytics_empty");
+    let payload = call(&ctx(&dir), "xpst_analytics", json!({}));
+    assert_eq!(payload["live"], json!(false));
+    assert_eq!(payload["snapshot_count"], json!(0));
+    assert_eq!(payload["platforms"], json!({}));
+    assert_eq!(payload["posts"], json!([]));
+    let report = &payload["outcome_report"];
+    assert_eq!(report["live"], json!(false));
+    assert_eq!(report["data_source"], Value::Null);
+    let platforms = report["platforms"].as_object().expect("platforms");
+    assert_eq!(
+        platforms.len(),
+        5,
+        "every platform renders, even with nothing"
+    );
+    for name in ["youtube", "x", "instagram", "tiktok", "threads"] {
+        assert_eq!(platforms[name]["totals"], Value::Null, "{name} totals");
+        assert_eq!(platforms[name]["has_data"], json!(false), "{name} has_data");
+        assert_eq!(
+            platforms[name]["note"],
+            json!("No posts recorded for this platform"),
+            "{name} note"
+        );
+        assert_eq!(
+            platforms[name]["collection_status"],
+            json!("unknown"),
+            "{name} status is unknown, never ok"
+        );
+    }
+    assert_eq!(
+        report["diagnostics"]["unknown_collection_status_platforms"],
+        json!(["youtube", "x", "instagram", "tiktok", "threads"])
+    );
+}
+
+/// A row recorded during a FAILED collection stays visible but out of the
+/// totals, and the platform's aggregate keeps the `null`-not-zero contract.
+#[test]
+fn analytics_excludes_a_failed_collection_from_the_totals() {
+    let dir = profile("analytics_failed_row");
+    std::fs::write(
+        dir.join("state.json"),
+        r#"{"posted_videos": {"vid-1": {"posted_to": {"x": {"id": "x-1", "timestamp": "2026-11-10T01:00:00+00:00"}}}}}"#,
+    )
+    .expect("seed state");
+    let store = xpst_store::Store::open(dir.join("analytics.db")).expect("open ledger");
+    store
+        .record_snapshots(&[
+            xpst_store::NewSnapshot::new("x", "x-1", "2026-11-20T00:00:00+00:00")
+                .metrics(xpst_store::Metrics {
+                    views: Some(100),
+                    likes: Some(10),
+                    ..xpst_store::Metrics::default()
+                })
+                .status(xpst_store::CollectionStatus::Failed),
+        ])
+        .expect("seed snapshot");
+
+    let payload = call(&ctx(&dir), "xpst_analytics", json!({}));
+    let x = &payload["outcome_report"]["platforms"]["x"];
+    assert_eq!(x["totals"], Value::Null, "a failed capture is not a total");
+    assert_eq!(x["has_data"], json!(false));
+    let outcomes = x["outcomes"].as_array().expect("outcomes");
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0]["metrics"]["views"], json!(100), "still visible");
+    assert_eq!(outcomes[0]["counted_in_totals"], json!(false));
+    assert_eq!(outcomes[0]["collection_status"], json!("failed"));
+    // The aggregate keeps the missing metric missing rather than inventing 0.
+    assert_eq!(payload["platforms"]["x"]["views"], json!(100));
+    assert_eq!(payload["platforms"]["x"]["comments"], Value::Null);
+}

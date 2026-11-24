@@ -421,8 +421,10 @@ impl Store {
             ) m ON s.platform = m.platform AND s.post_id = m.post_id
                AND s.captured_at = m.captured_at
         ";
-        // Python leaves the order undefined; this pins it for reproducible output.
-        const ORDER: &str = " ORDER BY s.captured_at DESC, s.platform, s.post_id";
+        // Python leaves the order undefined; SQLite returns the grouped rows in
+        // `(platform, post_id)` order (the GROUP BY key), and `xpst_analytics`
+        // serves `latest()` verbatim, so that is the order pinned here.
+        const ORDER: &str = " ORDER BY s.platform, s.post_id";
         let mut rows = Vec::new();
         match platform {
             Some(platform) => {

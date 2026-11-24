@@ -46,7 +46,7 @@ use serde_json::{json, Value};
 const FIXTURE: &str = include_str!("fixtures/mcp_stdio.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing.
-const EXPECTED_SCENARIOS: usize = 4;
+const EXPECTED_SCENARIOS: usize = 5;
 
 /// The state file every scenario starts from, byte-identical to `STATE` in the
 /// capture script. It carries two recorded failures so `xpst_activity` answers a
@@ -310,7 +310,7 @@ fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_xpst")
 }
 
-fn profile(name: &str, seed: &Value) -> PathBuf {
+fn profile(name: &str, scenario: &Value) -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("mcp-stdio-{name}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("scratch profile");
@@ -331,9 +331,9 @@ fn profile(name: &str, seed: &Value) -> PathBuf {
     for (name, body) in SEED_FILES {
         std::fs::write(dir.join(name), body).expect("seed file");
     }
-    // Scenario-specific seed files (the `mutations` queue), byte-identical to
-    // the capture script's `seed` block.
-    if let Some(files) = seed.as_object() {
+    // Scenario-specific seed files (the `mutations` queue, the `analytics`
+    // state), byte-identical to the capture script's `seed` block.
+    if let Some(files) = scenario.get("seed").and_then(Value::as_object) {
         for (name, body) in files {
             std::fs::write(dir.join(name), body.as_str().unwrap_or_default())
                 .expect("seed scenario file");
@@ -359,22 +359,80 @@ fn profile(name: &str, seed: &Value) -> PathBuf {
             .record_followers(platform, count, captured_at)
             .expect("seed follower");
     }
-    for (platform, post_id, captured_at, views, likes, comments, shares) in METRIC_SNAPSHOTS {
-        store
-            .record_snapshots(
-                &[
-                    xpst_store::NewSnapshot::new(platform, post_id, captured_at).metrics(
-                        xpst_store::Metrics {
-                            views: Some(views),
+    // The metric ledger. The fixture records the exact rows each scenario
+    // starts from (`snapshots`), so the Rust ledger is the Python ledger; a
+    // scenario without its own rows falls back to the shared set.
+    let snapshots = scenario
+        .get("snapshots")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_else(|| {
+            METRIC_SNAPSHOTS
+                .iter()
+                .map(
+                    |(platform, post_id, captured_at, views, likes, comments, shares)| {
+                        json!([
+                            platform,
+                            post_id,
+                            captured_at,
+                            views,
                             likes,
-                            comments: Some(comments),
-                            shares: Some(shares),
-                            ..xpst_store::Metrics::default()
-                        },
-                    ),
-                ],
-            )
+                            comments,
+                            shares
+                        ])
+                    },
+                )
+                .collect()
+        });
+    for row in &snapshots {
+        let row = row.as_array().expect("snapshot row");
+        let text = |index: usize| row[index].as_str().map(str::to_string);
+        let mut snapshot = xpst_store::NewSnapshot::new(
+            text(0).expect("platform"),
+            text(1).expect("post_id"),
+            text(2).expect("captured_at"),
+        )
+        .metrics(xpst_store::Metrics {
+            views: row[3].as_i64(),
+            likes: row[4].as_i64(),
+            comments: row[5].as_i64(),
+            shares: row[6].as_i64(),
+            ..xpst_store::Metrics::default()
+        });
+        if let Some(status) = row.get(7).and_then(Value::as_str) {
+            snapshot = snapshot.status(xpst_store::CollectionStatus::parse(status));
+        }
+        if let Some(extra) = row.get(8).and_then(Value::as_str) {
+            snapshot = snapshot.extra_json(extra);
+        }
+        store
+            .record_snapshots(&[snapshot])
             .expect("seed metric snapshot");
+    }
+    // The persisted collection ledger `_collection_status` reads.
+    for run in scenario
+        .get("collection_runs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+    {
+        let run = run.as_array().expect("collection run");
+        let text = |index: usize| run[index].as_str().map(str::to_string);
+        let mut entry = xpst_store::NewCollectionRun::new(
+            text(0).expect("platform"),
+            text(1).expect("captured_at"),
+            xpst_store::CollectionStatus::parse(&text(2).expect("status")),
+        );
+        entry.error = text(3);
+        entry.reason = text(4);
+        entry.detail = text(5);
+        entry.attempted = run[6].as_i64();
+        entry.failures = run[7].as_i64();
+        entry.requested = run[8].as_i64();
+        entry.collected = run[9].as_i64();
+        store
+            .record_collection_runs(&[entry])
+            .expect("seed collection run");
     }
     for (content_hash, video_id, caption, source_url, created_at, platforms_json) in
         CROSS_POST_GROUPS
@@ -430,17 +488,19 @@ fn mask_fields(text: &str, fields: &[&str]) -> String {
     xpst_config::python_style_json_compact(&payload).expect("render the masked body")
 }
 
-/// Keys whose STRING value is a clock reading or a random identifier, replaced
-/// at any depth exactly the way `capture_mcp_stdio.py` replaces them. The setup
+/// Keys whose value is a clock reading or a random identifier, replaced at any
+/// depth exactly the way `capture_mcp_stdio.py` replaces them. The setup
 /// transaction stamps `created_at`/`updated_at`/`started_at`/`completed_at`/
 /// `verified_at` and mints a fresh v4 `transaction_id`, so none of them can be
-/// byte-compared. A `null` is left alone: "never stamped" is still compared.
+/// byte-compared. `xpst_analytics` reports `staleness_hours` as a float measured
+/// from the wall clock, so a non-string is masked too. A `null` is left alone:
+/// "never stamped" is still compared.
 fn mask_keys(text: &str, keys: &[&str]) -> String {
     fn walk(value: &mut Value, keys: &[&str]) {
         match value {
             Value::Object(map) => {
                 for (key, item) in map.iter_mut() {
-                    if keys.contains(&key.as_str()) && item.is_string() {
+                    if keys.contains(&key.as_str()) && !item.is_null() {
                         *item = json!("<CLOCK>");
                     } else {
                         walk(item, keys);
@@ -539,7 +599,7 @@ fn scenarios() -> Vec<Value> {
 fn the_rust_server_speaks_the_python_wire() {
     for scenario in scenarios() {
         let name = scenario["name"].as_str().expect("scenario name");
-        let dir = profile(name, &scenario["seed"]);
+        let dir = profile(name, &scenario);
         let root = dir.display().to_string();
         // The fixture records the helper paths as `<PROFILE>/bin/...`; this
         // run's profile is a different directory.

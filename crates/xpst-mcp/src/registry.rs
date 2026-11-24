@@ -152,8 +152,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_analytics",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads analytics.db and can refresh from platform APIs",
+        Implementation::Ported {
+            handler: crate::tools::analytics::run,
+            render: Render::Compact,
         },
     ),
     (

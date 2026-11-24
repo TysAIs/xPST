@@ -9,6 +9,7 @@
 //! could not read. A missing store is reported as missing, never as an empty
 //! success.
 
+pub mod analytics;
 pub mod best_time;
 pub mod bio;
 pub mod bootstrap;
