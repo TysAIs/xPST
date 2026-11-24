@@ -90,7 +90,7 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "config validate",
         "xpst-config",
-        "`{valid, checks}` payload; exit 2 on a blocker.",
+        "`{valid, checks}` payload with the schema checks; exit 2 on a blocker. Python also checks the download/log directories, credential files and rate limits, so the check list differs by design (see the deviations).",
         config_validate,
     ),
     implemented(
@@ -114,25 +114,25 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "doctor",
         "xpst-cli",
-        "Local-only diagnostics; live probes are P1 (the report says so).",
+        "Local-only diagnostics; live probes are P1 (the report says so), so the payload differs from Python's live report by design (see the deviations).",
         doctor,
     ),
     implemented(
         "version",
         "xpst-cli",
-        "Version and dependency report; `--version` matches Click's shape.",
+        "Rust engine identity (`version`, `engine`, `phase`, `commit`); `--version` matches Click's shape. Python's dependency list has no Rust equivalent, so the payload differs by design (see the deviations).",
         version,
     ),
     implemented(
         "status",
         "xpst-state",
-        "Statistics payload field-for-field with `get_statistics()` on captured fixtures.",
+        "Statistics payload byte-compared with `get_statistics()` on captured fixtures — Python's `json.dumps` separators and insertion order, including the state file's own platform order.",
         status,
     ),
     implemented(
         "schedule list",
         "xpst-state",
-        "Entries, pause marker and paused snapshots, as `schedule_list --json` reports them.",
+        "Entries, pause marker and paused snapshots, byte-compared with `schedule_list --json` (store key order preserved, `scheduled_time_local` appended last).",
         schedule_list,
     ),
     implemented(
@@ -150,13 +150,13 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "failures list",
         "xpst-state",
-        "Dead-letter rows with status/resolved/age_hours, as `failures_list --json` reports them.",
+        "Dead-letter rows with status/resolved/age_hours, byte-compared with `failures_list --json`.",
         failures_list,
     ),
     implemented(
         "failures clear",
         "xpst-state",
-        "Clears the dead-letter queue through the same tolerant loader `status` uses (v1 migration included) and writes Python's `json.dump` separators, keeping `errors: {}` for the per-video form; payload byte-compared with the Python CLI (written keys sorted, not in read order).",
+        "Clears the dead-letter queue through the same tolerant loader `status` uses (v1 migration included) and writes Python's `json.dump` separators, keeping `errors: {}` for the per-video form; payload byte-compared with the Python CLI (written keys keep the read order).",
         failures_clear,
     ),
     implemented(

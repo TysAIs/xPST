@@ -223,12 +223,14 @@ pub const DEVIATIONS: &[&str] = &[
      harness invokes the Python engine as a module). The message body — `Usage:`, `Try '… \
      --help'`, `Error: Invalid value for '--port' / '-p': 'abc' is not a valid integer.` — is \
      byte-identical.",
-    "Commands implemented before the local-state tranche (`status`, `version`, `failures list`, \
-     `schedule list`/`pause`/`resume`, `config show`, `doctor`) render `--json` with serde's \
-     compact separators and sorted keys, where Python prints `json.dumps` separators (`\", \"`, \
-     `\": \"`) and insertion order. The payloads are field-for-field identical and the \
-     local-surface fixture compares them structurally; byte parity for those commands is a \
-     separate card.",
+    "`version`, `doctor` and `config validate` print a different `--json` payload from the \
+     Python engine, not a differently-rendered one: `version` reports the Rust engine's identity \
+     where Python lists its own dependency versions, `doctor` is local-only diagnostics where \
+     Python probes every platform live, and `config validate` runs the schema checks where \
+     Python also checks the download and log directories, the per-platform credential files and \
+     the rate limits. The renderer is shared (Python's `json.dumps` separators and insertion \
+     order), so the difference is the payload itself; porting the live doctor and the full \
+     validate check list are separate slices.",
     "Integer options are validated and rendered with Python's arbitrary-precision `int()` \
      (`--port 0900` is `:900`, `--port 10^20` prints in full). The three that are used for \
      arithmetic — `pair --ttl`, `state backup --keep`, `stream relay-config --rtmp-port` — \
