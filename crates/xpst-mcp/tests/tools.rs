@@ -444,12 +444,12 @@ fn bio_get_lists_enabled_accounts_then_custom_links() {
 accounts:
   youtube:
     enabled: true
-    username: '@ty'
+    username: '@example'
   x:
     enabled: false
-    username: ty
+    username: example
 bio:
-  handle: Tyler
+  handle: Example Creator
   links:
     - label: Site
       url: https://example.invalid
@@ -461,11 +461,11 @@ bio:
 
     let payload = call(&ctx(&dir), "xpst_bio_get", json!({}));
     assert_eq!(payload["url"], json!("http://127.0.0.1:8080/bio"));
-    assert_eq!(payload["handle"], json!("Tyler"));
+    assert_eq!(payload["handle"], json!("Example Creator"));
     assert_eq!(
         payload["links"],
         json!([
-            {"label": "YouTube", "url": "https://youtube.com/@ty"},
+            {"label": "YouTube", "url": "https://youtube.com/@example"},
             {"label": "Site", "url": "https://example.invalid"},
         ]),
         "an enabled account with a handle comes first; a non-http link is dropped"
