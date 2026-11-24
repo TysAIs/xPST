@@ -1080,3 +1080,233 @@ fn json_to_config_value(value: &Value) -> xpst_config::Value {
         other => crate::output::string(other.to_string()),
     }
 }
+
+// ---------------------------------------------------------------------------
+// `schedule install`
+// ---------------------------------------------------------------------------
+//
+// Parity target: `src/xpst/cli.py::schedule_install` →
+// `_install_os_scheduler` / `_uninstall_os_scheduler`. The Linux branch is the
+// only one this host can exercise: macOS writes a LaunchAgent plist and Windows
+// registers a scheduled task, and both are recorded as deviations rather than
+// guessed at.
+//
+// What the command actually does is decide what the crontab should say and hand
+// it to `crontab -`; `xpst_state::scheduler` owns that decision so it can be
+// pinned without a process. This module owns the subprocess calls, the payload
+// and the exit code.
+
+/// `platform.system()` as the Python engine spells it.
+fn python_system() -> &'static str {
+    match std::env::consts::OS {
+        "linux" => "Linux",
+        "macos" => "Darwin",
+        "windows" => "Windows",
+        other => other,
+    }
+}
+
+/// `os.path.realpath(os.path.join(os.path.dirname(sys.executable), "xpst"))`.
+///
+/// The Python engine names the binary beside its interpreter; the Rust engine's
+/// analogue is the binary beside itself. The parent directory is canonicalised
+/// (it exists) rather than the file, because `realpath` normalises a path whose
+/// tail does not exist and `canonicalize` would fail on it.
+fn engine_binary() -> String {
+    let exe_name = if cfg!(windows) { "xpst.exe" } else { "xpst" };
+    let current = std::env::current_exe().unwrap_or_default();
+    let parent = current.parent().unwrap_or(std::path::Path::new("."));
+    let parent = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
+    parent.join(exe_name).display().to_string()
+}
+
+/// One `crontab` invocation's outcome.
+struct CrontabRun {
+    code: i32,
+    stdout: String,
+    stderr: String,
+}
+
+fn run_crontab(args: &[&str], stdin: Option<&str>) -> std::io::Result<CrontabRun> {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    let mut command = Command::new("crontab");
+    command
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        });
+    let mut child = command.spawn()?;
+    if let Some(text) = stdin {
+        if let Some(mut pipe) = child.stdin.take() {
+            let _ = pipe.write_all(text.as_bytes());
+        }
+    }
+    let output = child.wait_with_output()?;
+    Ok(CrontabRun {
+        code: output.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
+}
+
+/// The lines of `crontab -l`, or an empty list when there is no table.
+///
+/// Python treats a non-zero exit *or* empty output as "no crontab", which is
+/// what a fresh account answers.
+fn existing_lines(run: &CrontabRun) -> Vec<String> {
+    if run.code != 0 || run.stdout.trim().is_empty() {
+        return Vec::new();
+    }
+    run.stdout.trim().split('\n').map(str::to_string).collect()
+}
+
+/// Run `schedule install`.
+pub fn install(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let json_mode = global.json || leaf.is_some_and(|m| flag(m, "opt:json"));
+    let uninstall = leaf_flag(leaf, "opt:remove");
+    let interval = crate::clickargs::leaf_integer(leaf, "opt:interval").unwrap_or(15);
+    let system = python_system();
+    let xpst_bin = engine_binary();
+
+    if crate::fsutil::which("crontab").is_none() {
+        // Python raises `RuntimeError` here, so the process exits 1 with a
+        // traceback and no payload. The message is the contract; the frames are
+        // a Python detail (recorded as a deviation).
+        let message = if uninstall {
+            "crontab not found on PATH. Install cron to manage scheduled posting on Linux."
+        } else {
+            "crontab not found on PATH. Install cron to use scheduled posting on Linux \
+             (e.g. 'sudo apt install cron' or 'sudo dnf install cronie')."
+        };
+        let _ = writeln!(err, "RuntimeError: {message}");
+        return exit::GENERAL;
+    }
+
+    if system != "Linux" {
+        // macOS and Windows are not ported; answer the way Python answers an
+        // unknown OS rather than pretending to install something.
+        let message = format!("Unsupported OS: {system}");
+        if json_mode {
+            let _ = write_python_json(
+                out,
+                &object(vec![
+                    ("ok", boolean(false)),
+                    ("error", string(message.clone())),
+                ]),
+            );
+        } else {
+            let _ = write_text(out, &message);
+        }
+        return exit::GENERAL;
+    }
+
+    let listing = match run_crontab(&["-l"], None) {
+        Ok(run) => run,
+        Err(error) => {
+            let _ = writeln!(err, "xpst schedule install: cannot run crontab: {error}");
+            return exit::GENERAL;
+        }
+    };
+    let lines = existing_lines(&listing);
+
+    if uninstall {
+        if lines.is_empty() {
+            if json_mode {
+                let _ = write_python_json(
+                    out,
+                    &object(vec![
+                        ("ok", boolean(true)),
+                        ("message", string("No crontab entries found")),
+                    ]),
+                );
+            } else {
+                let _ = write_text(out, "No crontab entries found");
+            }
+            return exit::SUCCESS;
+        }
+        let table = xpst_state::scheduler::uninstall_table(&lines);
+        let written = match &table {
+            Some(text) => run_crontab(&["-"], Some(text)),
+            None => run_crontab(&["-r"], None),
+        };
+        if let Err(error) = written {
+            let _ = writeln!(err, "xpst schedule install: cannot run crontab: {error}");
+            return exit::GENERAL;
+        }
+        if json_mode {
+            let _ = write_python_json(
+                out,
+                &object(vec![
+                    ("ok", boolean(true)),
+                    ("removed", string("crontab entry")),
+                ]),
+            );
+        } else {
+            let _ = write_text(out, "✓ xPST crontab entry removed");
+        }
+        return exit::SUCCESS;
+    }
+
+    // cron does not expand `~`, so the log path is fully resolved.
+    let cron_log = match paths::config_dir() {
+        Some(dir) => dir.join("logs").join("cron.log").display().to_string(),
+        None => "~/.xpst/logs/cron.log".to_string(),
+    };
+    let table = xpst_state::scheduler::install_table(&lines, interval, &xpst_bin, &cron_log);
+    let written = match run_crontab(&["-"], Some(&table)) {
+        Ok(run) => run,
+        Err(error) => {
+            let _ = writeln!(err, "xpst schedule install: cannot run crontab: {error}");
+            return exit::GENERAL;
+        }
+    };
+    if written.code == 0 {
+        if json_mode {
+            let _ = write_python_json(
+                out,
+                &object(vec![
+                    ("ok", boolean(true)),
+                    ("os", string("linux")),
+                    ("interval_min", integer(interval)),
+                    ("command", string("serve")),
+                ]),
+            );
+        } else {
+            let _ = write_text(
+                out,
+                &format!(
+                    "✓ Crontab entry installed (every {interval} minutes, keep-alive)\n\
+                     \x20 Runs `xpst serve` (pidfile-guarded; idempotent)\n\
+                     \x20 Logs: ~/.xpst/logs/cron.log\n\
+                     \x20 Uninstall: xpst schedule install --remove"
+                ),
+            );
+        }
+        return exit::SUCCESS;
+    }
+
+    let detail = written.stderr.trim().to_string();
+    if json_mode {
+        let _ = write_python_json(
+            out,
+            &object(vec![
+                ("ok", boolean(false)),
+                ("error", string(detail.clone())),
+            ]),
+        );
+    } else {
+        let _ = write_text(out, &format!("Failed to set crontab: {detail}"));
+    }
+    exit::GENERAL
+}

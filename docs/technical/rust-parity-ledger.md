@@ -4,7 +4,7 @@
 
 One row per leaf command of the shipped CLI. `status` is `implemented` when the Rust engine runs the command and `stub` when it answers `not implemented in the Rust engine yet`. The two columns either side are the questions a reader actually has: which crate owns the behaviour, and whether the Python implementation they are comparing against makes an outbound network call.
 
-**52 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
+**56 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
 
 ## Columns
 
@@ -15,7 +15,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 
 | Command | Rust status | Owner crate | Python network |
 |---|---|---|---|
-| `analytics export` | stub | xpst-store | none |
+| `analytics export` | implemented | xpst-store | none |
 | `app` | implemented | xpst-app | none |
 | `auth` | stub | xpst-auth | yes |
 | `backfill` | stub | xpst-core | yes |
@@ -64,8 +64,8 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `messenger status` | implemented | xpst-provider | none |
 | `onboard` | stub | xpst-auth | yes |
 | `pair` | implemented | xpst-auth | none |
-| `plugins docs` | stub | xpst-cli | none |
-| `plugins list` | stub | xpst-cli | none |
+| `plugins docs` | implemented | xpst-cli | none |
+| `plugins list` | implemented | xpst-cli | none |
 | `post` | stub | xpst-core | yes |
 | `preflight` | implemented | xpst-core | none |
 | `providers` | implemented | xpst-provider | none |
@@ -74,7 +74,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `refresh-tokens` | stub | xpst-auth | yes |
 | `run` | stub | xpst-core | yes |
 | `schedule add` | implemented | xpst-state | none |
-| `schedule install` | stub | xpst-state | none |
+| `schedule install` | implemented | xpst-state | none |
 | `schedule list` | implemented | xpst-state | none |
 | `schedule pause` | implemented | xpst-state | none |
 | `schedule remove` | implemented | xpst-state | none |
@@ -160,6 +160,10 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `readiness` | xpst-cli | The first-run report (`build_readiness_report`): the canonical provider status shared with `providers`, the ban-risk registry, the local folder set and the yt-dlp/FFmpeg helper probes, with `--fix` creating the same folders; payload byte-compared with the Python CLI (the `python` row reports the Rust engine, and `--fix` does not rewrite `config.yaml`). |
 | `verify-media` | xpst-media | The per-destination ingest verdict (`PostPreflightService.plan` with readiness off): `-p all` resolved through `enabled_destinations`, the `media_spec` check list and the raw ffprobe document in ffprobe's own key order, the `--plan` post plan and transform plans, and the exit-1-on-error contract; payload byte-compared with the Python CLI. |
 | `preflight` | xpst-core | The config-aware route plan (`build_route_plan`): target resolution from the config's enabled flags, the per-destination state/reason/envelope/constraints/blockers/warnings/transform/visibility payload, the ban-risk advisory and the read-only quota gate; payload byte-compared with the Python CLI. `verify_media`'s loudness check is ported but the route plan pins `check_loudness=False`, so `preflight` never spawns the extra ffmpeg pass. |
+| `analytics export` | xpst-store | The local export: post-id discovery from `state.json` (canonical `id`, legacy `post_id`, unknown platforms appended in state order), the `--platforms` filter, the totals and per-platform totals, the `collection_status` block, the `json.dump(indent=2, ensure_ascii=False)` document and the CSV BOM + `\r\n` header; payload and written file byte-compared with the Python CLI (`exported_at` masked). The per-platform metric collectors are not ported, so the export carries the answer a credential-less profile gets (empty metrics, `collection_status.status: ok`). |
+| `plugins list` | xpst-cli | The installed-plugin inventory: `~/.xpst/plugins` resolved from HOME (not `XPST_CONFIG_DIR`, as `DEFAULT_PLUGIN_DIR` does), the directory created on a fresh profile, and the `{plugins, count}` payload with `list_plugins()`'s five keys in order; payload byte-compared with the Python CLI. A plugin is Python code, so the inventory is asked of an interpreter (`XPST_PYTHON`, else `python3`, else `python`) running the shipped `PluginManager` — the same out-of-process shape `kb doctor` uses. |
+| `plugins docs` | xpst-cli | The generated markdown: the header, the `Auto-generated on` stamp, the plugin count, and per plugin its name, version, description, capabilities and `config_options` rows, written to `--output` or carried in the payload; payload and written file byte-compared with the Python CLI (the stamp masked). Same interpreter delegation as `plugins list`. |
+| `schedule install` | xpst-state | The Linux scheduler entry: `crontab -l` read, the prior xPST marker/command pair filtered out (including Python's `skip_next` quirk), the `*/N * * * * <bin> serve >> <log> 2>&1` line appended and written back with `crontab -`, plus `--remove`'s `crontab -`/`crontab -r` split and the `No crontab entries found` answer; payload and the resulting crontab byte-compared with the Python CLI against a stand-in `crontab` on PATH. The macOS LaunchAgent and Windows scheduled-task branches are not ported (named divergence). |
 
 ## Known deviations from the Python engine
 
@@ -194,3 +198,6 @@ Named on purpose: a difference that is not written down is a bug nobody found.
 * `preflight --transform` builds the rendition decision the way `VideoProcessor` does — it runs `ffmpeg -version` before trusting the binary — so a machine with no ffmpeg gets the same `transcode` row with `ffmpeg unavailable — compliance not verified`. The compliance probe itself is the shipped one (`is_platform_compliant`), including the `+25%` bitrate tolerance and the `fps + 0.1` slack.
 * A `Choice` option is matched case-sensitively here where Click's `case_sensitive=False` accepts any case: `preflight --format VIDEO` is a usage error (exit 2) in the Rust engine and `video` in Python. The parity manifest records the choice list but not Click's case flag, so this affects every choice option (`--format`, `--visibility`, `verify-media --platform`), not just `preflight`; the lowercase spelling every script and fixture uses is identical.
 * Integer options are validated and rendered with Python's arbitrary-precision `int()` (`--port 0900` is `:900`, `--port 10^20` prints in full). The three that are used for arithmetic — `pair --ttl`, `state backup --keep`, `stream relay-config --rtmp-port` — saturate at the `i64` bounds instead of carrying the exact value, which keeps the observable behaviour (`--keep` deletes nothing, `--rtmp-port` is out of range) but not the printed number for a value beyond 2^63.
+* `schedule install` ports the Linux branch only. macOS writes a LaunchAgent plist and Windows registers a scheduled task; neither can be exercised on this host, so both answer `Unsupported OS: <system>` (exit 1) instead of installing something unverified. The Linux path is byte-compared against a stand-in `crontab` on PATH, including the written table. A missing `crontab` reproduces Python's `RuntimeError` message and exit 1, but prints one line where Python prints a traceback.
+* `plugins list` and `plugins docs` ask an interpreter for the inventory (`XPST_PYTHON`, else `python3`, else `python`) because a plugin is Python code that `PluginManager.discover()` imports and calls `register()` on — a Rust binary cannot execute it, and a static parse of the `register()` literal would misreport any plugin that computes its dict. With no interpreter that can import `xpst.plugins` the inventory is empty where Python would list the plugins. The checked-in fixture replays a recorded inventory through a stand-in interpreter (so the row pins the rendering and the directory resolution), and `crates/xpst-cli/tests/plugin_probe.rs` drives the real delegation whenever an interpreter is available.
+* `analytics export` does not fetch platform metrics: the YouTube/twikit/instagrapg/TikTok/Threads collectors are not ported, so the export carries the payload a credential-less profile gets from the shipped engine — empty metric maps with `collection_status.status: "ok"` — and the `analytics.db` ledger writes (metric snapshots, per-run outcomes) are skipped. With credentials, Python fetches live numbers and records them. The discovery, the `--platforms` filter, the totals, the document bytes (JSON key order and separators, the CSV BOM and `\r\n`) and the payload are the shipped behaviour.

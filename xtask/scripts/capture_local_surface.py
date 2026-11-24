@@ -119,6 +119,71 @@ FFMPEG_LOUDNESS_STUB = (
 # itself, so this row exercises the header reader rather than ffprobe.
 PNG_HEADER_B64 = "iVBORw0KGgoAAAANSUhEUgAABDgAAAeA"
 
+# `schedule install` shells out to `crontab`. A stand-in keeps its table in
+# `$XPST_CRONTAB_STORE` (inside the scratch profile) and normalises the one
+# machine-dependent token — the engine's own binary path — so the written
+# crontab is a property of the fixture rather than of where the engine happens
+# to be installed.
+CRONTAB_STUB = (
+    "#!/bin/sh\n"
+    'store="${XPST_CRONTAB_STORE:-/nonexistent}"\n'
+    'case "$1" in\n'
+    '  -l) [ -f "$store" ] || { echo "no crontab for the fixture" >&2; exit 1; };'
+    ' cat "$store" ;;\n'
+    "  -) sed -E 's#^(\\*/[0-9]+ \\* \\* \\* \\* )[^ ]+( serve >> )#\\1<ENGINE>\\2#'"
+    ' > "$store" ;;\n'
+    '  -r) rm -f "$store" ;;\n'
+    '  *) echo "unsupported: $*" >&2; exit 2 ;;\n'
+    "esac\n"
+)
+
+# A plugin is Python code, so the Rust engine asks an interpreter for the
+# inventory. The stand-in answers with the rows the shipped `PluginManager`
+# produced for the seeded plugins (recorded into `bin/plugins.json`), and only
+# when the engine asked about the profile's own plugin directory — a wrong
+# resolution shows up as an empty list instead of a silent pass.
+PLUGIN_PROBE_STUB = (
+    "#!/bin/sh\n"
+    'case "$3" in\n'
+    '  */.xpst/plugins) cat "$(dirname "$0")/plugins.json" ;;\n'
+    '  *) echo "unexpected plugin dir: $3" >&2; exit 1 ;;\n'
+    "esac\n"
+)
+
+# One uploader with config options (a dict and a bare string, so both render
+# branches are exercised), one source with no metadata, and one that raises at
+# import time — the three shapes `PluginManager` has to survive.
+PLUGIN_ALPHA = '''\
+class AlphaUploader:
+    pass
+
+
+def register():
+    return {
+        "name": "alpha",
+        "version": "1.2.0",
+        "description": "Uploads to Alpha",
+        "uploader": AlphaUploader,
+        "config_options": [
+            {"name": "api_key", "description": "the key", "default": "none"},
+            "legacy_option",
+        ],
+    }
+'''
+
+PLUGIN_BETA = '''\
+class BetaSource:
+    pass
+
+
+def register():
+    return {"name": "beta", "source": BetaSource}
+'''
+
+PLUGIN_BROKEN = '''\
+raise RuntimeError("this plugin does not import")
+'''
+
 #: 300 characters: past X's 280 ceiling, inside Instagram's 2200.
 LONG_CAPTION = "a" * 300
 
@@ -2189,6 +2254,304 @@ SCENARIOS = [
         "allow_nonzero": True,
         "compare": "stdout",
     },
+    # ── schedule install ───────────────────────────────────────────────────
+    #
+    # The Linux branch is the only one this host can run. `crontab` is a
+    # stand-in on PATH, so the written table is a property of the fixture; it
+    # normalises the engine's own binary path to `<ENGINE>`, which is the one
+    # token that differs between the two installs.
+    {
+        # A prior xPST marker/command pair is replaced, and the unrelated entry
+        # above it survives.
+        "name": "schedule_install_basic",
+        "argv": ["schedule", "install", "--json"],
+        "seed": {
+            "bin/crontab": CRONTAB_STUB,
+            "crontab.txt": (
+                "# existing\n"
+                "0 3 * * * /usr/bin/backup\n"
+                "# xPST serve supervisor\n"
+                "*/15 * * * * /old/xpst serve >> /old/cron.log 2>&1\n"
+            ),
+        },
+        "executable": ["bin/crontab"],
+        "env": {
+            "XPST_CRONTAB_STORE": "PROFILE/crontab.txt",
+            "PATH": "PROFILE/bin:/usr/bin:/bin",
+        },
+        "files": ["crontab.txt"],
+        "compare": "json",
+    },
+    {
+        # A fresh account: `crontab -l` fails, so the table starts empty and the
+        # interval is the one the caller asked for.
+        "name": "schedule_install_interval",
+        "argv": ["schedule", "install", "--interval", "5", "--json"],
+        "seed": {"bin/crontab": CRONTAB_STUB},
+        "executable": ["bin/crontab"],
+        "env": {
+            "XPST_CRONTAB_STORE": "PROFILE/crontab.txt",
+            "PATH": "PROFILE/bin:/usr/bin:/bin",
+        },
+        "files": ["crontab.txt"],
+        "compare": "json",
+    },
+    {
+        # `--remove` filters the pair out and writes the survivors back.
+        "name": "schedule_install_remove",
+        "argv": ["schedule", "install", "--remove", "--json"],
+        "seed": {
+            "bin/crontab": CRONTAB_STUB,
+            "crontab.txt": (
+                "# existing\n"
+                "0 3 * * * /usr/bin/backup\n"
+                "# xPST serve supervisor\n"
+                "*/15 * * * * /old/xpst serve >> /old/cron.log 2>&1\n"
+            ),
+        },
+        "executable": ["bin/crontab"],
+        "env": {
+            "XPST_CRONTAB_STORE": "PROFILE/crontab.txt",
+            "PATH": "PROFILE/bin:/usr/bin:/bin",
+        },
+        "files": ["crontab.txt"],
+        "compare": "json",
+    },
+    {
+        # Nothing installed: the answer is a message, not a failure.
+        "name": "schedule_install_remove_empty",
+        "argv": ["schedule", "install", "--remove", "--json"],
+        "seed": {"bin/crontab": CRONTAB_STUB},
+        "executable": ["bin/crontab"],
+        "env": {
+            "XPST_CRONTAB_STORE": "PROFILE/crontab.txt",
+            "PATH": "PROFILE/bin:/usr/bin:/bin",
+        },
+        "compare": "json",
+    },
+    {
+        # No `crontab` on PATH: Python raises `RuntimeError` (traceback, exit 1)
+        # and the Rust engine prints the same message and exits 1. Only the exit
+        # code is compared — the frames name Python files.
+        "name": "schedule_install_no_crontab",
+        "argv": ["schedule", "install", "--json"],
+        "seed": {"bin/.keep": ""},
+        "env": {"PATH": "PROFILE/bin"},
+        "allow_nonzero": True,
+        "compare": "exit",
+    },
+    {
+        # Text mode is Rich's coloured output in Python and plain lines here
+        # (recorded deviation); the exit code is the contract.
+        "name": "schedule_install_text",
+        "argv": ["schedule", "install"],
+        "seed": {"bin/crontab": CRONTAB_STUB},
+        "executable": ["bin/crontab"],
+        "env": {
+            "XPST_CRONTAB_STORE": "PROFILE/crontab.txt",
+            "PATH": "PROFILE/bin:/usr/bin:/bin",
+        },
+        "compare": "exit",
+    },
+    # ── plugins ────────────────────────────────────────────────────────────
+    #
+    # `~/.xpst/plugins` is resolved from HOME, so these rows pin HOME to the
+    # scratch profile (`config_dir`). The inventory itself is Python code: the
+    # Rust engine asks an interpreter, and the fixture's stand-in answers with
+    # the rows the shipped `PluginManager` produced for the same seeded files
+    # (`plugin_probe` records them into `bin/plugins.json`).
+    {
+        # A fresh profile: `discover()` creates the directory and reports none.
+        "name": "plugins_list_empty",
+        "argv": ["plugins", "list", "--json"],
+        "seed": {},
+        "config_dir": ".xpst",
+        "compare": "json",
+    },
+    {
+        # Two loadable plugins (one uploader with config options, one source)
+        # and one that raises at import: the broken file is skipped, not fatal.
+        "name": "plugins_list_seeded",
+        "argv": ["plugins", "list", "--json"],
+        "seed": {
+            ".xpst/plugins/alpha.py": PLUGIN_ALPHA,
+            ".xpst/plugins/beta.py": PLUGIN_BETA,
+            ".xpst/plugins/broken.py": PLUGIN_BROKEN,
+            "bin/pyprobe": PLUGIN_PROBE_STUB,
+        },
+        "executable": ["bin/pyprobe"],
+        "env": {"XPST_PYTHON": "PROFILE/bin/pyprobe"},
+        "config_dir": ".xpst",
+        "plugin_probe": True,
+        "compare": "json",
+    },
+    {
+        # The generated markdown, carried in the payload. The `Auto-generated
+        # on` stamp is the wall clock, so its value is masked and the prefix
+        # (the key) is still compared.
+        "name": "plugins_docs_seeded",
+        "argv": ["plugins", "docs", "--json"],
+        "seed": {
+            ".xpst/plugins/alpha.py": PLUGIN_ALPHA,
+            ".xpst/plugins/beta.py": PLUGIN_BETA,
+            ".xpst/plugins/broken.py": PLUGIN_BROKEN,
+            "bin/pyprobe": PLUGIN_PROBE_STUB,
+        },
+        "executable": ["bin/pyprobe"],
+        "env": {"XPST_PYTHON": "PROFILE/bin/pyprobe"},
+        "config_dir": ".xpst",
+        "plugin_probe": True,
+        "mask_lines": ["Auto-generated on "],
+        "compare": "json",
+    },
+    {
+        # `--output` writes the same document to a file and reports the path.
+        "name": "plugins_docs_output",
+        "argv": ["plugins", "docs", "--output", "PROFILE/plugins.md", "--json"],
+        "seed": {
+            ".xpst/plugins/alpha.py": PLUGIN_ALPHA,
+            ".xpst/plugins/beta.py": PLUGIN_BETA,
+            "bin/pyprobe": PLUGIN_PROBE_STUB,
+        },
+        "executable": ["bin/pyprobe"],
+        "env": {"XPST_PYTHON": "PROFILE/bin/pyprobe"},
+        "config_dir": ".xpst",
+        "plugin_probe": True,
+        "mask_lines": ["Auto-generated on "],
+        "files": ["plugins.md"],
+        "compare": "json",
+    },
+    {
+        # No plugins installed: a message, not an empty document.
+        "name": "plugins_docs_empty",
+        "argv": ["plugins", "docs", "--json"],
+        "seed": {},
+        "config_dir": ".xpst",
+        "compare": "json",
+    },
+    # ── analytics export ───────────────────────────────────────────────────
+    #
+    # The export is local: post ids come from `state.json`, and the metric
+    # collectors are not ported, so the payload is the one a credential-less
+    # profile gets (empty metric maps, `collection_status.status: ok`). The
+    # platforms are TikTok and Threads because their collectors return `[]`
+    # before importing anything optional, which is what makes the row a
+    # property of the engine rather than of the interpreter's installed extras.
+    {
+        # The JSON document: key order, `json.dump(indent=2, ensure_ascii=False)`
+        # separators, and the first-run `config.yaml` the loader materializes.
+        "name": "analytics_export_json",
+        "argv": ["analytics", "export", "--output", "PROFILE/out.json", "--json"],
+        "seed": {
+            "state.json": json.dumps(
+                {
+                    "posted_videos": {
+                        "vid-1": {
+                            "posted_to": {
+                                "tiktok": {"id": "tt-1"},
+                                "threads": {"id": "th-1"},
+                            }
+                        }
+                    }
+                }
+            )
+        },
+        "env": {"HOME": "PROFILE"},
+        "mask_lines": ['  "exported_at": '],
+        "files": ["out.json", "config.yaml"],
+        "compare": "json",
+    },
+    {
+        # CSV: a UTF-8 BOM and `\r\n` terminators, which is what `csv.writer`
+        # with `newline=""` produces.
+        "name": "analytics_export_csv",
+        "argv": [
+            "analytics", "export", "--format", "csv",
+            "--output", "PROFILE/out.csv", "--json",
+        ],
+        "seed": {
+            "state.json": json.dumps(
+                {"posted_videos": {"vid-1": {"posted_to": {"tiktok": {"id": "tt-1"}}}}}
+            )
+        },
+        "env": {"HOME": "PROFILE"},
+        "files": ["out.csv"],
+        "compare": "json",
+    },
+    {
+        # `--platforms` filters the discovered ids, so only the named platform
+        # appears in the document.
+        "name": "analytics_export_platforms",
+        "argv": [
+            "analytics", "export", "--platforms", "tiktok",
+            "--output", "PROFILE/out.json", "--json",
+        ],
+        "seed": {
+            "state.json": json.dumps(
+                {
+                    "posted_videos": {
+                        "vid-1": {
+                            "posted_to": {
+                                "tiktok": {"id": "tt-1"},
+                                "threads": {"id": "th-1"},
+                            }
+                        }
+                    }
+                }
+            )
+        },
+        "env": {"HOME": "PROFILE"},
+        "mask_lines": ['  "exported_at": '],
+        "files": ["out.json"],
+        "compare": "json",
+    },
+    {
+        # A legacy `post_id` is read as the id, and an unknown platform is
+        # appended after the five the collector knows.
+        "name": "analytics_export_legacy_ids",
+        "argv": ["analytics", "export", "--output", "PROFILE/out.json", "--json"],
+        "seed": {
+            "state.json": json.dumps(
+                {
+                    "posted_videos": {
+                        "vid-1": {
+                            "posted_to": {
+                                "x": {"post_id": "legacy-1"},
+                                "messenger": {"id": "m-1"},
+                                "youtube": {"id": ""},
+                            }
+                        }
+                    }
+                }
+            )
+        },
+        "env": {"HOME": "PROFILE"},
+        "mask_lines": ['  "exported_at": '],
+        "files": ["out.json"],
+        "compare": "json",
+    },
+    {
+        # Nothing in `state.json`: the refusal is a payload, and the exit code
+        # is 0 (Python returns rather than raising).
+        "name": "analytics_export_no_posts",
+        "argv": ["analytics", "export", "--output", "PROFILE/out.json", "--json"],
+        "seed": {},
+        "env": {"HOME": "PROFILE"},
+        "compare": "json",
+    },
+    {
+        # Text mode is Rich's coloured output in Python and plain lines here
+        # (recorded deviation); the exit code is the contract.
+        "name": "analytics_export_text",
+        "argv": ["analytics", "export", "--output", "PROFILE/out.json"],
+        "seed": {
+            "state.json": json.dumps(
+                {"posted_videos": {"vid-1": {"posted_to": {"tiktok": {"id": "tt-1"}}}}}
+            )
+        },
+        "env": {"HOME": "PROFILE"},
+        "compare": "exit",
+    },
 ]
 
 
@@ -2243,6 +2606,43 @@ def seed_profile(scenario: dict, profile: Path) -> None:
             os.utime(path, (scenario["snapshot_epoch"], scenario["snapshot_epoch"]))
 
 
+def plugin_probe_rows(plugin_dir: Path) -> str:
+    """The rows the shipped `PluginManager` reports for `plugin_dir`.
+
+    This is the contract between the two halves of `plugins list`: the Rust
+    engine asks an interpreter for exactly this document and renders it. The
+    capture records it as `bin/plugins.json`, so the checked-in fixture does not
+    depend on the test machine having an importable engine — and the stand-in
+    interpreter only answers when it was asked about the profile's own plugin
+    directory, so a wrong resolution shows up as an empty list.
+    """
+    from xpst.plugins import PluginManager
+
+    manager = PluginManager(plugin_dir)
+    manager.discover()
+    rows = []
+    for summary in manager.list_plugins():
+        detail = manager.get(summary["name"]) or {}
+        row = dict(summary)
+        row["config_options"] = detail.get("config_options", [])
+        rows.append(row)
+    return json.dumps(rows, default=str)
+
+
+def materialize_plugin_probes() -> None:
+    """Seed `bin/plugins.json` for every scenario that declares `plugin_probe`."""
+    for scenario in SCENARIOS:
+        if not scenario.get("plugin_probe"):
+            continue
+        scratch = Path(tempfile.mkdtemp(prefix="xpst-plugin-probe-"))
+        try:
+            seed_profile(scenario, scratch)
+            rows = plugin_probe_rows(scratch / ".xpst" / "plugins")
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+        scenario["seed"]["bin/plugins.json"] = rows
+
+
 def argv_for(scenario: dict, profile: Path) -> list[str]:
     argv = [
         argument.replace("MISSING", str(profile / "does-not-exist.yaml"))
@@ -2287,9 +2687,30 @@ def env_for(scenario: dict, profile: Path) -> dict[str, str]:
     return env
 
 
+def mask_line_prefixes(text: str, prefixes: list[str] | None) -> str:
+    """Replace the tail of any line that starts with a named prefix.
+
+    `plugins docs` stamps `Auto-generated on <wall clock>` and `analytics
+    export` writes `"exported_at": "<wall clock>"`; two runs never agree on
+    either. The prefix is kept, so the key is still compared and only the value
+    after it is blanked.
+    """
+    if not prefixes:
+        return text
+    lines = []
+    for line in text.split("\n"):
+        for prefix in prefixes:
+            if line.startswith(prefix):
+                line = prefix + "<MASK>"
+                break
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def normalize(payload, profile: Path, mask: list[str] | None = None,
               mask_findings: list[str] | None = None,
-              mask_checks: list[str] | None = None):
+              mask_checks: list[str] | None = None,
+              mask_lines: list[str] | None = None):
     """Strip the values that cannot be compared across machines.
 
     * the scratch profile's absolute path becomes `<PROFILE>` (a payload that
@@ -2298,18 +2719,24 @@ def normalize(payload, profile: Path, mask: list[str] | None = None,
       name is compared instead;
     * `mask` names payload paths that carry the wall clock (`paused_at`,
       `checked_at`), which two runs never agree on;
+    * `mask_lines` names line prefixes whose value is the wall clock
+      (`Auto-generated on `, `  "exported_at": `); the prefix survives so the
+      key is still compared;
     * `mask_findings` names `kb doctor` findings whose answer depends on the
       interpreter's installed packages (`dependencies`). The finding is blanked
       and the severity count it contributed is decremented, so every other
       finding and the remaining counts are still compared exactly.
     """
     if isinstance(payload, str):
-        return payload.replace(str(profile), "<PROFILE>")
+        return mask_line_prefixes(payload.replace(str(profile), "<PROFILE>"), mask_lines)
     if isinstance(payload, list):
-        return [normalize(item, profile, mask, mask_findings, mask_checks) for item in payload]
+        return [
+            normalize(item, profile, mask, mask_findings, mask_checks, mask_lines)
+            for item in payload
+        ]
     if isinstance(payload, dict):
         result = {
-            key: normalize(value, profile, mask, mask_findings, mask_checks)
+            key: normalize(value, profile, mask, mask_findings, mask_checks, mask_lines)
             for key, value in payload.items()
         }
         if "paused_snapshots" in result:
@@ -2394,6 +2821,7 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
                     scenario.get("mask"),
                     scenario.get("mask_findings"),
                     scenario.get("mask_checks"),
+                    scenario.get("mask_lines"),
                 )
             except json.JSONDecodeError:
                 payload = None
@@ -2401,12 +2829,16 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
         for relative in scenario.get("files", []):
             path = profile / relative
             if path.exists():
+                # Read bytes and decode, not `read_text`: universal newlines
+                # would turn the CSV export's `\r\n` terminators into `\n` and
+                # the fixture would stop pinning the bytes `csv.writer` writes.
                 text = normalize(
-                    path.read_text(encoding="utf-8"),
+                    path.read_bytes().decode("utf-8"),
                     profile,
                     scenario.get("mask"),
                     scenario.get("mask_findings"),
                     scenario.get("mask_checks"),
+                    scenario.get("mask_lines"),
                 )
                 files[relative] = mask_file_keys(text, scenario.get("mask_file_keys"))
         return {
@@ -2420,6 +2852,7 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
                 scenario.get("mask"),
                 scenario.get("mask_findings"),
                 scenario.get("mask_checks"),
+                scenario.get("mask_lines"),
             ),
             "stderr": proc.stderr,
         }
@@ -2487,6 +2920,8 @@ def run_scenario(scenario: dict, python: str) -> dict:
         record["mask_findings"] = scenario["mask_findings"]
     if scenario.get("mask_checks"):
         record["mask_checks"] = scenario["mask_checks"]
+    if scenario.get("mask_lines"):
+        record["mask_lines"] = scenario["mask_lines"]
     if scenario.get("mask_file_keys"):
         record["mask_file_keys"] = scenario["mask_file_keys"]
     if scenario.get("executable"):
@@ -2642,6 +3077,10 @@ def compare_scenarios(python: str, binary: str) -> int:
 
 def main() -> None:
     python = os.environ.get("XPST_PYTHON") or sys.executable
+    # The plugin rows are Python code, so the fixture records the inventory the
+    # shipped `PluginManager` produced for the seeded files; the stand-in
+    # interpreter replays it for the Rust engine.
+    materialize_plugin_probes()
     if "--check-with" in sys.argv:
         index = sys.argv.index("--check-with")
         try:

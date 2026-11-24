@@ -7,6 +7,7 @@
 //! Everything else in the tree is declared-but-unimplemented and answers with
 //! `not implemented in the Rust engine yet` (see `crate::not_implemented`).
 
+pub mod analytics;
 pub mod app;
 pub mod best_time;
 pub mod bio;
@@ -26,6 +27,7 @@ pub mod logs;
 pub mod mcp;
 pub mod media;
 pub mod messenger;
+pub mod plugins;
 pub mod preflight;
 pub mod provider_status;
 pub mod providers;

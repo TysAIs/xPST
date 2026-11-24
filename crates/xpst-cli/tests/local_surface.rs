@@ -27,7 +27,7 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 169;
+const EXPECTED_SCENARIOS: usize = 186;
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -265,6 +265,30 @@ fn env_for(row: &Value, profile: &Profile) -> Vec<(String, String)> {
     env
 }
 
+/// Replace the tail of any line that starts with a named prefix.
+///
+/// `plugins docs` stamps `Auto-generated on <wall clock>` and `analytics export`
+/// writes `"exported_at": "<wall clock>"`; two runs never agree on either. The
+/// prefix is kept, so the key is still compared and only the value after it is
+/// blanked — the same rule `capture_local_surface.py` applies.
+fn mask_line_prefixes(text: &str, prefixes: &[String]) -> String {
+    if prefixes.is_empty() {
+        return text.to_owned();
+    }
+    let mut lines: Vec<String> = Vec::new();
+    for line in text.split('\n') {
+        let mut rendered = line.to_owned();
+        for prefix in prefixes {
+            if line.starts_with(prefix.as_str()) {
+                rendered = format!("{prefix}<MASK>");
+                break;
+            }
+        }
+        lines.push(rendered);
+    }
+    lines.join("\n")
+}
+
 /// Replace the scratch profile's absolute path with `<PROFILE>` everywhere in a
 /// payload, and blank the wall-clock fields the fixture masks.
 fn normalize(
@@ -273,21 +297,29 @@ fn normalize(
     mask: &[String],
     mask_findings: &[String],
     mask_checks: &[String],
+    mask_lines: &[String],
 ) {
     let root = profile.path().display().to_string();
-    fn walk(value: &mut Value, root: &str) {
+    fn walk(value: &mut Value, root: &str, mask_lines: &[String]) {
         match value {
             Value::String(text) => {
                 if text.contains(root) {
                     *text = text.replace(root, "<PROFILE>");
                 }
+                if !mask_lines.is_empty() {
+                    *text = mask_line_prefixes(text, mask_lines);
+                }
             }
-            Value::Array(items) => items.iter_mut().for_each(|item| walk(item, root)),
-            Value::Object(map) => map.values_mut().for_each(|item| walk(item, root)),
+            Value::Array(items) => items
+                .iter_mut()
+                .for_each(|item| walk(item, root, mask_lines)),
+            Value::Object(map) => map
+                .values_mut()
+                .for_each(|item| walk(item, root, mask_lines)),
             _ => {}
         }
     }
-    walk(value, &root);
+    walk(value, &root, mask_lines);
     if let Value::Object(map) = value {
         for path in mask {
             if map.contains_key(path) {
@@ -408,6 +440,19 @@ fn mask_named_checks(value: &mut Value, mask_checks: &[String]) {
 
 fn mask_checks_for(row: &Value) -> Vec<String> {
     row.get("mask_checks")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn mask_lines_for(row: &Value) -> Vec<String> {
+    row.get("mask_lines")
         .and_then(Value::as_array)
         .map(|items| {
             items
@@ -582,6 +627,7 @@ fn assert_files_match(row: &Value, profile: &Profile, scenario: &str) {
         let actual = std::fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("scenario `{scenario}`: {relative} unreadable: {error}"))
             .replace(&profile.path().display().to_string(), "<PROFILE>");
+        let actual = mask_line_prefixes(&actual, &mask_lines_for(row));
         let actual = mask_file_keys(&actual, &mask_keys);
         let want = want.as_str().unwrap_or_default();
         if let (Ok(actual_json), Ok(want_json)) = (
@@ -639,6 +685,7 @@ fn every_recorded_scenario_matches_the_python_engine() {
                     &mask_for(row),
                     &mask_findings_for(row),
                     &mask_checks_for(row),
+                    &mask_lines_for(row),
                 );
                 assert_payload_matches(&row["stdout_json"], &actual, name);
                 assert_files_match(row, &profile, name);

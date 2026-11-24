@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "captured_from": {
+    "repo": "TysAIs/xPST",
+    "source": "src/xpst/cli.py::_crontab_without_xpst"
+  },
+  "note": "Captured by calling the shipped filter. `skip_next` swallows the line after a marker or an xPST command, which is why a command with no marker also removes the entry below it.",
+  "case_count": 12,
+  "cases": [
+    {
+      "lines": [],
+      "kept": []
+    },
+    {
+      "lines": [
+        ""
+      ],
+      "kept": []
+    },
+    {
+      "lines": [
+        "# backup",
+        "0 3 * * * /usr/bin/backup"
+      ],
+      "kept": [
+        "# backup",
+        "0 3 * * * /usr/bin/backup"
+      ]
+    },
+    {
+      "lines": [
+        "# backup",
+        "0 3 * * * /usr/bin/backup",
+        "# xPST serve supervisor",
+        "*/15 * * * * /home/user/.local/bin/xpst serve >> /home/user/.xpst/logs/cron.log 2>&1"
+      ],
+      "kept": [
+        "# backup",
+        "0 3 * * * /usr/bin/backup"
+      ]
+    },
+    {
+      "lines": [
+        "# xPST scheduler",
+        "*/15 * * * * /home/user/.local/bin/xpst schedule run",
+        "0 5 * * * /usr/bin/keep"
+      ],
+      "kept": [
+        "0 5 * * * /usr/bin/keep"
+      ]
+    },
+    {
+      "lines": [
+        "*/15 * * * * /home/user/.local/bin/xpst serve >> /home/user/.xpst/logs/cron.log 2>&1",
+        "0 4 * * * /usr/bin/other"
+      ],
+      "kept": []
+    },
+    {
+      "lines": [
+        "0 1 * * * /usr/bin/a",
+        "# xPST serve supervisor"
+      ],
+      "kept": [
+        "0 1 * * * /usr/bin/a"
+      ]
+    },
+    {
+      "lines": [
+        "# xPST serve supervisor",
+        "*/15 * * * * /home/user/.local/bin/xpst serve >> /home/user/.xpst/logs/cron.log 2>&1",
+        "# xPST serve supervisor",
+        "*/5 * * * * /home/user/.local/bin/xpst serve >> /home/user/.xpst/logs/cron.log 2>&1",
+        "0 2 * * * /usr/bin/b"
+      ],
+      "kept": [
+        "0 2 * * * /usr/bin/b"
+      ]
+    },
+    {
+      "lines": [
+        "0 6 * * * /usr/bin/c # xPST note",
+        "0 7 * * * /usr/bin/d"
+      ],
+      "kept": []
+    },
+    {
+      "lines": [
+        "0 8 * * * /usr/bin/wrap xpst serve --quiet",
+        "0 9 * * * /usr/bin/e"
+      ],
+      "kept": []
+    },
+    {
+      "lines": [
+        "0 1 * * * /usr/bin/a",
+        "",
+        "   ",
+        "0 2 * * * /usr/bin/b"
+      ],
+      "kept": [
+        "0 1 * * * /usr/bin/a",
+        "0 2 * * * /usr/bin/b"
+      ]
+    },
+    {
+      "lines": [
+        "0 10 * * * /usr/bin/xpst-backup",
+        "0 11 * * * /usr/bin/f"
+      ],
+      "kept": [
+        "0 10 * * * /usr/bin/xpst-backup",
+        "0 11 * * * /usr/bin/f"
+      ]
+    }
+  ]
+}
