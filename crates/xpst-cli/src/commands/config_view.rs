@@ -963,6 +963,16 @@ pub fn python_str(value: &Value) -> String {
 }
 
 /// `os.path.expanduser` for the `~` and `~/...` forms.
+/// `os.path.expandvars(os.path.expanduser(...))` for one path field.
+///
+/// Exposed so a command that reads a path the view does not carry
+/// (`video.download_dir`, which `readiness --fix` creates) expands it exactly
+/// the way `_expand_paths` expands the fields it does carry.
+pub fn expand_path(text: &str, env: &dyn Fn(&str) -> Option<String>) -> String {
+    let home = env("HOME").unwrap_or_default();
+    expand_vars(&expand_home(text, &home), env)
+}
+
 fn expand_home(text: &str, home: &str) -> String {
     if text == "~" {
         return home.to_string();

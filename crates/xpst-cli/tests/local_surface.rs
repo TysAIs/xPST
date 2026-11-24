@@ -27,7 +27,7 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 121;
+const EXPECTED_SCENARIOS: usize = 130;
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -74,12 +74,41 @@ impl Profile {
         let Some(files) = seed.as_object() else {
             return;
         };
+        let root = self.dir.display().to_string();
         for (relative, content) in files {
             let path = self.dir.join(relative);
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).expect("seed directory");
             }
-            std::fs::write(&path, content.as_str().expect("seed is text")).expect("seed file");
+            // `PROFILE` is the scratch profile itself, so a seeded config can
+            // name a path inside it (a local source folder, a download dir).
+            let text = content
+                .as_str()
+                .expect("seed is text")
+                .replace("PROFILE", &root);
+            std::fs::write(&path, text).expect("seed file");
+        }
+    }
+
+    /// Make a seeded stand-in binary executable.
+    ///
+    /// `readiness` runs `ffmpeg -version` and `yt-dlp --version`; a
+    /// non-executable file is skipped by the resolver, which would make the
+    /// helper rows a property of the host instead of of the fixture.
+    fn make_executable(&self, paths: &Value) {
+        let Some(items) = paths.as_array() else {
+            return;
+        };
+        for relative in items {
+            let path = self.dir.join(relative.as_str().expect("executable path"));
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                    .expect("chmod seeded binary");
+            }
+            #[cfg(not(unix))]
+            let _ = path;
         }
     }
 
@@ -217,7 +246,13 @@ fn env_for(row: &Value, profile: &Profile) -> Vec<(String, String)> {
 
 /// Replace the scratch profile's absolute path with `<PROFILE>` everywhere in a
 /// payload, and blank the wall-clock fields the fixture masks.
-fn normalize(value: &mut Value, profile: &Profile, mask: &[String], mask_findings: &[String]) {
+fn normalize(
+    value: &mut Value,
+    profile: &Profile,
+    mask: &[String],
+    mask_findings: &[String],
+    mask_checks: &[String],
+) {
     let root = profile.path().display().to_string();
     fn walk(value: &mut Value, root: &str) {
         match value {
@@ -276,6 +311,15 @@ fn normalize(value: &mut Value, profile: &Profile, mask: &[String], mask_finding
             }
         }
     }
+    // `mask_checks` names readiness checks whose answer is a property of the
+    // machine rather than of the engine (the `python` row: a Rust binary has no
+    // Python runtime to version). The row keeps its id, label, ok, severity and
+    // action; only message and details are blanked, so a dropped or reordered
+    // row still fails. `--fix` nests the report under `readiness`, so the
+    // masking walks the whole document.
+    if !mask_checks.is_empty() {
+        mask_named_checks(value, mask_checks);
+    }
 }
 
 /// FNV-1a 64-bit, the same digest `capture_local_surface.py` records.
@@ -294,6 +338,55 @@ fn fnv1a64(text: &str) -> String {
 
 fn mask_findings_for(row: &Value) -> Vec<String> {
     row.get("mask_findings")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Blank the `message`/`details` of every named readiness check, at any depth.
+fn mask_named_checks(value: &mut Value, mask_checks: &[String]) {
+    match value {
+        Value::Object(map) => {
+            for key in ["checks", "blocking", "warnings"] {
+                if let Some(checks) = map.get_mut(key).and_then(Value::as_array_mut) {
+                    for check in checks.iter_mut() {
+                        let Some(object) = check.as_object_mut() else {
+                            continue;
+                        };
+                        let id = object
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string();
+                        if !mask_checks.iter().any(|name| name == &id) {
+                            continue;
+                        }
+                        object.insert("message".to_string(), Value::String("<ENV>".to_string()));
+                        object.insert("details".to_string(), Value::String("<ENV>".to_string()));
+                    }
+                }
+            }
+            for item in map.values_mut() {
+                mask_named_checks(item, mask_checks);
+            }
+        }
+        Value::Array(items) => {
+            for item in items.iter_mut() {
+                mask_named_checks(item, mask_checks);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn mask_checks_for(row: &Value) -> Vec<String> {
+    row.get("mask_checks")
         .and_then(Value::as_array)
         .map(|items| {
             items
@@ -450,6 +543,7 @@ fn every_recorded_scenario_matches_the_python_engine() {
         let name = row["name"].as_str().expect("scenario name");
         let profile = Profile::new(name);
         profile.seed(&row["seed"]);
+        profile.make_executable(&row["executable"]);
         profile.seed_sqlite(&row["sqlite"]);
         profile.seed_credentials(&row["credential"]);
         profile.seed_credential_json(&row["credential_json"]);
@@ -477,6 +571,7 @@ fn every_recorded_scenario_matches_the_python_engine() {
                     &profile,
                     &mask_for(row),
                     &mask_findings_for(row),
+                    &mask_checks_for(row),
                 );
                 assert_payload_matches(&row["stdout_json"], &actual, name);
                 assert_files_match(row, &profile, name);

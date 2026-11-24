@@ -321,6 +321,12 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         "`kb query` on the `default` workspace rendered with `json.dumps(indent=2)` (ASCII-escaped), including Python's text-mode quirk of reading a `hits` key the payload never carries; payload byte-compared with the Python CLI.",
         search,
     ),
+    implemented(
+        "readiness",
+        "xpst-cli",
+        "The first-run report (`build_readiness_report`): the canonical provider status shared with `providers`, the ban-risk registry, the local folder set and the yt-dlp/FFmpeg helper probes, with `--fix` creating the same folders; payload byte-compared with the Python CLI (the `python` row reports the Rust engine, and `--fix` does not rewrite `config.yaml`).",
+        readiness,
+    ),
 ];
 
 const fn implemented(
@@ -739,6 +745,15 @@ fn search(
     err: &mut dyn Write,
 ) -> i32 {
     commands::kb::search(global, leaf, out, err)
+}
+
+fn readiness(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::readiness::run(global, leaf, out, err)
 }
 
 fn best_time(

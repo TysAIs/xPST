@@ -3937,6 +3937,7 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.21",
  "xpst-auth",
+ "xpst-authflow",
  "xpst-config",
  "xpst-media",
  "xpst-state",

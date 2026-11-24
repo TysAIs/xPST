@@ -4,7 +4,7 @@
 
 One row per leaf command of the shipped CLI. `status` is `implemented` when the Rust engine runs the command and `stub` when it answers `not implemented in the Rust engine yet`. The two columns either side are the questions a reader actually has: which crate owns the behaviour, and whether the Python implementation they are comparing against makes an outbound network call.
 
-**48 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
+**49 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
 
 ## Columns
 
@@ -70,7 +70,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `preflight` | stub | xpst-core | none |
 | `providers` | implemented | xpst-provider | none |
 | `quota` | implemented | xpst-state | none |
-| `readiness` | stub | xpst-cli | none |
+| `readiness` | implemented | xpst-cli | none |
 | `refresh-tokens` | stub | xpst-auth | yes |
 | `run` | stub | xpst-core | yes |
 | `schedule add` | stub | xpst-state | none |
@@ -156,6 +156,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `kb migrate-store` | xpst-store | The JSON-store probe and the honest LanceDB refusal (`{"ok": false, "error": "lancedb is not installed"}`, exit 1) plus the `no JSON store found` answer; payload byte-compared with the Python CLI. The vector store is not ported, so a machine with the knowledge extra would migrate in Python (named divergence). |
 | `kb query` | xpst-store | Substring search over the JSON store (`query_nuggets`): `workspace`/`query`/`mode`/`count`/`nuggets` with citation, timestamps, a null score and the area id; payload byte-compared with the Python CLI. The embedding stack is not ported, so the semantic path is not taken — the same answer Python gives without the knowledge extra or on an unembedded store. |
 | `search` | xpst-store | `kb query` on the `default` workspace rendered with `json.dumps(indent=2)` (ASCII-escaped), including Python's text-mode quirk of reading a `hits` key the payload never carries; payload byte-compared with the Python CLI. |
+| `readiness` | xpst-cli | The first-run report (`build_readiness_report`): the canonical provider status shared with `providers`, the ban-risk registry, the local folder set and the yt-dlp/FFmpeg helper probes, with `--fix` creating the same folders; payload byte-compared with the Python CLI (the `python` row reports the Rust engine, and `--fix` does not rewrite `config.yaml`). |
 
 ## Known deviations from the Python engine
 
@@ -177,4 +178,8 @@ Named on purpose: a difference that is not written down is a bug nobody found.
 * `kb query` and `search` always take `query_nuggets`' substring path: the embedding stack (fastembed + the vector stores) is not ported, so `mode` is always `substring` and `score` is always null. That is the same answer Python gives without the knowledge extra and on any store that holds no vectors; a machine with the extra and an embedded store would get `mode: semantic` from Python and substring hits from the Rust engine. The JSON store is the only backend read — a workspace whose nuggets live only in sqlite-vec or LanceDB reads as empty.
 * `kb doctor`'s optional-dependency probe asks an interpreter out-of-process (`XPST_PYTHON`, else `python3`, else `python`) with `importlib.util.find_spec`, because a Rust binary has no `sys.path`. With no interpreter at all the knowledge extra is reported absent. The finding is therefore a property of the machine, which is why the checked-in fixture masks it (`mask_findings`) and the two-engine harness pins `XPST_PYTHON` so both engines answer from the same interpreter.
 * `kb course`/`kb doctor` order mixed-type values (a hand-edited `order_index` that is a string beside an integer, a non-numeric `timestamp_start`) with numbers before strings instead of raising the `TypeError` Python's `sorted` raises. A store the shipped writer produced is homogeneous, so the order is identical; only a hand-corrupted file can observe the difference.
+* `readiness`'s `python` row reports the Rust engine (`Rust engine (no Python runtime)`) instead of a Python version: a Rust binary has no interpreter to version. The row keeps its id, label, severity and `ok: true`, so the summary and the blocking list are unaffected; only `message` and `details` differ. The checked-in fixture masks that one row (`mask_checks`) and compares every other row, the ordering and the counts exactly.
+* `readiness --fix` creates the same folders and reports the same `actions`, but does not rewrite `config.yaml` from the Pydantic model (the same choice `byo set` makes). The payload is identical; the file is left as written, so a profile that had never been saved keeps the document the loader materialized.
+* `readiness`'s yt-dlp probe cannot reproduce two Python-specific candidates: the macOS framework-user directory (it embeds the interpreter's major.minor) and `sys.executable`'s directory (the Rust engine uses its own binary's directory). The probe order is otherwise the shipped one, and the fixture pins `XPST_YTDLP_PATH` so both engines answer from the same binary.
+* `readiness` renders a stored ban-risk acknowledgement in the shipped writer's `sort_keys=True` order. A hand-edited `ban_risk_acknowledgements.json` with another key order would render in that order under Python and sorted here; the values are identical.
 * Integer options are validated and rendered with Python's arbitrary-precision `int()` (`--port 0900` is `:900`, `--port 10^20` prints in full). The three that are used for arithmetic — `pair --ttl`, `state backup --keep`, `stream relay-config --rtmp-port` — saturate at the `i64` bounds instead of carrying the exact value, which keeps the observable behaviour (`--keep` deletes nothing, `--rtmp-port` is out of range) but not the printed number for a value beyond 2^63.
