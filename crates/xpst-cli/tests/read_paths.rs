@@ -206,52 +206,105 @@ fn config_validate_flags_an_unrecognised_document() {
 }
 
 #[test]
-fn doctor_reads_live_state_and_reports_an_absent_schedule_as_healthy() {
+fn doctor_reports_the_live_shape_and_surfaces_a_failing_source() {
     let fixture = Fixture::new("doctor-ok");
     fixture.write("config.yaml", CONFIG_YAML);
+    // A source whose every fetch fails used to be invisible here while the
+    // daemon reported "cycle complete"; it must surface as a warning.
     fixture.write(
         "state.json",
-        r#"{"version": 2, "posted_videos": {"a": {"posted_to": {"x": {"id": "1", "deleted": false}}}}, "content_hashes": {"h": "a"}}"#,
+        r#"{"version": 2, "posted_videos": {}, "health": {"sources": {"tiktok": {"last_error": "boom", "consecutive_failures": 3, "last_error_at": "2026-01-01T00:00:00"}}}}"#,
     );
-    // No schedule.json: the paused install looks exactly like this.
 
     let (code, out, err) = run(&["doctor"], false);
     assert_eq!(code, 0, "stderr: {err}\nstdout: {out}");
     let payload: serde_json::Value = serde_json::from_str(out.trim()).expect("valid JSON");
-    assert_eq!(payload["ok"], true);
-    assert_eq!(payload["engine"]["name"], "rust");
-    assert_eq!(payload["engine"]["live_checks"], false);
-    assert_eq!(payload["state"]["version"], 2);
-    assert_eq!(payload["state"]["videos"], 1);
-    assert_eq!(payload["schedule"]["present"], false);
-    assert_eq!(payload["schedule"]["entries"], 0);
+    assert_eq!(payload["doctor"], true);
+    // Nine providers are reported (every one except the local file source);
+    // the canonical mapping carries all ten.
+    assert_eq!(
+        payload["platforms"].as_object().expect("platforms").len(),
+        9
+    );
+    assert_eq!(
+        payload["canonical"]["providers"]
+            .as_object()
+            .expect("providers")
+            .len(),
+        10
+    );
+    assert_eq!(
+        payload["canonical"]["roles"],
+        serde_json::json!(["source", "video_destination", "messaging", "analytics"])
+    );
+    assert_eq!(
+        payload["environment"]
+            .as_array()
+            .expect("environment")
+            .len(),
+        5
+    );
+    assert_eq!(payload["rate_limit_cooldowns"]["state"], "idle");
+    // A fresh profile has no credentials, so the report is not clear.
+    assert_eq!(payload["all_clear"], false);
+    let issues = payload["issues"].as_array().expect("issues");
+    let source = issues
+        .iter()
+        .find(|issue| issue["platform"] == "tiktok" && issue["severity"] == "warning")
+        .expect("the failing source is reported as a warning");
+    assert!(source["problem"]
+        .as_str()
+        .unwrap_or("")
+        .contains("Source pipeline 'tiktok' is failing: boom"));
 }
 
 #[test]
-fn doctor_fails_on_an_unreadable_config() {
-    let _fixture = Fixture::new("doctor-missing");
-
-    let (code, out, _err) = run(&["doctor"], false);
-    assert_eq!(code, 2);
+fn doctor_materializes_a_missing_config_and_reports() {
+    // Python's `load_config` writes the first-run default rather than failing,
+    // so a fresh profile is a report, not an error.
+    let fixture = Fixture::new("doctor-missing");
+    let (code, out, err) = run(&["doctor"], false);
+    assert_eq!(code, 0, "stderr: {err}\nstdout: {out}");
     let payload: serde_json::Value = serde_json::from_str(out.trim()).expect("valid JSON");
-    assert_eq!(payload["ok"], false);
-    assert_eq!(payload["config"]["readable"], false);
+    assert_eq!(payload["doctor"], true);
+    assert!(
+        fixture.profile.join("config.yaml").exists(),
+        "doctor must materialize the first-run config"
+    );
 }
 
 #[test]
-fn doctor_refuses_a_future_state_schema() {
+fn doctor_exits_2_on_an_unparseable_config() {
+    let fixture = Fixture::new("doctor-bad-config");
+    fixture.write("config.yaml", "{not yaml: [");
+
+    let (code, _out, _err) = run(&["doctor"], false);
+    assert_eq!(code, 2);
+}
+
+#[test]
+fn doctor_tolerates_a_future_state_schema() {
+    // Python's `StateManager` raises on a future schema and doctor catches it,
+    // so the report still answers (with no source-health rows).
     let fixture = Fixture::new("doctor-future-state");
     fixture.write("config.yaml", CONFIG_YAML);
     fixture.write("state.json", r#"{"version": 99, "posted_videos": {}}"#);
 
-    let (code, out, _err) = run(&["doctor"], false);
-    assert_eq!(code, 2);
+    let (code, out, err) = run(&["doctor"], false);
+    assert_eq!(code, 0, "stderr: {err}\nstdout: {out}");
     let payload: serde_json::Value = serde_json::from_str(out.trim()).expect("valid JSON");
-    assert_eq!(payload["ok"], false);
-    assert!(payload["state"]["error"]
-        .as_str()
-        .unwrap_or("")
-        .contains("Unsupported state schema version 99"));
+    assert_eq!(payload["doctor"], true);
+    assert!(
+        payload["issues"]
+            .as_array()
+            .expect("issues")
+            .iter()
+            .all(|issue| !issue["problem"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Source pipeline")),
+        "a state document doctor cannot read must not invent source failures"
+    );
 }
 
 #[test]

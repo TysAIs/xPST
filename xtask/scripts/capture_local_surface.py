@@ -1203,6 +1203,39 @@ SCENARIOS = [
         "files": ["knowledge/default/areas.json.corrupt"],
         "compare": "json",
     },
+    # ── the live health report (t_25b95efc) ───────────────────────────────
+    #
+    # `doctor --json` is the live report: probes, canonical status, badges,
+    # quota, cooldowns and the environment. On a seeded no-credential profile
+    # every probe short-circuits before a socket opens, so the payload is
+    # deterministic apart from the wall clock (`checked_at`, `checked_at_iso`,
+    # `check_age_seconds`) and the connectivity detail. The probe is pointed at
+    # a loopback listener so the ANSWER is deterministic too (an offline runner
+    # would otherwise add a network issue and change `all_clear`), and the
+    # detail — which carries a measured latency — is masked.
+    {
+        "name": "doctor_no_credentials",
+        "argv": ["doctor", "--json"],
+        "seed": {
+            "config.yaml": "version: 4\n",
+            "bin/ffmpeg": "#!/bin/sh\n",
+            "bin/ffprobe": "#!/bin/sh\n",
+            "bin/yt-dlp": "#!/bin/sh\n",
+        },
+        "env": {
+            "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+            "XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe",
+            "XPST_YTDLP_PATH": "PROFILE/bin/yt-dlp",
+        },
+        "network_probe": True,
+        "mask": [
+            "checked_at",
+            "checked_at_iso",
+            "check_age_seconds",
+            "environment.network.detail",
+        ],
+        "compare": "stdout",
+    },
     {
         "name": "kb_course_empty",
         "argv": ["kb", "course", "--json"],
@@ -2869,14 +2902,96 @@ def mask_file_keys(text: str, keys: list[str] | None) -> str:
             if key in entry:
                 text = text.replace(json.dumps(entry[key]), '"<TS>"')
     return text
+def mask_payload(payload, mask: list[str] | None):
+    """Replace the values `mask` names, wherever they appear.
+
+    A bare name (`checked_at`) is replaced at ANY depth — the doctor payload
+    carries it once per provider. A dotted name (`environment.network.detail`)
+    is a path, and a segment that is not a key selects the list element whose
+    `name` field matches it. Masked values become `"<TS>"`, so the rest of the
+    document is still compared byte for byte.
+    """
+    if not mask:
+        return payload
+
+    def walk(value, keys):
+        if not keys:
+            return "<TS>"
+        head, rest = keys[0], keys[1:]
+        if isinstance(value, dict):
+            if head in value:
+                value[head] = walk(value[head], rest)
+            return value
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict) and item.get("name") == head:
+                    walk(item, rest)
+            return value
+        return value
+
+    for entry in mask:
+        if "." in entry:
+            walk(payload, entry.split("."))
+        else:
+            def replace(value):
+                if isinstance(value, dict):
+                    for key in list(value):
+                        if key == entry:
+                            value[key] = "<TS>"
+                        else:
+                            replace(value[key])
+                elif isinstance(value, list):
+                    for item in value:
+                        replace(item)
+
+            replace(payload)
+    return payload
+
+
+def masked_stdout(text: str, mask: list[str] | None) -> str:
+    """Mask a `--json` payload and re-render it with Python's own separators.
+
+    The re-dump is asserted to reproduce the original bytes before masking, so
+    the comparison stays a byte comparison of the whole document (key order,
+    separators, number formatting) with only the named values replaced.
+    """
+    payload = json.loads(text)
+    rendered = json.dumps(payload, ensure_ascii=False)
+    if rendered != text.rstrip("\n"):
+        raise SystemExit(
+            "stdout is not `json.dumps` output; a masked byte case would be "
+            f"comparing a re-rendered document:\n{text[:400]}"
+        )
+    return json.dumps(mask_payload(payload, mask), ensure_ascii=False)
+
+
+def network_probe_env(env: dict[str, str]) -> "socket.socket | None":
+    """Point the connectivity probe at a loopback listener.
+
+    `check_network()` is the one environment check whose answer depends on the
+    machine (and whose detail carries a measured latency). A listener makes the
+    answer deterministically "online" on every runner; the detail is masked.
+    """
+    import socket
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(8)
+    env["XPST_NETWORK_PROBE_HOST"] = "127.0.0.1"
+    env["XPST_NETWORK_PROBE_PORT"] = str(listener.getsockname()[1])
+    return listener
 
 
 def observe(scenario: dict, prefix: list[str]) -> dict:
     """Run one scenario against one engine and return what it answered."""
     profile = Path(tempfile.mkdtemp(prefix="xpst-observe-"))
+    listener = None
     try:
         seed_profile(scenario, profile)
         env = env_for(scenario, profile)
+        if scenario.get("network_probe"):
+            listener = network_probe_env(env)
         proc = subprocess.run(
             [*prefix, *argv_for(scenario, profile)],
             cwd=str(REPO),
@@ -2969,6 +3084,8 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
             "stderr": proc.stderr,
         }
     finally:
+        if listener is not None:
+            listener.close()
         shutil.rmtree(profile, ignore_errors=True)
 
 
@@ -3040,6 +3157,8 @@ def run_scenario(scenario: dict, python: str) -> dict:
         record["executable"] = scenario["executable"]
     if scenario.get("binary"):
         record["binary"] = scenario["binary"]
+    if scenario.get("network_probe"):
+        record["network_probe"] = True
     if scenario.get("allow_nonzero"):
         record["allow_nonzero"] = True
     if scenario.get("credential"):
@@ -3059,7 +3178,12 @@ def run_scenario(scenario: dict, python: str) -> dict:
         record["why"] = scenario["why"]
         return record
     if scenario["compare"] == "stdout":
-        record["stdout"] = observed["stdout_normalized"]
+        if scenario.get("mask"):
+            record["stdout"] = masked_stdout(
+                observed["stdout_normalized"], scenario["mask"]
+            )
+        else:
+            record["stdout"] = observed["stdout_normalized"]
         return record
     if scenario["compare"] == "digest":
         if observed["payload"] is None:
@@ -3158,10 +3282,20 @@ def compare_scenarios(python: str, binary: str) -> int:
                     f"{name}: exit {expected['exit_code']} (python) != "
                     f"{actual['exit_code']} (rust)"
                 )
-            if expected["stdout_normalized"] != actual["stdout_normalized"]:
+            mask = scenario.get("mask")
+            want = (
+                masked_stdout(expected["stdout_normalized"], mask)
+                if mask
+                else expected["stdout_normalized"]
+            )
+            got = (
+                masked_stdout(actual["stdout_normalized"], mask)
+                if mask
+                else actual["stdout_normalized"]
+            )
+            if want != got:
                 mismatches.append(
-                    f"{name}: stdout differs\n  python: {expected['stdout_normalized']!r}\n"
-                    f"  rust:   {actual['stdout_normalized']!r}"
+                    f"{name}: stdout differs\n  python: {want!r}\n  rust:   {got!r}"
                 )
         elif mode == "exit":
             if expected["exit_code"] != actual["exit_code"]:
