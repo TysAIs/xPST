@@ -44,6 +44,9 @@ use std::sync::OnceLock;
 use xpst_config::yaml::Mapping;
 use xpst_config::Value;
 
+use crate::commands::bootstrap;
+use crate::GlobalOptions;
+
 /// The captured registry, shared with `commands::providers`.
 pub const REGISTRY: &str = include_str!("../resources/provider_registry.json");
 
@@ -390,6 +393,10 @@ pub struct ConfigView {
     config_dir: PathBuf,
     provider_mode: String,
     accounts: BTreeMap<String, Mapping>,
+    /// Top-level sections (`monitoring`, `rate_limits`) the local commands read,
+    /// merged the way `_merge_config` merges them: a file section is rebuilt
+    /// from the dataclass defaults and only known fields are copied.
+    sections: BTreeMap<String, Mapping>,
     document: Value,
 }
 
@@ -470,8 +477,38 @@ impl ConfigView {
                 .unwrap_or("official")
                 .to_string(),
             accounts,
+            sections: BTreeMap::new(),
             document: document.clone(),
         };
+
+        // Top-level sections: `_merge_config` rebuilds a section from the
+        // dataclass defaults and copies only the fields the dataclass declares,
+        // so an unknown key in the file is dropped rather than carried.
+        if let Some(captured) = defaults.get("sections").and_then(Value::as_mapping) {
+            for (name, fields) in captured.iter() {
+                if let (Some(name), Some(fields)) = (name.as_str(), fields.as_mapping()) {
+                    view.sections.insert(name.to_string(), fields.clone());
+                }
+            }
+        }
+        if let Some(file_sections) = document.as_mapping() {
+            for (name, section) in file_sections.iter() {
+                let (Some(name), Some(section)) = (name.as_str(), section.as_mapping()) else {
+                    continue;
+                };
+                let Some(target) = view.sections.get_mut(name) else {
+                    continue;
+                };
+                for (field, value) in section.iter() {
+                    let Some(field) = field.as_str() else {
+                        continue;
+                    };
+                    if target.contains_key(field) {
+                        target.insert(Value::from(field), value.clone());
+                    }
+                }
+            }
+        }
 
         // `provider_mode` is a top-level key, not an account field. Python's
         // `_merge_config` stores `str(file_config["provider_mode"])`, so a
@@ -589,6 +626,16 @@ impl ConfigView {
             };
             let expanded = expand_vars(&expand_home(&raw, &home), env);
             self.set(platform, field, Value::String(expanded));
+        }
+        // `_expand_paths` also expands `monitoring.log_file`.
+        if let Some(raw) = self
+            .section_text("monitoring", "log_file")
+            .filter(|value| !value.is_empty())
+        {
+            let expanded = expand_vars(&expand_home(&raw, &home), env);
+            if let Some(section) = self.sections.get_mut("monitoring") {
+                section.insert(Value::from("log_file"), Value::String(expanded));
+            }
         }
     }
 
@@ -710,6 +757,45 @@ impl ConfigView {
     pub fn mapping(&self, platform: &str, field: &str) -> Option<&Value> {
         self.raw(platform, field)
     }
+
+    /// A top-level section's merged mapping (`monitoring`, `rate_limits`).
+    pub fn section(&self, name: &str) -> Option<&Mapping> {
+        self.sections.get(name)
+    }
+
+    /// A string field of a top-level section, or `None` when absent/not a string.
+    pub fn section_text(&self, section: &str, field: &str) -> Option<String> {
+        self.section(section)?
+            .get(field)?
+            .as_str()
+            .map(str::to_string)
+    }
+
+    /// An integer field of a top-level section, or `None`.
+    pub fn section_int(&self, section: &str, field: &str) -> Option<i64> {
+        self.section(section)?.get(field)?.as_i64()
+    }
+}
+
+/// Resolve the config view for a command: materialize/parse the config file the
+/// way [`bootstrap::ensure_config`] does, then build the view with the process
+/// environment.
+///
+/// This is the one entry point every ported command that reads config should
+/// use, so the Python load order (`file → legacy fix → env → rebase → expand`)
+/// is applied exactly once and in one place.
+pub fn resolve(global: &GlobalOptions) -> Result<ConfigView, bootstrap::BootstrapError> {
+    let path = bootstrap::ensure_config(global)?;
+    let document = xpst_config::ConfigDocument::read(&path)
+        .map_err(|error| bootstrap::BootstrapError::Invalid(error.to_string()))?
+        .raw()
+        .clone();
+    let config_dir = path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let env = |name: &str| std::env::var(name).ok();
+    ConfigView::load(&document, &config_dir, &env).map_err(bootstrap::BootstrapError::Invalid)
 }
 
 /// `v.lower() in ("true", "1", "yes")`.

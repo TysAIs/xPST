@@ -22,6 +22,7 @@
 pub mod cli;
 pub mod commands;
 pub mod exit;
+pub mod fsutil;
 pub mod implemented;
 pub mod ledger;
 pub mod output;
@@ -246,4 +247,14 @@ pub fn string_value(matches: &ArgMatches, id: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// [`string_value`] for a handler that receives the leaf as an `Option`.
+pub fn leaf_string(leaf: Option<&ArgMatches>, id: &str) -> Option<String> {
+    leaf.and_then(|matches| string_value(matches, id))
+}
+
+/// [`flag`] for a handler that receives the leaf as an `Option`.
+pub fn leaf_flag(leaf: Option<&ArgMatches>, id: &str) -> bool {
+    leaf.is_some_and(|matches| flag(matches, id))
 }

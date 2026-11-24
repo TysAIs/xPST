@@ -26,7 +26,7 @@
 
 use std::path::{Path, PathBuf};
 
-use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
+use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use base64::Engine as _;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -45,6 +45,12 @@ const KEY_LEN: usize = 32;
 const UNSAFE_KEY_CHARS: [char; 9] = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
 
 type Aes128CbcDec = cbc::Decryptor<aes::Aes128>;
+type Aes128CbcEnc = cbc::Encryptor<aes::Aes128>;
+
+/// Bytes of the per-install fallback secret (`_SECRET_BYTES`).
+const SECRET_BYTES: usize = 32;
+/// Bytes of the per-install salt (`_SALT_BYTES`).
+const SALT_BYTES: usize = 16;
 
 /// The file-backed half of `CredentialStore`.
 #[derive(Debug, Clone)]
@@ -93,6 +99,75 @@ impl CredentialStore {
         std::fs::remove_file(path).is_ok()
     }
 
+    /// `CredentialStore.list_keys()`: the stored keys, sorted.
+    ///
+    /// Python globs `*.enc` and skips the keyring index; the file name is the
+    /// key, so a key that could never have been written cannot appear here.
+    pub fn list_keys(&self) -> Vec<String> {
+        let Ok(entries) = std::fs::read_dir(&self.dir) else {
+            return Vec::new();
+        };
+        let mut keys: Vec<String> = entries
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let key = name.strip_suffix(".enc")?;
+                if key == "_keyring_index" {
+                    return None;
+                }
+                Some(key.to_string())
+            })
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    /// `CredentialStore.store()` for the file half: encrypt and write `value`.
+    ///
+    /// The fallback secret and salt are created on first use, exactly as Python
+    /// does, so a store written here is readable by the shipped engine and vice
+    /// versa. The write is atomic and owner-only (`0600`), and a key that could
+    /// never be a file name is refused rather than silently renamed.
+    pub fn store(&self, key: &str, value: &str) -> Result<(), String> {
+        let path = self.path_for(key).ok_or_else(|| {
+            format!("credential key {key:?} cannot be stored: it becomes a file name")
+        })?;
+        std::fs::create_dir_all(&self.dir).map_err(|error| error.to_string())?;
+        restrict_dir(&self.dir);
+        let secret = self.load_or_create(".fallback_secret", SECRET_BYTES)?;
+        let salt = self.load_or_create(".fallback_salt", SALT_BYTES)?;
+        let derived = derive_key(&secret, &salt)?;
+        let token = fernet_encrypt(&derived, value.as_bytes())?;
+        write_secret(&path, &token)
+    }
+
+    /// `CredentialStore.store_json()`: `json.dumps(data)` under `key`.
+    pub fn store_json(&self, key: &str, data: &serde_json::Value) -> Result<(), String> {
+        self.store(
+            key,
+            &serde_json::to_string(data).map_err(|error| error.to_string())?,
+        )
+    }
+
+    /// `CredentialStore.retrieve_json()`: the parsed value, or `None`.
+    pub fn retrieve_json(&self, key: &str) -> Option<serde_json::Value> {
+        let text = self.retrieve(key)?;
+        serde_json::from_str(&text).ok()
+    }
+
+    /// Read `name` from the credentials directory, creating it with `len` random
+    /// bytes when absent (`_load_or_create_secret_material`).
+    fn load_or_create(&self, name: &str, len: usize) -> Result<Vec<u8>, String> {
+        let path = self.dir.join(name);
+        if let Ok(existing) = std::fs::read(&path) {
+            return Ok(existing);
+        }
+        let mut material = vec![0u8; len];
+        getrandom::fill(&mut material).map_err(|error| format!("no OS entropy: {error}"))?;
+        write_secret(&path, &material)?;
+        Ok(material)
+    }
+
     /// `<dir>/<key>.enc`, or `None` for a key that could never have been
     /// written (Python refuses those at write time, so "absent" is the honest
     /// answer rather than an error).
@@ -131,6 +206,102 @@ fn derive_key(secret: &[u8], salt: &[u8]) -> Result<[u8; KEY_LEN], String> {
     scrypt::scrypt(secret, salt, &params, &mut output)
         .map_err(|err| format!("scrypt failed: {err}"))?;
     Ok(output)
+}
+
+/// Encrypt one Fernet token: `version(1) || timestamp(8) || iv(16) ||
+/// ciphertext || hmac(32)`, base64url with padding.
+///
+/// The mirror of [`fernet_decrypt`], and the reason a credential written by the
+/// Rust engine is readable by the shipped Python store: same version byte, same
+/// big-endian timestamp, same AES-128-CBC/PKCS7 body and the same HMAC-SHA256
+/// over everything before it.
+fn fernet_encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<Vec<u8>, String> {
+    let (signing_key, encryption_key) = key.split_at(16);
+    let mut iv = [0u8; 16];
+    getrandom::fill(&mut iv).map_err(|err| format!("no OS entropy for the IV: {err}"))?;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or_default();
+
+    let mut buffer = vec![0u8; plaintext.len() + 16];
+    buffer[..plaintext.len()].copy_from_slice(plaintext);
+    let written = Aes128CbcEnc::new_from_slices(encryption_key, &iv)
+        .map_err(|err| format!("bad AES key/iv: {err}"))?
+        .encrypt_padded_mut::<Pkcs7>(&mut buffer, plaintext.len())
+        .map_err(|err| format!("padding error: {err}"))?
+        .len();
+    buffer.truncate(written);
+
+    let mut signed = Vec::with_capacity(1 + 8 + 16 + buffer.len() + 32);
+    signed.push(0x80);
+    signed.extend_from_slice(&timestamp.to_be_bytes());
+    signed.extend_from_slice(&iv);
+    signed.extend_from_slice(&buffer);
+
+    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(signing_key)
+        .map_err(|err| format!("bad signing key: {err}"))?;
+    mac.update(&signed);
+    signed.extend_from_slice(&mac.finalize().into_bytes());
+    Ok(base64::engine::general_purpose::URL_SAFE
+        .encode(&signed)
+        .into_bytes())
+}
+
+/// Write secret material atomically with `0600` (`_write_secret_file`).
+///
+/// Temp file in the destination directory, `fsync`, then rename — a failure
+/// partway through leaves the previous file intact instead of truncating a
+/// credential to zero bytes.
+fn write_secret(path: &Path, data: &[u8]) -> Result<(), String> {
+    use std::io::Write as _;
+
+    let dir = path
+        .parent()
+        .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
+    std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "credential".to_string());
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    let tmp = dir.join(format!(".{name}.tmp.{}.{unique}", std::process::id()));
+
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&tmp).map_err(|error| error.to_string())?;
+    let result = file
+        .write_all(data)
+        .and_then(|()| file.sync_all())
+        .map_err(|error| error.to_string());
+    drop(file);
+    if let Err(error) = result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error);
+    }
+    std::fs::rename(&tmp, path).map_err(|error| {
+        let _ = std::fs::remove_file(&tmp);
+        error.to_string()
+    })
+}
+
+/// Keep the credentials directory owner-only (`0700`).
+fn restrict_dir(dir: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
 }
 
 /// Decrypt one Fernet token.

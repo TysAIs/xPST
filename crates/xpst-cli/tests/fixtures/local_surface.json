@@ -5,7 +5,7 @@
     "source": "src/xpst/cli.py"
   },
   "note": "Captured by running the shipped Python CLI against scratch profiles. scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent; snapshot modified_at is stripped and its epoch recorded instead.",
-  "scenario_count": 65,
+  "scenario_count": 88,
   "scenarios": [
     {
       "name": "status_empty_profile",
@@ -4265,6 +4265,973 @@
         ],
         "reply_rules": 0,
         "webhook_path": "/webhook/messenger"
+      }
+    },
+    {
+      "name": "state_export_ok",
+      "argv": [
+        "state",
+        "export",
+        "PROFILE/out.json",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "state.json": "{\n  \"version\": 2,\n  \"posted_videos\": {\n    \"v1\": {\n      \"source_platform\": \"tiktok\",\n      \"source_url\": \"https://example.invalid/v1\",\n      \"posted_to\": {\n        \"youtube\": {\n          \"id\": \"a\"\n        }\n      },\n      \"errors\": {\n        \"instagram\": {\n          \"error\": \"boom\",\n          \"timestamp\": null,\n          \"count\": 2\n        }\n      }\n    }\n  },\n  \"health\": {\n    \"total_processed\": 1,\n    \"last_check\": null,\n    \"last_wake_check\": null,\n    \"platforms\": {\n      \"youtube\": {\n        \"status\": \"ok\",\n        \"last_success\": null,\n        \"failures\": 0\n      }\n    }\n  }\n}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "files": {
+        "out.json": "{\n  \"version\": 2,\n  \"posted_videos\": {\n    \"v1\": {\n      \"source_platform\": \"tiktok\",\n      \"source_url\": \"https://example.invalid/v1\",\n      \"posted_to\": {\n        \"youtube\": {\n          \"id\": \"a\"\n        }\n      },\n      \"errors\": {\n        \"instagram\": {\n          \"error\": \"boom\",\n          \"timestamp\": null,\n          \"count\": 2\n        }\n      }\n    }\n  },\n  \"health\": {\n    \"total_processed\": 1,\n    \"last_check\": null,\n    \"last_wake_check\": null,\n    \"platforms\": {\n      \"youtube\": {\n        \"status\": \"ok\",\n        \"last_success\": null,\n        \"failures\": 0\n      }\n    }\n  }\n}"
+      },
+      "stdout_json": {
+        "ok": true,
+        "exported": "<PROFILE>/out.json",
+        "source": "<PROFILE>/state.json"
+      }
+    },
+    {
+      "name": "state_export_missing",
+      "argv": [
+        "state",
+        "export",
+        "PROFILE/out.json",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "json",
+      "exit_code": 1,
+      "allow_nonzero": true,
+      "stdout_json": {
+        "ok": false,
+        "error": {
+          "code": "NO_STATE_FILE",
+          "message": "No state.json to export."
+        }
+      }
+    },
+    {
+      "name": "state_import_yes",
+      "argv": [
+        "state",
+        "import",
+        "PROFILE/incoming.json",
+        "--yes",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "state.json": "{\n  \"version\": 2,\n  \"posted_videos\": {\n    \"v1\": {\n      \"source_platform\": \"tiktok\",\n      \"source_url\": \"https://example.invalid/v1\",\n      \"posted_to\": {\n        \"youtube\": {\n          \"id\": \"a\"\n        }\n      },\n      \"errors\": {\n        \"instagram\": {\n          \"error\": \"boom\",\n          \"timestamp\": null,\n          \"count\": 2\n        }\n      }\n    }\n  },\n  \"health\": {\n    \"total_processed\": 1,\n    \"last_check\": null,\n    \"last_wake_check\": null,\n    \"platforms\": {\n      \"youtube\": {\n        \"status\": \"ok\",\n        \"last_success\": null,\n        \"failures\": 0\n      }\n    }\n  }\n}",
+        "incoming.json": "{\"version\": 2, \"posted_videos\": {\"z\": {\"posted_to\": {}}}}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "files": {
+        "state.json": "{\"version\": 2, \"posted_videos\": {\"z\": {\"posted_to\": {}}}}"
+      },
+      "stdout_json": {
+        "ok": true,
+        "imported": "<PROFILE>/incoming.json",
+        "posted_videos": 1
+      }
+    },
+    {
+      "name": "state_backup_ok",
+      "argv": [
+        "state",
+        "backup",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "state.json": "{\n  \"version\": 2,\n  \"posted_videos\": {\n    \"v1\": {\n      \"source_platform\": \"tiktok\",\n      \"source_url\": \"https://example.invalid/v1\",\n      \"posted_to\": {\n        \"youtube\": {\n          \"id\": \"a\"\n        }\n      },\n      \"errors\": {\n        \"instagram\": {\n          \"error\": \"boom\",\n          \"timestamp\": null,\n          \"count\": 2\n        }\n      }\n    }\n  },\n  \"health\": {\n    \"total_processed\": 1,\n    \"last_check\": null,\n    \"last_wake_check\": null,\n    \"platforms\": {\n      \"youtube\": {\n        \"status\": \"ok\",\n        \"last_success\": null,\n        \"failures\": 0\n      }\n    }\n  }\n}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "mask": [
+        "backup"
+      ],
+      "stdout_json": {
+        "ok": true,
+        "backup": "<TS>",
+        "retained": 1
+      }
+    },
+    {
+      "name": "failures_clear_all",
+      "argv": [
+        "failures",
+        "clear",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "state.json": "{\n  \"version\": 2,\n  \"posted_videos\": {\n    \"v1\": {\n      \"source_platform\": \"tiktok\",\n      \"source_url\": \"https://example.invalid/v1\",\n      \"posted_to\": {\n        \"youtube\": {\n          \"id\": \"a\"\n        }\n      },\n      \"errors\": {\n        \"instagram\": {\n          \"error\": \"boom\",\n          \"timestamp\": null,\n          \"count\": 2\n        }\n      }\n    }\n  },\n  \"health\": {\n    \"total_processed\": 1,\n    \"last_check\": null,\n    \"last_wake_check\": null,\n    \"platforms\": {\n      \"youtube\": {\n        \"status\": \"ok\",\n        \"last_success\": null,\n        \"failures\": 0\n      }\n    }\n  }\n}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "files": {
+        "state.json": "{\"version\": 2, \"posted_videos\": {\"v1\": {\"source_platform\": \"tiktok\", \"source_url\": \"https://example.invalid/v1\", \"posted_to\": {\"youtube\": {\"id\": \"a\"}}}}, \"health\": {\"total_processed\": 1, \"last_check\": null, \"last_wake_check\": null, \"platforms\": {\"youtube\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0}}, \"sources\": {}}, \"content_hashes\": {}}"
+      },
+      "stdout_json": {
+        "ok": true,
+        "cleared": 1,
+        "scope": "all"
+      }
+    },
+    {
+      "name": "failures_clear_one",
+      "argv": [
+        "failures",
+        "clear",
+        "v1",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "state.json": "{\n  \"version\": 2,\n  \"posted_videos\": {\n    \"v1\": {\n      \"source_platform\": \"tiktok\",\n      \"source_url\": \"https://example.invalid/v1\",\n      \"posted_to\": {\n        \"youtube\": {\n          \"id\": \"a\"\n        }\n      },\n      \"errors\": {\n        \"instagram\": {\n          \"error\": \"boom\",\n          \"timestamp\": null,\n          \"count\": 2\n        }\n      }\n    }\n  },\n  \"health\": {\n    \"total_processed\": 1,\n    \"last_check\": null,\n    \"last_wake_check\": null,\n    \"platforms\": {\n      \"youtube\": {\n        \"status\": \"ok\",\n        \"last_success\": null,\n        \"failures\": 0\n      }\n    }\n  }\n}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "files": {
+        "state.json": "{\"version\": 2, \"posted_videos\": {\"v1\": {\"source_platform\": \"tiktok\", \"source_url\": \"https://example.invalid/v1\", \"posted_to\": {\"youtube\": {\"id\": \"a\"}}, \"errors\": {}}}, \"health\": {\"total_processed\": 1, \"last_check\": null, \"last_wake_check\": null, \"platforms\": {\"youtube\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0}}, \"sources\": {}}, \"content_hashes\": {}}"
+      },
+      "stdout_json": {
+        "ok": true,
+        "cleared": 1,
+        "scope": "v1"
+      }
+    },
+    {
+      "name": "quota_defaults",
+      "argv": [
+        "quota",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "youtube": {
+          "daily_limit": 5,
+          "used_today": 0,
+          "remaining": 5,
+          "hourly_limit": null,
+          "used_this_hour": 0,
+          "quota_units": {
+            "bucket": "videos.insert",
+            "used_calls": 0,
+            "platform_ceiling_per_day": 100,
+            "operator_cap_per_day": 5,
+            "effective_limit_per_day": 5,
+            "remaining_calls": 5,
+            "cost_per_call": 1,
+            "used_units": 0,
+            "total_units": 100,
+            "remaining_units": 100,
+            "remaining_uploads": 5,
+            "cost_per_upload": 1,
+            "other_endpoints_units_per_day": 10000,
+            "source": "Google YouTube Data API Quota Calculator (https://developers.google.com/youtube/v3/determine_quota_cost, last updated 2026-11-12 UTC); granular quota buckets since 2026-06-01 per the API revision history"
+          }
+        },
+        "instagram": {
+          "daily_limit": 5,
+          "used_today": 0,
+          "remaining": 5,
+          "hourly_limit": null,
+          "used_this_hour": 0,
+          "auth_mode": "graph_api"
+        },
+        "x": {
+          "daily_limit": 5,
+          "used_today": 0,
+          "remaining": 5,
+          "hourly_limit": null,
+          "used_this_hour": 0,
+          "auth_mode": "cookies"
+        },
+        "tiktok": {
+          "daily_limit": 5,
+          "used_today": 0,
+          "remaining": 5,
+          "hourly_limit": null,
+          "used_this_hour": 0
+        },
+        "threads": {
+          "daily_limit": 5,
+          "used_today": 0,
+          "remaining": 5,
+          "hourly_limit": null,
+          "used_this_hour": 0
+        },
+        "facebook": {
+          "daily_limit": 5,
+          "used_today": 0,
+          "remaining": 5,
+          "hourly_limit": null,
+          "used_this_hour": 0
+        }
+      }
+    },
+    {
+      "name": "logs_present",
+      "argv": [
+        "logs",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\nmonitoring:\n  log_file: ~/xpst.log\n",
+        "xpst.log": "line one\nline two\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "logs": [],
+        "error": "No log file found"
+      }
+    },
+    {
+      "name": "devices_list",
+      "argv": [
+        "devices",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "devices.json": "{\"version\": 1, \"pairing_codes\": [], \"failed_attempts\": [], \"devices\": [{\"device_id\": \"dev-1\", \"label\": \"phone\", \"token_sha256\": \"abc\", \"created_at\": 1767225600.0, \"last_seen_at\": 1767225600.0, \"client\": \"\", \"revoked\": false}]}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "ok": true,
+        "devices": [
+          {
+            "device_id": "dev-1",
+            "label": "phone",
+            "created_at": 1767225600.0,
+            "last_seen_at": 1767225600.0,
+            "client": "",
+            "revoked": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "pair_fixed_code",
+      "argv": [
+        "pair",
+        "--code",
+        "ABCD2345",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "mask": [
+        "created_at",
+        "expires_at"
+      ],
+      "stdout_json": {
+        "ok": true,
+        "url": "http://127.0.0.1:8080",
+        "code": "ABCD-2345",
+        "label": "phone",
+        "created_at": "<TS>",
+        "expires_at": "<TS>",
+        "expires_in_s": 600
+      }
+    },
+    {
+      "name": "stream_destinations",
+      "argv": [
+        "stream",
+        "destinations",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "ok": true,
+        "error": null,
+        "configured": [],
+        "ready_to_relay": false,
+        "fetchable": [],
+        "missing_credentials": [
+          {
+            "platform": "youtube",
+            "missing": [
+              "oauth_token"
+            ],
+            "action": "Connect the destination channel with `xpst auth youtube` (OAuth scopes youtube.upload, youtube.readonly, youtube.force-ssl).",
+            "registration_url": "https://console.cloud.google.com/apis/credentials"
+          },
+          {
+            "platform": "twitch",
+            "missing": [
+              "client_id",
+              "access_token",
+              "user_id"
+            ],
+            "action": "Register an application at https://dev.twitch.tv/console/apps (free, no review). Authorise it as the broadcaster with the channel:read:stream_key scope; the result is a user access token. An app access token cannot read a stream key. Store the pair with `xpst stream app-credentials twitch --client-id \u2026 --access-token \u2026 --user-id <broadcaster id>`.",
+            "registration_url": "https://dev.twitch.tv/console/apps"
+          },
+          {
+            "platform": "kick",
+            "missing": [
+              "client_id",
+              "access_token",
+              "user_id"
+            ],
+            "action": "Create an app in the Kick developer settings (free). Run the OAuth 2.1 authorisation-code flow for the channel with the streamkey:read (and channel:read, for live status) scopes. Store the pair with `xpst stream app-credentials kick --client-id \u2026 --access-token \u2026 --user-id <broadcaster user id>`.",
+            "registration_url": "https://docs.kick.com/getting-started/kick-apps-setup"
+          },
+          {
+            "platform": "facebook",
+            "missing": [
+              "page_access_token"
+            ],
+            "action": "Connect the Page with `xpst auth facebook`; only a Page access token can create a Page live video.",
+            "registration_url": "https://developers.facebook.com/docs/pages/access-tokens"
+          }
+        ],
+        "platforms": [
+          {
+            "platform": "youtube",
+            "display_name": "YouTube Live",
+            "ingest_class": "api",
+            "key_present": false,
+            "ingest_url": null,
+            "operator_action": "sign in with the channel that will receive the stream",
+            "note": "The API returns cdn.ingestionInfo.ingestionAddress + streamName. Creating a liveStream resource does not start or announce a broadcast.",
+            "fetch": {
+              "platform": "youtube",
+              "endpoint": "POST https://www.googleapis.com/youtube/v3/liveStreams",
+              "credentials_present": false,
+              "missing": [
+                "oauth_token"
+              ],
+              "action": "Connect the destination channel with `xpst auth youtube` (OAuth scopes youtube.upload, youtube.readonly, youtube.force-ssl).",
+              "registration_url": "https://console.cloud.google.com/apis/credentials",
+              "scopes": []
+            }
+          },
+          {
+            "platform": "twitch",
+            "display_name": "Twitch",
+            "ingest_class": "api",
+            "key_present": false,
+            "ingest_url": null,
+            "operator_action": "register a Twitch application (free) and authorise it as the broadcaster",
+            "note": "The endpoint requires a *user* access token; an app access token cannot read a stream key. Twitch answers 403 for accounts not permitted to stream.",
+            "fetch": {
+              "platform": "twitch",
+              "endpoint": "GET https://api.twitch.tv/helix/streams/key?broadcaster_id=<id>",
+              "credentials_present": false,
+              "missing": [
+                "client_id",
+                "access_token",
+                "user_id"
+              ],
+              "action": "Register an application at https://dev.twitch.tv/console/apps (free, no review). Authorise it as the broadcaster with the channel:read:stream_key scope; the result is a user access token. An app access token cannot read a stream key. Store the pair with `xpst stream app-credentials twitch --client-id \u2026 --access-token \u2026 --user-id <broadcaster id>`.",
+              "registration_url": "https://dev.twitch.tv/console/apps",
+              "scopes": [
+                "channel:read:stream_key"
+              ]
+            }
+          },
+          {
+            "platform": "kick",
+            "display_name": "Kick",
+            "ingest_class": "api",
+            "key_present": false,
+            "ingest_url": null,
+            "operator_action": "register a Kick application (free) and authorise the channel",
+            "note": "The key and its ingest URL arrive as data[].stream.key / .url; Kick publishes no standalone stream-key endpoint. Documented but never exercised by this repo.",
+            "fetch": {
+              "platform": "kick",
+              "endpoint": "GET https://api.kick.com/public/v1/channels?broadcaster_user_id=<id>",
+              "credentials_present": false,
+              "missing": [
+                "client_id",
+                "access_token",
+                "user_id"
+              ],
+              "action": "Create an app in the Kick developer settings (free). Run the OAuth 2.1 authorisation-code flow for the channel with the streamkey:read (and channel:read, for live status) scopes. Store the pair with `xpst stream app-credentials kick --client-id \u2026 --access-token \u2026 --user-id <broadcaster user id>`.",
+              "registration_url": "https://docs.kick.com/getting-started/kick-apps-setup",
+              "scopes": [
+                "streamkey:read",
+                "channel:read"
+              ]
+            }
+          },
+          {
+            "platform": "facebook",
+            "display_name": "Facebook Page Live",
+            "ingest_class": "api",
+            "key_present": false,
+            "ingest_url": null,
+            "operator_action": "connect the Page (a personal profile cannot go live through the API)",
+            "note": "Page destinations only; the Page token is the credential. xPST creates the stream with published=false, so fetching a key does not put anything on the Page.",
+            "fetch": {
+              "platform": "facebook",
+              "endpoint": "POST https://graph.facebook.com/<version>/{page-id}/live_videos",
+              "credentials_present": false,
+              "missing": [
+                "page_access_token"
+              ],
+              "action": "Connect the Page with `xpst auth facebook`; only a Page access token can create a Page live video.",
+              "registration_url": "https://developers.facebook.com/docs/pages/access-tokens",
+              "scopes": []
+            }
+          },
+          {
+            "platform": "instagram",
+            "display_name": "Instagram Live",
+            "ingest_class": "manual",
+            "key_present": false,
+            "ingest_url": null,
+            "operator_action": "open instagram.com \u2192 Create \u2192 Live video (Live Producer) and copy the server URL plus the per-session stream key",
+            "note": "Keys are per session by design, so a relay cannot be configured once and forgotten. An official Live API for eligible accounts is reported but unconfirmed for this repository; until it is proven, this row stays manual.",
+            "fetch": null
+          },
+          {
+            "platform": "tiktok",
+            "display_name": "TikTok LIVE",
+            "ingest_class": "manual",
+            "key_present": false,
+            "ingest_url": null,
+            "operator_action": "open TikTok LIVE Center, start a live setup, copy the RTMP URL and key",
+            "note": "Per-session key with no documented endpoint for handing one to an app.",
+            "fetch": null
+          },
+          {
+            "platform": "rumble",
+            "display_name": "Rumble Live",
+            "ingest_class": "manual",
+            "key_present": false,
+            "ingest_url": null,
+            "operator_action": "copy the RTMP ingest URL and stream key from the Rumble studio",
+            "note": "No public ingest-key endpoint.",
+            "fetch": null
+          },
+          {
+            "platform": "x",
+            "display_name": "X",
+            "ingest_class": "unsupported",
+            "key_present": false,
+            "ingest_url": null,
+            "operator_action": "",
+            "note": "No live-video ingest API for third-party apps.",
+            "fetch": null
+          },
+          {
+            "platform": "threads",
+            "display_name": "Threads",
+            "ingest_class": "unsupported",
+            "key_present": false,
+            "ingest_url": null,
+            "operator_action": "",
+            "note": "No live broadcast surface.",
+            "fetch": null
+          },
+          {
+            "platform": "bluesky",
+            "display_name": "Bluesky",
+            "ingest_class": "unsupported",
+            "key_present": false,
+            "ingest_url": null,
+            "operator_action": "",
+            "note": "No live ingest; AT Protocol carries posts, not broadcast.",
+            "fetch": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "stream_set_key_ok",
+      "argv": [
+        "stream",
+        "set-key",
+        "youtube",
+        "--ingest-url",
+        "rtmps://a.example/live2",
+        "--key",
+        "secret123",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "ok": true,
+        "platform": "youtube",
+        "ingest_url": "rtmps://a.example/live2",
+        "stream_key": "se\u202623"
+      }
+    },
+    {
+      "name": "stream_clear_key",
+      "argv": [
+        "stream",
+        "clear-key",
+        "youtube",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "ok": false,
+        "platform": "youtube",
+        "removed": false
+      }
+    },
+    {
+      "name": "stream_relay_config_output",
+      "argv": [
+        "stream",
+        "relay-config",
+        "--output",
+        "PROFILE/mediamtx.yml",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "credential_json": {
+        "stream_destination_youtube": {
+          "ingest_url": "rtmps://a.example/live2",
+          "stream_key": "secret123"
+        }
+      },
+      "files": {
+        "mediamtx.yml": "# Generated by xPST \u2014 live-stream relay (MediaMTX).\n# This file contains stream keys. Keep it mode 0600 and never commit it.\n# Encoder setup: push one RTMP stream to rtmp://127.0.0.1:1935/<path>.\nlogLevel: info\nrtmp: true\nrtmpAddress: :1935\nrtsp: false\nhls: false\nwebrtc: false\nsrt: false\nmoq: false\napi: false\npaths:\n  xpst:\n    source: publisher\n    forward:\n    - dest: rtmps://a.example/live2#secret123\n"
+      },
+      "stdout_json": {
+        "ok": true,
+        "relay_ingest_url": "rtmp://127.0.0.1:1935/xpst",
+        "destination_count": 1,
+        "destinations": [
+          {
+            "platform": "youtube",
+            "ingest_url": "rtmps://a.example/live2",
+            "stream_key": "se\u202623"
+          }
+        ],
+        "note": "Each destination receives the same bytes; nothing is re-encoded. A platform that issues per-session keys (Instagram, TikTok, Rumble) must be re-pasted before every stream.",
+        "output": "<PROFILE>/mediamtx.yml"
+      }
+    },
+    {
+      "name": "stream_relay_config_empty",
+      "argv": [
+        "stream",
+        "relay-config",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "stdout",
+      "exit_code": 2,
+      "allow_nonzero": true,
+      "stdout": "{\"ok\": false, \"error\": \"no destinations configured \u2014 nothing to forward to. Add one with `xpst stream set-key <platform>`.\"}\nno destinations configured \u2014 nothing to forward to. Add one with `xpst stream \nset-key <platform>`.\n"
+    },
+    {
+      "name": "bio_masked",
+      "argv": [
+        "bio",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "credential": {
+        "dashboard_api_token": "yaF492IK4gZE95x5WpxLeu53JSp2n3PK8s7EjfvkGso"
+      },
+      "stdout_json": {
+        "url": "http://127.0.0.1:8080/bio",
+        "edit_url": "http://127.0.0.1:8080/bio/edit?token=yaF492IK%E2%80%A6vkGso",
+        "edit_url_reveal_flag": "--reveal"
+      }
+    },
+    {
+      "name": "bio_reveal",
+      "argv": [
+        "bio",
+        "--reveal",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "credential": {
+        "dashboard_api_token": "yaF492IK4gZE95x5WpxLeu53JSp2n3PK8s7EjfvkGso"
+      },
+      "stdout_json": {
+        "url": "http://127.0.0.1:8080/bio",
+        "edit_url": "http://127.0.0.1:8080/bio/edit?token=yaF492IK4gZE95x5WpxLeu53JSp2n3PK8s7EjfvkGso",
+        "edit_url_masked": "http://127.0.0.1:8080/bio/edit?token=yaF492IK%E2%80%A6vkGso"
+      }
+    },
+    {
+      "name": "security_audit",
+      "argv": [
+        "security-audit",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": {
+        "overall_status": "pass",
+        "checks": [
+          {
+            "check": "dashboard_localhost",
+            "status": "unobserved",
+            "passed": true,
+            "advisory": true,
+            "detail": "No dashboard has bound a socket in this process; nothing observed either way."
+          },
+          {
+            "check": "mcp_readonly",
+            "status": "observed",
+            "passed": false,
+            "advisory": true,
+            "detail": "XPST_MCP_READONLY not set \u2014 mutating MCP tools rely on the XPST_MCP_ALLOW_MUTATIONS/REQUIRE_CONFIRM gates."
+          },
+          {
+            "check": "provider_mode",
+            "status": "observed",
+            "passed": true,
+            "advisory": true,
+            "detail": "Provider mode: official"
+          },
+          {
+            "check": "ffmpeg_available",
+            "status": "observed",
+            "passed": true,
+            "detail": "FFmpeg found"
+          },
+          {
+            "check": "encrypted_storage",
+            "status": "observed",
+            "passed": true,
+            "detail": "Fernet-encrypted file store (scrypt-derived key) is the active backend."
+          }
+        ],
+        "passed_count": 4,
+        "failed_count": 1,
+        "check_count": 5
+      }
+    },
+    {
+      "name": "mcp_list",
+      "argv": [
+        "mcp",
+        "list",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "stdout_json": [
+        {
+          "name": "xpst_run",
+          "description": "Check for new videos and cross-post them to configured platforms. A batch where nothing was published is never reported as success: `batch_status` says `published` / `partial` / `failed` / `nothing_to_do`, `exit_code` is the status the CLI would exit with, and `failed_destinations` names every destination that failed."
+        },
+        {
+          "name": "xpst_post",
+          "description": "Post to platforms: one local video/image file, a carousel (carousel_paths), or a text post. `content_type` states what the post is in the canonical vocabulary (video/image/carousel/text/thread); a type a chosen destination cannot publish is refused with an explicit blocker BEFORE anything is uploaded, and the refusal is never reported as a success. `overrides` writes a different caption per destination (e.g. {\"x\": {\"text\": \"short copy\"}}); destinations without one use `caption`. Call `xpst_capabilities` to see what each destination can actually publish."
+        },
+        {
+          "name": "xpst_analytics",
+          "description": "Per-post and per-platform engagement metrics (views, likes, comments, shares) with persisted snapshot history. live=false reads the local snapshot store only (fast, offline); live=true refreshes from the platform APIs first. Every platform reports collection_status (ok/partial/failed/unavailable/unknown) with its error: a failed collection is labelled, never returned as a silent zero."
+        },
+        {
+          "name": "xpst_cross_post_analytics",
+          "description": "Cross-post correlation analytics (B1): one video posted to multiple platforms shown as a single entry with aggregated totals (views, likes, comments, shares) and per-platform breakdown, plus engagement rate and tier (high/medium/low). Reads the local snapshot store only \u2014 fast and offline."
+        },
+        {
+          "name": "xpst_followers",
+          "description": "Follower counts per platform with growth history. Returns total followers across all platforms, per-platform counts, and recent growth trends from stored snapshots."
+        },
+        {
+          "name": "xpst_best_time",
+          "description": "Best time to post per platform, based on engagement history. Analyzes when your posts get the highest engagement and recommends the optimal day-of-week and hour for each platform."
+        },
+        {
+          "name": "xpst_security_audit",
+          "description": "Run an automated security check on the xPST installation. Verifies credential file permissions, encrypted storage, dashboard localhost binding, MCP readonly mode, FFmpeg availability, and provider mode configuration."
+        },
+        {
+          "name": "xpst_suggest_caption",
+          "description": "Generate AI caption suggestions for a video file. Uses the video's transcript to generate 3 caption variants with platform-specific character limits and hashtag suggestions. Falls back to deterministic extraction when no LLM is configured."
+        },
+        {
+          "name": "xpst_generate_ideas",
+          "description": "Generate post ideas for a content topic (AI content studio). Uses the KB LLM when configured (XPST_KB_LLM_ENABLED), otherwise falls back to deterministic template generation \u2014 no LLM required. Returns up to `count` ideas, each with an 'idea' headline and optional 'hook'."
+        },
+        {
+          "name": "xpst_transcript",
+          "description": "Get the transcript for a video by its content_hash or video_id. Returns the full transcript text and segment timestamps. Transcripts are cached by content_hash so cross-posted videos share the same transcript (D2)."
+        },
+        {
+          "name": "xpst_search",
+          "description": "Search the knowledge base for nuggets, clips, and topics. Returns matching knowledge nuggets with their source video info and analytics correlation (total views across platforms)."
+        },
+        {
+          "name": "xpst_activity",
+          "description": "List recorded platform failures with targeted retry or review actions (read-only)"
+        },
+        {
+          "name": "xpst_schedule_list",
+          "description": "List scheduled posts (pending, completed, failed) with times and targets"
+        },
+        {
+          "name": "xpst_schedule_add",
+          "description": "Schedule a post for later: local video file + caption + ISO-8601 time, optional platform list, repeat rule (daily/weekly/monthly), and per-destination caption overrides (honoured when it fires). Omit video_path for a text-only post: caption IS the post, stored as content_type=text and fired through the text route."
+        },
+        {
+          "name": "xpst_schedule_cancel",
+          "description": "Cancel a scheduled post by entry id \u2014 the MCP equivalent of `xpst schedule remove`. Removes the entry from the LOCAL schedule store (~/.xpst/schedule.json) only; it never un-posts content that has already been published. Get entry ids from xpst_schedule_list. dry_run=true returns the same verdict without modifying the store. An unknown id is an error (POST_NOT_FOUND), never a silent success."
+        },
+        {
+          "name": "xpst_schedule_pause",
+          "description": "Pause the schedule queue \u2014 the MCP equivalent of `xpst schedule pause`. No scheduled entry fires (from cron, the daemon or an explicit run) until xpst_schedule_resume. Safe to call: it stops posts, never starts them."
+        },
+        {
+          "name": "xpst_schedule_resume",
+          "description": "Release a paused schedule queue \u2014 the MCP equivalent of `xpst schedule resume`. Due entries become eligible to fire again; this re-enables publishing, so it is a consent-gated mutation."
+        },
+        {
+          "name": "xpst_failures_retry",
+          "description": "Retry ONE recorded upload failure, identified by video_id + platform \u2014 the MCP equivalent of `xpst failures retry <video_id> --platform <name>`. Re-posts that video's local source file to that single destination (a REAL platform upload; scope=platform_upload). Returns ok=false with VIDEO_NOT_FOUND, NO_RECORDED_FAILURE, NO_LOCAL_FILE or RETRY_FAILED instead of pretending a retry happened; posted=true only when the destination accepted the post. Use xpst_activity to list failures and their retryable flag, and dry_run=true to plan without uploading."
+        },
+        {
+          "name": "xpst_health",
+          "description": "Test connectivity to all platforms and sources (no uploads)"
+        },
+        {
+          "name": "xpst_status",
+          "description": "Show cross-posting statistics and health status"
+        },
+        {
+          "name": "xpst_rate_limit_status",
+          "description": "Read-only view of active rate-limit cooldowns: per platform the remaining seconds, strike count, resume time and the platform's recorded reason. A cooldown defers posts, it does not fail them. Pure local read \u2014 no uploads, no platform API calls, no sleeps, safe to call repeatedly and in dry runs."
+        },
+        {
+          "name": "xpst_backfill",
+          "description": "Retry failed or incomplete posts from history. `attempted` / `successful` are counts, not a verdict: `batch_status`, `exit_code` and `failed_destinations` report the same aggregate the CLI (`xpst backfill`) exits on, so an all-failed retry is not read as a successful one."
+        },
+        {
+          "name": "xpst_config_show",
+          "description": "Display current configuration (with sensitive values masked)"
+        },
+        {
+          "name": "xpst_auth_status",
+          "description": "Show live authentication status and the truthful per-platform badge (connected / expiring / needs_reauth / source_only / disabled / unknown). The badge is derived from a live check with its timestamp \u2014 a stored credential alone is never reported as connected."
+        },
+        {
+          "name": "xpst_byo_app",
+          "description": "Bring-your-own developer app setup: report (masked) which platforms have a locally-stored app credential, or store/clear one. A stored app id/secret is what flips a platform into its official OAuth path with NO App Review needed (Meta Standard Access: the owner uses their own app). The secret is stored only in the encrypted local store and is never echoed back \u2014 responses carry at most a 4-char id tail. Omit app_id/app_secret for a status read."
+        },
+        {
+          "name": "xpst_bio_get",
+          "description": "Get the link-in-bio page URL and its current configuration. Returns the public /bio URL, the page handle, and the ordered list of links (enabled social accounts + custom links) exactly as rendered by the dashboard bio page."
+        },
+        {
+          "name": "xpst_capabilities",
+          "description": "Return the canonical role-aware provider catalog AND the content contract without network calls: per destination, which content types it declares and which it can actually publish (`content`), plus the publishing route each content type takes. Read this before posting so you never attempt a modality a destination cannot publish."
+        },
+        {
+          "name": "xpst_preflight",
+          "description": "Resolve the per-destination plan BEFORE anything is published: for each destination, whether it will publish (`posted`), is not connected (`skipped_unconnected`, with the connect command), or cannot take this format (`unsupported_format`, with the envelope). Targets an explicit `platforms` list, or `all: true` for every connected account that accepts the format, or the format route \u2229 connected accounts. Never uploads and never touches the network"
+        },
+        {
+          "name": "xpst_readiness",
+          "description": "Return local setup readiness and actionable blockers without starting the posting engine"
+        },
+        {
+          "name": "xpst_auth_start",
+          "description": "Return a human-only authentication action plan; never opens a browser or accepts secrets"
+        },
+        {
+          "name": "xpst_providers",
+          "description": "List supported content sources and posting destinations with capabilities"
+        },
+        {
+          "name": "xpst_disconnect",
+          "description": "Disconnect a platform: remove its stored account credentials (tokens, cookies, session files) and set accounts.<platform>.enabled=false. Never touches posted content or local state."
+        },
+        {
+          "name": "xpst_delete",
+          "description": "Delete a post for REAL on the platform and remove its local record. Calls the platform delete API for every destination the video was posted to and reports each destination's outcome: deleted, soft_hidden (unpublished but recoverable), pending (could not confirm \u2014 remove manually via the returned share_url), or unsupported (that platform has no delete path, e.g. Messenger). The response carries platform_deleted per destination plus a boolean aggregate (true only when every destination is gone). Destination platforms (YouTube, X, Instagram, TikTok, Threads, Facebook) all support deletion today. Removing the record also makes the engine treat the video as new again, so treat the call as destructive and confirm with the user first."
+        },
+        {
+          "name": "messenger_send",
+          "description": "Send a text message to a Messenger recipient (page-scoped PSID) via the Meta Graph API. Requires a configured Messenger Page Access Token (run 'xpst auth messenger'). Returns the message_id."
+        },
+        {
+          "name": "messenger_set_rules",
+          "description": "Configure the Messenger ManyChat-lite auto-reply rules. Provide a keyword->reply map (the '*' key is the catch-all) and optionally toggle auto_reply. Persists to config."
+        },
+        {
+          "name": "xpst_messenger_check_comments",
+          "description": "Fetch recent comments on an Instagram or Facebook post and auto-reply per the configured reply_rules (Content360-style comment auto-reply, mirroring `xpst messenger check-comments`). Gated by accounts.messenger.comment_reply_enabled and comment_platforms. Posts public replies on the comment threads when a keyword matches."
+        },
+        {
+          "name": "kb_add",
+          "description": "Ingest a local file or URL into the knowledge base"
+        },
+        {
+          "name": "kb_query",
+          "description": "Return stored knowledge nuggets whose text matches the query"
+        },
+        {
+          "name": "kb_organize",
+          "description": "Discover areas, tag difficulty, and assign nuggets"
+        },
+        {
+          "name": "kb_areas",
+          "description": "List discovered knowledge areas in course order (beginner -> advanced)"
+        },
+        {
+          "name": "xpst_setup_start",
+          "description": "Start or return the shared resumable setup transaction"
+        },
+        {
+          "name": "xpst_setup_status",
+          "description": "Read the shared setup transaction and pending human actions"
+        },
+        {
+          "name": "xpst_setup_resume",
+          "description": "Resume setup with safe step state or caller-verified readiness"
+        },
+        {
+          "name": "xpst_setup_reset",
+          "description": "Reset the shared setup transaction and its recovery copies"
+        },
+        {
+          "name": "xpst_stream",
+          "description": "Live-stream relay status: every platform's ingest path (api/manual/unsupported), whether a stream key is already stored, and whether xPST holds the credentials to fetch one itself. The same registry and key-presence verdict the CLI serves, so an agent never has to shell out. With `include_live` it also asks Twitch/Kick who is live right now \u2014 only for platforms whose credentials exist; the rest come back as `unavailable` with the registration step. Never returns a stream key. Read-only: it stores nothing, posts nothing, spends nothing."
+        },
+        {
+          "name": "xpst_chat",
+          "description": "Read-only live chat from Twitch, YouTube and Kick as ONE merged timeline. Each message carries `platform`, `author`, `text`, `timestamp`, `message_id` and `channel`, ordered chronologically, so an agent never has to reconcile three feeds. With `read` it opens the platforms for `duration_s` (bounded, default 20s, max 300) and returns what arrived; without it, it reports what COULD be read and what is missing \u2014 no network. A platform that cannot be read appears under `unavailable` with a code and the next step, never as an empty list: 'not live', 'no credential' and 'no such channel' are different answers. Never sends, moderates or replies \u2014 there is no write path at all."
+        }
+      ]
+    },
+    {
+      "name": "app_missing",
+      "argv": [
+        "app"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "stdout",
+      "exit_code": 1,
+      "allow_nonzero": true,
+      "stdout": "xPST desktop app not found.\nInstall a published bundle from https://github.com/TysAIs/xPST/releases\nor build one from a checkout: scripts/build-engine.sh && (cd src-tauri && cargo \ntauri build)\n"
+    },
+    {
+      "name": "kb_areas_empty",
+      "argv": [
+        "kb",
+        "areas",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "stdout_json": {
+        "areas": []
+      }
+    },
+    {
+      "name": "kb_areas_populated",
+      "argv": [
+        "kb",
+        "areas",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        ".xpst/knowledge/default/areas.json": "{\"b\": {\"label\": \"Beta\", \"order_index\": 1, \"nugget_ids\": [\"n1\"]}, \"a\": {\"label\": \"Alpha\", \"order_index\": 0, \"nugget_ids\": [\"n1\", \"n2\"]}}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "stdout_json": {
+        "areas": []
+      }
+    },
+    {
+      "name": "schedule_remove_ok",
+      "argv": [
+        "schedule",
+        "remove",
+        "id-1",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "schedule.json": "[{\"id\": \"id-1\", \"caption\": \"c\", \"scheduled_time\": \"2026-01-01T00:00:00+00:00\", \"status\": \"pending\"}]"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "files": {
+        "schedule.json": "[]"
+      },
+      "stdout_json": {
+        "ok": true,
+        "operation": "schedule_cancel",
+        "scope": "local_schedule_store",
+        "dry_run": false,
+        "entry_id": "id-1",
+        "found": true,
+        "cancelled": true,
+        "entry": {
+          "id": "id-1",
+          "caption": "c",
+          "scheduled_time": "2026-01-01T00:00:00+00:00",
+          "status": "pending",
+          "scheduled_time_local": "2025-12-31T17:00:00-07:00"
+        },
+        "error": null,
+        "removed": "id-1"
       }
     }
   ]

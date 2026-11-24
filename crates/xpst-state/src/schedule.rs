@@ -115,7 +115,7 @@ fn sort_key(entry: &Value) -> &str {
 }
 
 /// Copy of an entry plus its `scheduled_time_local` rendering.
-fn with_local_view(mut entry: Value) -> Value {
+pub fn with_local_view(mut entry: Value) -> Value {
     let rendered = local_time(&entry);
     if let Some(object) = entry.as_object_mut() {
         object.insert(

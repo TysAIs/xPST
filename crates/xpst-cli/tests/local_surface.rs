@@ -27,7 +27,7 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 65;
+const EXPECTED_SCENARIOS: usize = 88;
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -80,6 +80,33 @@ impl Profile {
                 std::fs::create_dir_all(parent).expect("seed directory");
             }
             std::fs::write(&path, content.as_str().expect("seed is text")).expect("seed file");
+        }
+    }
+
+    /// Seed JSON credentials (a stored stream key, an app credential) with the
+    /// same Fernet store the Python engine writes, so both engines read the same
+    /// material.
+    fn seed_credential_json(&self, credentials: &Value) {
+        let Some(entries) = credentials.as_object() else {
+            return;
+        };
+        let store = xpst_auth::credentials::CredentialStore::new(&self.dir);
+        for (key, value) in entries {
+            store.store_json(key, value).expect("seed JSON credential");
+        }
+    }
+
+    /// Seed the encrypted credential store the way the capture script does, so a
+    /// command that reads a stored secret sees the same value in both engines.
+    fn seed_credentials(&self, credentials: &Value) {
+        let Some(entries) = credentials.as_object() else {
+            return;
+        };
+        let store = xpst_auth::credentials::CredentialStore::new(&self.dir);
+        for (key, value) in entries {
+            store
+                .store(key, value.as_str().expect("credential is text"))
+                .expect("seed credential");
         }
     }
 
@@ -303,8 +330,14 @@ fn assert_payload_matches(expected: &Value, actual: &Value, scenario: &str) {
     assert_eq!(actual, expected, "scenario `{scenario}` payload drifted");
 }
 
-/// Compare the files a scenario wrote, byte for byte (after the same
-/// `<PROFILE>` normalisation the payload gets).
+/// Compare the files a scenario wrote.
+///
+/// A YAML file is compared byte for byte — the config writer's whole point is
+/// that its bytes are PyYAML's. A JSON file is compared structurally: JSON
+/// objects are unordered, and the Rust engine writes `state.json` with sorted
+/// keys where Python preserves the order it read, so a byte comparison would
+/// fail on a difference no reader can observe. The values, types and array
+/// order are still held to the Python engine.
 fn assert_files_match(row: &Value, profile: &Profile, scenario: &str) {
     let Some(expected) = row.get("files").and_then(Value::as_object) else {
         return;
@@ -318,9 +351,19 @@ fn assert_files_match(row: &Value, profile: &Profile, scenario: &str) {
         let actual = std::fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("scenario `{scenario}`: {relative} unreadable: {error}"))
             .replace(&profile.path().display().to_string(), "<PROFILE>");
+        let want = want.as_str().unwrap_or_default();
+        if let (Ok(actual_json), Ok(want_json)) = (
+            serde_json::from_str::<Value>(&actual),
+            serde_json::from_str::<Value>(want),
+        ) {
+            assert_eq!(
+                actual_json, want_json,
+                "scenario `{scenario}`: {relative} differs from the Python engine"
+            );
+            continue;
+        }
         assert_eq!(
-            actual,
-            want.as_str().unwrap_or_default(),
+            actual, want,
             "scenario `{scenario}`: {relative} differs from the Python engine"
         );
     }
@@ -334,6 +377,8 @@ fn every_recorded_scenario_matches_the_python_engine() {
         let name = row["name"].as_str().expect("scenario name");
         let profile = Profile::new(name);
         profile.seed(&row["seed"]);
+        profile.seed_credentials(&row["credential"]);
+        profile.seed_credential_json(&row["credential_json"]);
         let argv = argv_for(row, &profile);
         let env = env_for(row, &profile);
         let config_dir = config_dir_for(row, &profile);

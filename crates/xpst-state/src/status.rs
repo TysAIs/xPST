@@ -134,9 +134,18 @@ fn ensure_state_keys(state: &mut Map<String, Value>) {
     // call; this reader fills the default block instead (named deviation).
     let health_missing = !state.get("health").is_some_and(Value::is_object);
     if health_missing {
+        // `_ensure_state_keys`'s default block carries `last_error` per
+        // platform; `_empty_state`'s does not. A key-filled document therefore
+        // gains it, which is visible in the written file.
         state.insert(
             "health".to_string(),
-            empty_state().remove("health").unwrap_or_else(|| json!({})),
+            json!({
+                "platforms": ensure_platform_health(),
+                "sources": {},
+                "total_processed": 0,
+                "last_check": null,
+                "last_wake_check": null,
+            }),
         );
     }
     if let Some(Value::Object(health)) = state.get_mut("health") {
@@ -145,7 +154,7 @@ fn ensure_state_keys(state: &mut Map<String, Value>) {
             .or_insert_with(|| json!({}));
         health
             .entry("platforms".to_string())
-            .or_insert_with(default_platform_health);
+            .or_insert_with(ensure_platform_health);
         health
             .entry("total_processed".to_string())
             .or_insert_with(|| json!(0));
@@ -158,14 +167,21 @@ fn ensure_state_keys(state: &mut Map<String, Value>) {
     }
 }
 
-fn default_platform_health() -> Value {
+/// `_ensure_state_keys`'s default platform table.
+///
+/// It differs from [`default_platform_health`] by one key: Python's
+/// `_ensure_state_keys` writes `last_error: None` per platform, while
+/// `_empty_state` (used when there is no file at all) does not. A document that
+/// is migrated or key-filled therefore gains `last_error`, and one created from
+/// nothing does not — a difference a byte comparison of the written file sees.
+fn ensure_platform_health() -> Value {
     Value::Object(
         DEFAULT_DESTINATIONS
             .iter()
             .map(|name| {
                 (
                     (*name).to_string(),
-                    json!({"status": "ok", "last_success": null, "failures": 0}),
+                    json!({"status": "ok", "last_success": null, "failures": 0, "last_error": null}),
                 )
             })
             .collect(),
@@ -270,7 +286,8 @@ fn migrate_legacy_cross_posted(state: &mut Map<String, Value>) {
         );
     }
     state.insert("posted_videos".to_string(), Value::Object(migrated));
-    state.remove("cross_posted");
+    // Python keeps the legacy `cross_posted` map in the document; deleting it
+    // would make the written file differ from the shipped engine's.
 }
 
 /// Number of recorded failures across every video (`len(get_dead_letter_queue())`).

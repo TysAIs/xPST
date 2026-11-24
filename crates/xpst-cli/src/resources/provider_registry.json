@@ -199,6 +199,26 @@
    "local": {
     "path": ""
    }
+  },
+  "sections": {
+   "monitoring": {
+    "log_level": "INFO",
+    "log_file": "~/.xpst/logs/xpst.log",
+    "log_rotation": "10 MB",
+    "healthcheck_port": 8080,
+    "enable_metrics": true,
+    "dashboard_username": "",
+    "dashboard_password_hash": "",
+    "health_check_interval": 300
+   },
+   "rate_limits": {
+    "youtube": 5,
+    "instagram": 5,
+    "x": 5,
+    "tiktok": 5,
+    "threads": 5,
+    "facebook": 5
+   }
   }
  },
  "manifests": {

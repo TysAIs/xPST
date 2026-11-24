@@ -77,6 +77,20 @@ pub fn array(items: Vec<xpst_config::Value>) -> xpst_config::Value {
     xpst_config::Value::Sequence(items)
 }
 
+/// `_error_payload()` in Python's key order: `{ok: false, error: {code, message, ...}}`.
+///
+/// [`error_payload`] builds the same shape through `serde_json`, whose map sorts
+/// its keys; a command that prints the payload byte-for-byte needs this one.
+pub fn error_object(
+    code: &str,
+    message: &str,
+    extra: Vec<(&str, xpst_config::Value)>,
+) -> xpst_config::Value {
+    let mut error = vec![("code", string(code)), ("message", string(message))];
+    error.extend(extra);
+    object(vec![("ok", boolean(false)), ("error", object(error))])
+}
+
 /// A JSON string.
 pub fn string(text: impl Into<String>) -> xpst_config::Value {
     xpst_config::Value::String(text.into())
@@ -90,6 +104,12 @@ pub fn boolean(flag: bool) -> xpst_config::Value {
 /// A JSON integer.
 pub fn integer(number: i64) -> xpst_config::Value {
     xpst_config::Value::Number(number.into())
+}
+
+/// A JSON float (Python renders it with `repr`, so `1767225600.0` keeps its
+/// `.0`).
+pub fn number(value: f64) -> xpst_config::Value {
+    serde_json::Number::from_f64(value).map_or(xpst_config::Value::Null, xpst_config::Value::Number)
 }
 
 /// A JSON `null`.
@@ -135,4 +155,262 @@ pub fn write_python_json(out: &mut dyn Write, value: &xpst_config::Value) -> std
     let text = xpst_config::python_style_json(value)
         .map_err(|err| std::io::Error::other(format!("cannot render JSON: {err}")))?;
     writeln!(out, "{text}")
+}
+
+/// Convert a `serde_json` document into the insertion-ordered value type.
+///
+/// `serde_json::Map` sorts its keys, so a document that came through it is
+/// already in sorted order; this conversion keeps whatever order it is handed.
+/// It exists so a `serde_json` payload can be rendered with
+/// [`xpst_config::python_style_json`] — Python's `", "` / `": "` separators —
+/// instead of serde's compact form.
+pub fn from_json(value: &serde_json::Value) -> xpst_config::Value {
+    use serde_json::Value as Json;
+    use xpst_config::Value as Out;
+    match value {
+        Json::Null => Out::Null,
+        Json::Bool(flag) => Out::Bool(*flag),
+        Json::Number(number) => Out::Number(number.clone()),
+        Json::String(text) => Out::String(text.clone()),
+        Json::Array(items) => Out::Sequence(items.iter().map(from_json).collect()),
+        Json::Object(map) => {
+            let mut out = xpst_config::Mapping::new();
+            for (key, item) in map {
+                out.insert(Out::String(key.clone()), from_json(item));
+            }
+            Out::Mapping(out)
+        }
+    }
+}
+
+/// Render a `serde_json` document the way `json.dumps(value, indent=2)` does.
+///
+/// Python's default `ensure_ascii=True` escapes every character outside
+/// printable ASCII as `\uXXXX` (a surrogate pair above the BMP), which is why
+/// `security-audit` and `mcp list` carry `\u2014` rather than an em dash. Items
+/// are separated by `","` with no trailing space, a key is followed by `": "`,
+/// and the indent is two spaces — exactly `json.dumps(indent=2)`.
+pub fn python_pretty_json(value: &serde_json::Value) -> String {
+    let mut out = String::new();
+    write_pretty(value, 0, true, &mut out);
+    out
+}
+
+/// The same rendering with `ensure_ascii=False`: raw UTF-8, as
+/// `json.dump(..., ensure_ascii=False)` writes `schedule.json`.
+pub fn python_pretty_json_utf8(value: &serde_json::Value) -> String {
+    let mut out = String::new();
+    write_pretty(value, 0, false, &mut out);
+    out
+}
+
+/// `json.dumps(value, indent=2)` for the insertion-ordered value type.
+///
+/// The ordered twin of [`python_pretty_json`]: a payload built with
+/// [`object`]/[`array`] keeps Python's key order, which `serde_json::Map` would
+/// sort away.
+pub fn python_pretty_json_cfg(value: &xpst_config::Value) -> String {
+    let mut out = String::new();
+    write_pretty_cfg(value, 0, true, &mut out);
+    out
+}
+
+/// [`python_pretty_json_cfg`] with `ensure_ascii=False` (raw UTF-8).
+pub fn python_pretty_json_cfg_utf8(value: &xpst_config::Value) -> String {
+    let mut out = String::new();
+    write_pretty_cfg(value, 0, false, &mut out);
+    out
+}
+
+fn write_pretty_cfg(value: &xpst_config::Value, depth: usize, ascii_only: bool, out: &mut String) {
+    use xpst_config::Value as Cfg;
+    match value {
+        Cfg::Null => out.push_str("null"),
+        Cfg::Bool(true) => out.push_str("true"),
+        Cfg::Bool(false) => out.push_str("false"),
+        Cfg::Number(number) => {
+            if let Some(integer) = number.as_i64() {
+                out.push_str(&integer.to_string());
+            } else if let Some(integer) = number.as_u64() {
+                out.push_str(&integer.to_string());
+            } else {
+                out.push_str(&xpst_config::pyyaml::python_json_float(
+                    number.as_f64().unwrap_or_default(),
+                ));
+            }
+        }
+        Cfg::NonFinite(kind) => out.push_str(kind.as_json()),
+        Cfg::Timestamp(text) | Cfg::String(text) => write_pretty_string(text, ascii_only, out),
+        Cfg::Sequence(items) => {
+            if items.is_empty() {
+                out.push_str("[]");
+                return;
+            }
+            out.push_str("[\n");
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(",\n");
+                }
+                indent(depth + 1, out);
+                write_pretty_cfg(item, depth + 1, ascii_only, out);
+            }
+            out.push('\n');
+            indent(depth, out);
+            out.push(']');
+        }
+        Cfg::Mapping(map) => {
+            if map.is_empty() {
+                out.push_str("{}");
+                return;
+            }
+            out.push_str("{\n");
+            for (index, (key, item)) in map.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(",\n");
+                }
+                indent(depth + 1, out);
+                match key {
+                    Cfg::String(text) | Cfg::Timestamp(text) => {
+                        write_pretty_string(text, ascii_only, out)
+                    }
+                    other => {
+                        let rendered = xpst_config::python_style_json(other).unwrap_or_default();
+                        write_pretty_string(&rendered, ascii_only, out);
+                    }
+                }
+                out.push_str(": ");
+                write_pretty_cfg(item, depth + 1, ascii_only, out);
+            }
+            out.push('\n');
+            indent(depth, out);
+            out.push('}');
+        }
+    }
+}
+
+fn indent(depth: usize, out: &mut String) {
+    for _ in 0..depth {
+        out.push_str("  ");
+    }
+}
+
+fn write_pretty(value: &serde_json::Value, depth: usize, ascii_only: bool, out: &mut String) {
+    use serde_json::Value as Json;
+    match value {
+        Json::Null => out.push_str("null"),
+        Json::Bool(true) => out.push_str("true"),
+        Json::Bool(false) => out.push_str("false"),
+        Json::Number(number) => {
+            if let Some(integer) = number.as_i64() {
+                out.push_str(&integer.to_string());
+            } else if let Some(integer) = number.as_u64() {
+                out.push_str(&integer.to_string());
+            } else {
+                out.push_str(&xpst_config::pyyaml::python_json_float(
+                    number.as_f64().unwrap_or_default(),
+                ));
+            }
+        }
+        Json::String(text) => write_pretty_string(text, ascii_only, out),
+        Json::Array(items) => {
+            if items.is_empty() {
+                out.push_str("[]");
+                return;
+            }
+            out.push_str("[\n");
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(",\n");
+                }
+                indent(depth + 1, out);
+                write_pretty(item, depth + 1, ascii_only, out);
+            }
+            out.push('\n');
+            indent(depth, out);
+            out.push(']');
+        }
+        Json::Object(map) => {
+            if map.is_empty() {
+                out.push_str("{}");
+                return;
+            }
+            out.push_str("{\n");
+            for (index, (key, item)) in map.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(",\n");
+                }
+                indent(depth + 1, out);
+                write_pretty_string(key, ascii_only, out);
+                out.push_str(": ");
+                write_pretty(item, depth + 1, ascii_only, out);
+            }
+            out.push('\n');
+            indent(depth, out);
+            out.push('}');
+        }
+    }
+}
+
+/// `json.dumps` string escaping, with `ensure_ascii` as a switch.
+fn write_pretty_string(text: &str, ascii_only: bool, out: &mut String) {
+    out.push('"');
+    for character in text.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0c}' => out.push_str("\\f"),
+            c if (' '..='~').contains(&c) => out.push(c),
+            c if !ascii_only => out.push(c),
+            c => {
+                let mut units = [0u16; 2];
+                for unit in c.encode_utf16(&mut units) {
+                    out.push_str(&format!("\\u{unit:04x}"));
+                }
+            }
+        }
+    }
+    out.push('"');
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pretty_json_matches_pythons_indent_two() {
+        let value = serde_json::json!({"a": [1, 2], "b": {"c": "d"}, "e": [], "f": {}});
+        assert_eq!(
+            python_pretty_json(&value),
+            "{\n  \"a\": [\n    1,\n    2\n  ],\n  \"b\": {\n    \"c\": \"d\"\n  },\n  \"e\": [],\n  \"f\": {}\n}"
+        );
+    }
+
+    #[test]
+    fn non_ascii_is_escaped_like_ensure_ascii() {
+        assert_eq!(
+            python_pretty_json(&serde_json::json!("a—b")),
+            "\"a\\u2014b\""
+        );
+        assert_eq!(
+            python_pretty_json(&serde_json::json!("😀")),
+            "\"\\ud83d\\ude00\""
+        );
+        assert_eq!(
+            python_pretty_json(&serde_json::json!("\u{7f}")),
+            "\"\\u007f\""
+        );
+    }
+
+    #[test]
+    fn floats_render_like_python_repr() {
+        assert_eq!(
+            python_pretty_json(&serde_json::json!(1767225600.0)),
+            "1767225600.0"
+        );
+        assert_eq!(python_pretty_json(&serde_json::json!(1.5)), "1.5");
+    }
 }

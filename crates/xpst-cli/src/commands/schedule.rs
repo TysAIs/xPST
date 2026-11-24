@@ -15,8 +15,8 @@ use std::io::Write;
 use clap::ArgMatches;
 use serde_json::Value;
 
-use crate::output::{write_json, write_text};
-use crate::{exit, flag, paths, string_value, GlobalOptions};
+use crate::output::{boolean, null, object, string, write_json, write_text};
+use crate::{exit, flag, leaf_flag, leaf_string, paths, string_value, GlobalOptions};
 
 /// Run `schedule list`.
 pub fn run(
@@ -250,6 +250,185 @@ pub fn resume(
         let _ = write_text(out, "Queue was not paused.");
     }
     exit::SUCCESS
+}
+
+/// `xpst schedule remove ENTRY_ID [--dry-run]` — cancel one queued post.
+///
+/// Parity target: `src/xpst/cli.py::schedule_remove` →
+/// `src/xpst/services/recovery_service.py::cancel_scheduled_post`. Removal is a
+/// local schedule-store operation only: it never un-posts content that has
+/// already been published, and an unknown id is a `POST_NOT_FOUND` failure, not
+/// a silent success.
+///
+/// The store is read and written exactly as `ScheduleManager` does it: entries
+/// sorted by `scheduled_time` for the lookup, `scheduled_time_local` added to the
+/// reported entry, and `json.dump(entries, indent=2, ensure_ascii=False)` on the
+/// way back.
+pub fn remove(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let json_mode = global.json || leaf.is_some_and(|m| flag(m, "opt:json"));
+    let Some(dir) = paths::config_dir() else {
+        let message =
+            "cannot determine the config directory: neither XPST_CONFIG_DIR nor HOME is set";
+        if json_mode {
+            let payload =
+                crate::output::error_payload_with("CONFIG_ERROR", message, serde_json::json!({}));
+            let _ = write_json(out, &payload);
+        } else {
+            let _ = writeln!(err, "{message}");
+        }
+        return exit::CONFIG_ERROR;
+    };
+    let entry_id = leaf_string(leaf, "arg:entry_id").unwrap_or_default();
+    let dry_run = leaf_flag(leaf, "opt:dry-run");
+
+    let path = dir.join(xpst_state::schedule::SCHEDULE_FILE_NAME);
+    // Parsed as YAML (JSON is a subset) so each entry keeps the key order the
+    // store wrote — the payload reports the entry verbatim.
+    let mut entries: Vec<xpst_config::Value> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| xpst_config::yaml::from_str(&text).ok())
+        .and_then(|value| match value {
+            xpst_config::Value::Sequence(items) => Some(items),
+            _ => None,
+        })
+        .unwrap_or_default();
+
+    // `manager.list()` sorts by `scheduled_time` before the lookup.
+    let mut ordered = entries.clone();
+    ordered.sort_by(|left, right| {
+        let key = |entry: &xpst_config::Value| {
+            entry
+                .get("scheduled_time")
+                .and_then(xpst_config::Value::as_str)
+                .unwrap_or("")
+                .to_string()
+        };
+        key(left).cmp(&key(right))
+    });
+    let found = ordered
+        .iter()
+        .find(|entry| {
+            entry.get("id").and_then(xpst_config::Value::as_str) == Some(entry_id.as_str())
+        })
+        .cloned();
+
+    let mut cancelled = false;
+    if !dry_run {
+        if let Some(_entry) = &found {
+            let before = entries.len();
+            entries.retain(|entry| {
+                entry.get("id").and_then(xpst_config::Value::as_str) != Some(entry_id.as_str())
+            });
+            if entries.len() < before {
+                let text = crate::output::python_pretty_json_cfg_utf8(
+                    &xpst_config::Value::Sequence(entries.clone()),
+                );
+                if let Err(error) = crate::fsutil::write_private(&path, text.as_bytes()) {
+                    let _ = writeln!(err, "xpst schedule remove: cannot write the queue: {error}");
+                    return exit::GENERAL;
+                }
+                cancelled = true;
+            }
+        }
+    }
+
+    let found_flag = found.is_some();
+    let mut payload = object(vec![
+        ("ok", boolean(found_flag)),
+        ("operation", string("schedule_cancel")),
+        ("scope", string("local_schedule_store")),
+        ("dry_run", boolean(dry_run)),
+        ("entry_id", string(entry_id.clone())),
+        ("found", boolean(found_flag)),
+        ("cancelled", boolean(cancelled)),
+        (
+            "entry",
+            found.clone().map_or_else(null, |entry| local_view(&entry)),
+        ),
+        ("error", null()),
+    ]);
+    if !found_flag {
+        if let xpst_config::Value::Mapping(map) = &mut payload {
+            map.insert(
+                xpst_config::Value::from("error"),
+                object(vec![
+                    ("code", string("POST_NOT_FOUND")),
+                    (
+                        "message",
+                        string(format!("Scheduled post not found: {entry_id}")),
+                    ),
+                    ("entry_id", string(entry_id.clone())),
+                ]),
+            );
+        }
+    }
+    if cancelled {
+        if let xpst_config::Value::Mapping(map) = &mut payload {
+            map.insert(
+                xpst_config::Value::from("removed"),
+                string(entry_id.clone()),
+            );
+        }
+    }
+
+    if json_mode {
+        let _ = crate::output::write_python_json(out, &payload);
+    } else if dry_run {
+        let _ = write_text(out, "Dry run — would remove:");
+        match &found {
+            Some(entry) => {
+                let caption: String = entry
+                    .get("caption")
+                    .and_then(xpst_config::Value::as_str)
+                    .unwrap_or("")
+                    .chars()
+                    .take(60)
+                    .collect();
+                let _ = write_text(out, &format!("  ID: {entry_id} — {caption}"));
+            }
+            None => {
+                let _ = write_text(out, &format!("  ID: {entry_id} — not found"));
+            }
+        }
+    } else if cancelled {
+        let _ = write_text(out, &format!("✓ Removed scheduled post {entry_id}"));
+    } else {
+        let _ = write_text(out, &format!("Post not found: {entry_id}"));
+    }
+
+    if found_flag {
+        exit::SUCCESS
+    } else {
+        exit::GENERAL
+    }
+}
+
+/// `ScheduleManager._with_local_view` on the ordered document: the entry plus
+/// `scheduled_time_local` appended last, exactly as Python's `dict(entry)` copy
+/// then assignment produces.
+fn local_view(entry: &xpst_config::Value) -> xpst_config::Value {
+    let rendered = xpst_config::python_style_json(entry)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .map(xpst_state::schedule::with_local_view)
+        .map(|json| {
+            json.get("scheduled_time_local")
+                .cloned()
+                .unwrap_or(Value::Null)
+        });
+    let mut view = entry.clone();
+    if let xpst_config::Value::Mapping(map) = &mut view {
+        map.insert(
+            xpst_config::Value::from("scheduled_time_local"),
+            rendered.map_or_else(null, |value| crate::output::from_json(&value)),
+        );
+    }
+    view
 }
 
 /// Carry a `serde_json` scalar into the ordered value type without losing its

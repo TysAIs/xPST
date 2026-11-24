@@ -4,7 +4,7 @@
 
 One row per leaf command of the shipped CLI. `status` is `implemented` when the Rust engine runs the command and `stub` when it answers `not implemented in the Rust engine yet`. The two columns either side are the questions a reader actually has: which crate owns the behaviour, and whether the Python implementation they are comparing against makes an outbound network call.
 
-**20 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
+**39 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
 
 ## Columns
 
@@ -16,11 +16,11 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | Command | Rust status | Owner crate | Python network |
 |---|---|---|---|
 | `analytics export` | stub | xpst-store | none |
-| `app` | stub | xpst-app | none |
+| `app` | implemented | xpst-app | none |
 | `auth` | stub | xpst-auth | yes |
 | `backfill` | stub | xpst-core | yes |
 | `best-time` | stub | xpst-store | none |
-| `bio` | stub | xpst-cli | none |
+| `bio` | implemented | xpst-cli | none |
 | `byo clear` | implemented | xpst-auth | none |
 | `byo set` | stub | xpst-auth | possible |
 | `byo status` | implemented | xpst-auth | none |
@@ -36,11 +36,11 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `connect` | stub | xpst-auth | yes |
 | `dashboard` | stub | xpst-api | none |
 | `delete` | stub | xpst-core | yes |
-| `devices` | stub | xpst-auth | none |
+| `devices` | implemented | xpst-auth | none |
 | `diagnostics` | stub | xpst-cli | possible |
 | `disconnect` | stub | xpst-auth | yes |
 | `doctor` | implemented | xpst-cli | yes |
-| `failures clear` | stub | xpst-state | none |
+| `failures clear` | implemented | xpst-state | none |
 | `failures list` | implemented | xpst-state | none |
 | `failures retry` | stub | xpst-core | yes |
 | `followers` | stub | xpst-provider | yes |
@@ -48,28 +48,28 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `generate ideas` | stub | xpst-core | possible |
 | `health` | stub | xpst-provider | yes |
 | `kb add` | stub | xpst-store | possible |
-| `kb areas` | stub | xpst-store | none |
+| `kb areas` | implemented | xpst-store | none |
 | `kb course` | stub | xpst-store | none |
 | `kb doctor` | stub | xpst-store | none |
 | `kb migrate-store` | stub | xpst-store | none |
 | `kb organize` | stub | xpst-store | possible |
 | `kb query` | stub | xpst-store | none |
 | `kb reembed` | stub | xpst-store | possible |
-| `logs` | stub | xpst-cli | none |
-| `mcp list` | stub | xpst-mcp | none |
+| `logs` | implemented | xpst-cli | none |
+| `mcp list` | implemented | xpst-mcp | none |
 | `mcp start` | stub | xpst-mcp | none |
 | `media fetch` | stub | xpst-media | yes |
 | `media status` | implemented | xpst-media | none |
 | `messenger check-comments` | stub | xpst-provider | yes |
 | `messenger status` | implemented | xpst-provider | none |
 | `onboard` | stub | xpst-auth | yes |
-| `pair` | stub | xpst-auth | none |
+| `pair` | implemented | xpst-auth | none |
 | `plugins docs` | stub | xpst-cli | none |
 | `plugins list` | stub | xpst-cli | none |
 | `post` | stub | xpst-core | yes |
 | `preflight` | stub | xpst-core | none |
 | `providers` | implemented | xpst-provider | none |
-| `quota` | stub | xpst-state | none |
+| `quota` | implemented | xpst-state | none |
 | `readiness` | stub | xpst-cli | none |
 | `refresh-tokens` | stub | xpst-auth | yes |
 | `run` | stub | xpst-core | yes |
@@ -77,24 +77,24 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `schedule install` | stub | xpst-state | none |
 | `schedule list` | implemented | xpst-state | none |
 | `schedule pause` | implemented | xpst-state | none |
-| `schedule remove` | stub | xpst-state | none |
+| `schedule remove` | implemented | xpst-state | none |
 | `schedule resume` | implemented | xpst-state | none |
 | `schedule run` | stub | xpst-core | yes |
 | `search` | stub | xpst-store | none |
-| `security-audit` | stub | xpst-cli | none |
+| `security-audit` | implemented | xpst-cli | none |
 | `serve` | stub | xpst-core | yes |
 | `setup` | stub | xpst-auth | yes |
-| `state backup` | stub | xpst-state | none |
-| `state export` | stub | xpst-state | none |
-| `state import` | stub | xpst-state | none |
+| `state backup` | implemented | xpst-state | none |
+| `state export` | implemented | xpst-state | none |
+| `state import` | implemented | xpst-state | none |
 | `status` | implemented | xpst-state | none |
-| `stream app-credentials` | stub | xpst-provider | none |
-| `stream clear-key` | stub | xpst-provider | none |
-| `stream destinations` | stub | xpst-provider | none |
+| `stream app-credentials` | implemented | xpst-provider | none |
+| `stream clear-key` | implemented | xpst-provider | none |
+| `stream destinations` | implemented | xpst-provider | none |
 | `stream fetch-key` | stub | xpst-provider | yes |
 | `stream live` | stub | xpst-provider | yes |
-| `stream relay-config` | stub | xpst-provider | none |
-| `stream set-key` | stub | xpst-provider | none |
+| `stream relay-config` | implemented | xpst-provider | none |
+| `stream set-key` | implemented | xpst-provider | none |
 | `suggest-caption` | stub | xpst-core | possible |
 | `transcript` | stub | xpst-store | possible |
 | `ui` | stub | xpst-api | none |
@@ -128,6 +128,25 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `schedule pause` | xpst-state | Writes the same `schedule.paused.json` marker (0600, `json.dumps(indent=2)`) under the same `.schedule.lock`; payload byte-compared with the Python CLI. |
 | `schedule resume` | xpst-state | Removes only the pause marker (snapshots survive) and reports `was_paused`; payload byte-compared with the Python CLI. |
 | `failures list` | xpst-state | Dead-letter rows with status/resolved/age_hours, as `failures_list --json` reports them. |
+| `failures clear` | xpst-state | Clears the dead-letter queue through the same tolerant loader `status` uses (v1 migration included) and writes Python's `json.dump` separators, keeping `errors: {}` for the per-video form; payload byte-compared with the Python CLI (written keys sorted, not in read order). |
+| `state export` | xpst-state | Validates `state.json` as JSON and copies it byte-for-byte (mode preserved); payload and exported file byte-compared with the Python CLI. |
+| `state import` | xpst-state | Validates `posted_videos`, backs the current file up as `state.json.pre-import-<stamp>` and copies the source in; payload and resulting `state.json` byte-compared with the Python CLI. |
+| `state backup` | xpst-state | Snapshots `state.json` into `backups/state-<stamp>.json` with `--keep` rotation and the same `retained` count; payload byte-compared with the Python CLI. |
+| `quota` | xpst-state | Per-platform usage ledger with config-derived limits, midnight/hourly resets, the YouTube `videos.insert` bucket block and `auth_mode`; payload byte-compared with the Python CLI on default, seeded and config-limited profiles. |
+| `logs` | xpst-cli | Last 50 lines of `monitoring.log_file` (expanded the way `_expand_paths` expands it) and the `No log file found` payload; byte-compared with the Python CLI. |
+| `devices` | xpst-auth | Paired-device rows newest-first with the token hash removed, and `--revoke` writing the same `devices.json` (sorted keys, indent 2, 0600); payload byte-compared with the Python CLI. |
+| `pair` | xpst-auth | Issues a one-time pairing code (or the `--code` one) with the same alphabet, hashing, TTL floor and `devices.json` shape; payload byte-compared with the Python CLI on a fixed code. |
+| `stream destinations` | xpst-provider | The ingest-path registry plus per-platform key presence and fetch readiness (YouTube token, Twitch/Kick app credentials, Facebook page token) read from the encrypted store; payload byte-compared with the Python CLI. |
+| `stream app-credentials` | xpst-provider | Stored app-credential state (masked) and the registration steps for Twitch/Kick, with `--clear`; payload byte-compared with the Python CLI. |
+| `stream set-key` | xpst-provider | Validates the destination and writes it to the Fernet credential store under `stream_destination_<platform>`; payload byte-compared and the stored entry read back by the Python engine. |
+| `stream clear-key` | xpst-provider | Deletes `stream_destination_<platform>` from the credential store and reports `removed`; payload byte-compared with the Python CLI. |
+| `stream relay-config` | xpst-provider | Renders the MediaMTX relay YAML from the stored destinations (keys included on stdout, key-free summary with `--output`); payload and written file byte-compared with the Python CLI. |
+| `bio` | xpst-cli | Public and editor URLs with the dashboard API token read from the credential store and masked unless `--reveal`; payload byte-compared with the Python CLI on a seeded token. |
+| `security-audit` | xpst-cli | The six live checks (credential file modes, dashboard bind, MCP readonly, provider mode, ffmpeg, encrypted storage) with `indent=2` ASCII-escaped JSON; payload byte-compared with the Python CLI. |
+| `mcp list` | xpst-mcp | The captured Python tool registry in Python's order, rendered with `json.dumps(indent=2)`; payload byte-compared with the Python CLI. |
+| `app` | xpst-app | Locates the installed desktop shell in the same preference order and prints the same not-found guidance (exit 1); byte-compared with the Python CLI. |
+| `kb areas` | xpst-store | Discovered knowledge areas in course order (`order_index`, label, id) with their nugget counts, read from the workspace's `areas.json`; payload byte-compared with the Python CLI. |
+| `schedule remove` | xpst-state | Cancels one entry through the same local-store contract (`operation`/`scope`/`found`/`cancelled`/`entry`, `POST_NOT_FOUND` on an unknown id) with `--dry-run`; payload and resulting `schedule.json` byte-compared with the Python CLI. |
 
 ## Known deviations from the Python engine
 
