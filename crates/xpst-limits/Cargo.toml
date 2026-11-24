@@ -13,6 +13,9 @@ workspace = true
 
 [dependencies]
 fd-lock = "4.0.4"
+# Timestamp parsing/rendering for the read-only cooldown view. Already in the
+# workspace graph; no new package.
+jiff.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

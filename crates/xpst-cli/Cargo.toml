@@ -32,6 +32,9 @@ xpst-config.workspace = true
 # it lives in `xpst-core` so the HTTP planner and the scheduler can read the same
 # one, and this crate only supplies the machine-dependent half.
 xpst-core = { version = "1.3.0", path = "../xpst-core" }
+# The cooldown report (`rate_cooldowns.json`) is owned by the rate-limit crate so
+# `doctor`, `health` and the MCP tool render one document.
+xpst-limits = { version = "1.3.0", path = "../xpst-limits" }
 xpst-media.workspace = true
 # `mcp start` serves the agent surface in-process: one binary, one server. The
 # crate owns the transport and the async runtime, so the CLI stays synchronous.

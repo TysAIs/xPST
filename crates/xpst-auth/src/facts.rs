@@ -46,6 +46,9 @@ pub struct CredentialFacts {
     /// The local source path exists.
     #[serde(default)]
     pub local_path_exists: bool,
+    /// The configured local source path (`accounts.local.path`), verbatim.
+    #[serde(default)]
+    pub local_path: String,
     /// TikTok's browser-mode cookie jar exists (configured path or the
     /// `credentials/tiktok_cookies.txt` default).
     #[serde(default)]
@@ -83,6 +86,9 @@ pub struct CredentialFacts {
     /// Instagram/Meta Graph access token.
     #[serde(default)]
     pub graph_access_token: bool,
+    /// Instagram's Graph user id (`graph_ig_user_id`).
+    #[serde(default)]
+    pub graph_ig_user_id: bool,
     /// Threads user id.
     #[serde(default)]
     pub threads_user_id: bool,
@@ -105,6 +111,12 @@ pub struct CredentialFacts {
     /// Access-token expiry, epoch seconds, when the provider reports one.
     #[serde(default)]
     pub expires_at: Option<f64>,
+    /// TikTok's publishing provider (`local` / `zernio`).
+    #[serde(default)]
+    pub provider: String,
+    /// The aggregator's connected account id (TikTok `zernio` route).
+    #[serde(default)]
+    pub aggregator_account_id: String,
 }
 
 /// The probe's classification, when it produced one
@@ -163,12 +175,26 @@ pub struct ProbeResult {
     /// Probe classification details.
     #[serde(default)]
     pub details: ProbeDetails,
+    /// The probe's full `details` mapping, verbatim.
+    ///
+    /// `details` above carries only the classification the truth table reads;
+    /// this is the whole non-secret mapping the payload renders (TikTok's
+    /// `yt_dlp_path`, Instagram's `probe`, the local source's path flags). It is
+    /// a `Value` so an unknown key survives instead of being dropped.
+    #[serde(default)]
+    pub raw_details: serde_json::Value,
     /// The mode this particular check used, when it reports one.
     #[serde(default)]
     pub auth_mode: Option<String>,
     /// Encrypted credentials were found in the store.
     #[serde(default)]
     pub credentials_stored: bool,
+    /// The probe reported the role as configured (`raw["configured"]`).
+    ///
+    /// `provider_truth._configured` accepts this as proof the inputs exist, so
+    /// a probe that answers "configured" must not be overruled by a path check.
+    #[serde(default)]
+    pub configured: bool,
 }
 
 impl ProbeResult {

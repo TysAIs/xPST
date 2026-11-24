@@ -46,10 +46,10 @@ const CONFIG_LIMITED: [&str; 6] = ["youtube", "instagram", "x", "tiktok", "threa
 
 /// One `PlatformQuota` row.
 #[derive(Debug, Clone)]
-struct PlatformQuota {
-    platform: String,
-    daily_limit: i64,
-    used_today: i64,
+pub(crate) struct PlatformQuota {
+    pub(crate) platform: String,
+    pub(crate) daily_limit: i64,
+    pub(crate) used_today: i64,
     last_reset: String,
     hourly_limit: Option<i64>,
     used_this_hour: i64,
@@ -103,7 +103,7 @@ impl PlatformQuota {
     }
 
     /// `_check_reset`: zero the counters when the period has elapsed.
-    fn check_reset(&mut self, now: &jiff::ZonedDateTime) {
+    pub(crate) fn check_reset(&mut self, now: &jiff::ZonedDateTime) {
         if self.last_reset.is_empty() {
             self.last_reset = now.strftime("%Y-%m-%dT%H:%M:%S%.6f").to_string();
         } else if let Ok(previous) = parse_local(&self.last_reset) {
@@ -128,7 +128,7 @@ impl PlatformQuota {
     }
 
     /// `remaining_today()`: `None` when there is no daily cap.
-    fn remaining_today(&mut self, now: &jiff::ZonedDateTime) -> Option<i64> {
+    pub(crate) fn remaining_today(&mut self, now: &jiff::ZonedDateTime) -> Option<i64> {
         self.check_reset(now);
         if self.daily_limit <= 0 {
             return None;
@@ -143,13 +143,13 @@ fn parse_local(text: &str) -> Result<jiff::civil::DateTime, ()> {
 }
 
 /// The ledger, in insertion order.
-struct Quotas {
-    rows: Vec<PlatformQuota>,
+pub(crate) struct Quotas {
+    pub(crate) rows: Vec<PlatformQuota>,
 }
 
 impl Quotas {
     /// `_load_quotas`: the file, or the four defaults when it is absent/corrupt.
-    fn load(dir: &Path) -> Self {
+    pub(crate) fn load(dir: &Path) -> Self {
         let path = dir.join("quotas.json");
         if let Ok(text) = std::fs::read_to_string(&path) {
             // Parsed as YAML (JSON is a subset) so the ledger's key order — the
@@ -183,7 +183,7 @@ impl Quotas {
     }
 
     /// `_apply_config_limits`: config wins, and a change is persisted.
-    fn apply_config_limits(&mut self, view: &config_view::ConfigView) -> bool {
+    pub(crate) fn apply_config_limits(&mut self, view: &config_view::ConfigView) -> bool {
         let mut changed = false;
         for platform in CONFIG_LIMITED {
             let Some(limit) = view.section_int("rate_limits", platform) else {
@@ -209,7 +209,7 @@ impl Quotas {
     /// The ledger keeps the order the platforms were loaded in — Python writes
     /// `self.quotas.items()` — so the file is rendered from the ordered value
     /// type rather than a `serde_json::Map`, which would sort it.
-    fn save(&self, dir: &Path) -> Result<(), String> {
+    pub(crate) fn save(&self, dir: &Path) -> Result<(), String> {
         let mut map = xpst_config::Mapping::new();
         for row in &self.rows {
             map.insert(Value::from(row.platform.clone()), row.to_json());
