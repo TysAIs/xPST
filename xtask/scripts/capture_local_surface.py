@@ -896,8 +896,17 @@ def env_for(scenario: dict, profile: Path) -> dict[str, str]:
     # asks fds 0/1/2), so an interactive capture would record a different
     # fixture than CI. Pinning COLUMNS makes both engines agree everywhere.
     env["COLUMNS"] = "80"
+    # A scenario's HOME is a *config* sandbox, not a Python environment. A
+    # `pip install --user` puts the distribution metadata under
+    # `~/.local/lib/...`, so re-pointing HOME hides it and the engine dies with
+    # `PackageNotFoundError` before it parses an argument — which is how the
+    # config scenarios went red on a runner whose pip installs to the user site
+    # while passing on a developer machine with a system-wide install. Pin the
+    # user base to the one this process actually has.
+    user_base = env.get("PYTHONUSERBASE") or str(Path.home() / ".local")
     if scenario.get("config_dir"):
         env["HOME"] = str(profile)
+        env["PYTHONUSERBASE"] = user_base
     for name, value in scenario.get("env", {}).items():
         env[name] = value.replace("PROFILE", str(profile))
     return env

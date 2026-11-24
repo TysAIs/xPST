@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import importlib.metadata
 import json
 import logging
 import os
@@ -44,6 +43,8 @@ from typing import TYPE_CHECKING
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+
+from xpst.version import package_version
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -260,7 +261,7 @@ def _create_app(
     app = FastAPI(
         title="xPST Dashboard",
         description="xPST cross-posting analytics and health API",
-        version=importlib.metadata.version("xpst"),
+        version=package_version(),
     )
 
     # Prime the live-auth cache in the background so the Home screen's first
