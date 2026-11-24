@@ -1131,6 +1131,11 @@ def compare_scenarios(python: str, binary: str) -> int:
         expected = observe(scenario, [python, "-m", "xpst"])
         actual = observe(scenario, [binary])
         mode = scenario["compare"]
+        # A Python-side failure is the one thing the diff cannot explain on its
+        # own: the payload is null and the files are untouched, which reads the
+        # same whether the command is unimplemented or the environment is
+        # missing a dependency. Carry the engine's own stderr into the report.
+        python_failed = expected["exit_code"] != 0 and expected["stderr"].strip()
 
         if mode == "json":
             if actual["payload"] is None:
@@ -1217,6 +1222,13 @@ def compare_scenarios(python: str, binary: str) -> int:
                 )
         else:
             mismatches.append(f"{name}: unknown compare mode `{mode}`")
+
+        if python_failed and mismatches and mismatches[-1].startswith(f"{name}:"):
+            tail = expected["stderr"].strip().splitlines()[-12:]
+            mismatches.append(
+                f"{name}: python exited {expected['exit_code']}, stderr:\n"
+                + "\n".join(f"    {line}" for line in tail)
+            )
 
     if mismatches:
         print(f"{len(mismatches)} mismatch(es) across {len(SCENARIOS)} scenarios:")
