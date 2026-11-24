@@ -456,19 +456,69 @@ fn is_executable_file(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::{OsStr, OsString};
     use std::sync::{Mutex, MutexGuard};
 
-    /// Serializes the tests that mutate process-global environment variables
-    /// (`XPST_FFMPEG_PATH`, `XPST_MEDIA_BIN_DIR`, `PATH`): cargo runs tests in
-    /// one process, so two of them racing on `PATH` makes both flaky.
+    /// Serializes every test that reads or writes a process-global variable the
+    /// resolver consults (`PATH`, `XPST_FFMPEG_PATH`, `XPST_FFPROBE_PATH`,
+    /// `XPST_MEDIA_BIN_DIR`, `XPST_CONFIG_DIR`, `HOME`).
+    ///
+    /// Cargo runs a module's tests in one process on parallel threads, so a
+    /// *reader* that skips this lock can observe another test's temporary value.
+    /// That is exactly how `finds_a_binary_that_exists_on_path` came to fail
+    /// roughly one run in seven: it called `which("sh")` while
+    /// `a_fetched_copy_is_found_when_nothing_else_resolves` held `PATH=""`.
+    /// Readers take the guard too — the lock protects the environment, not just
+    /// the writers.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn env_guard() -> MutexGuard<'static, ()> {
         ENV_LOCK.lock().unwrap_or_else(|poison| poison.into_inner())
     }
 
+    /// Sets or removes one variable for the duration of a test and restores the
+    /// previous value on drop — including while unwinding.
+    ///
+    /// A panicking test must not leave `PATH=""` behind for every test that runs
+    /// after it: without this, one real failure would cascade into the whole
+    /// module and hide which test actually broke.
+    ///
+    /// Declare the `env_guard()` binding *before* any `EnvVar`: locals drop in
+    /// reverse order, so the restore then happens while the lock is still held
+    /// and no sibling test can observe the half-restored environment.
+    struct EnvVar {
+        key: &'static str,
+        saved: Option<OsString>,
+    }
+
+    impl EnvVar {
+        fn set(key: &'static str, value: impl AsRef<OsStr>) -> Self {
+            let saved = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, saved }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let saved = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self { key, saved }
+        }
+    }
+
+    impl Drop for EnvVar {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     #[test]
     fn finds_a_binary_that_exists_on_path() {
+        // A reader, but it still takes the guard: `which` reads `PATH`, and a
+        // sibling test empties `PATH` while it holds the lock.
+        let _guard = env_guard();
         // `sh` exists on every unix host this repo builds on.
         let found = which("sh");
         assert!(found.is_some(), "expected `sh` on PATH");
@@ -477,35 +527,29 @@ mod tests {
 
     #[test]
     fn reports_absent_binaries_as_absent_instead_of_panicking() {
+        // `resolve` reads `PATH`, `HOME` and `XPST_MEDIA_BIN_DIR`.
+        let _guard = env_guard();
         let tool = resolve("definitely-not-a-real-binary-xyz", "XPST_TEST_NOPE");
         assert!(tool.is_none());
     }
 
     #[test]
     fn honours_the_env_override_only_when_the_path_exists() {
+        let _guard = env_guard();
+        let _override = EnvVar::set("XPST_TEST_OVERRIDE", "/nonexistent/ffmpeg-xyz");
         // A path that cannot exist falls through to PATH/system discovery.
-        std::env::set_var("XPST_TEST_OVERRIDE", "/nonexistent/ffmpeg-xyz");
         let found = resolve("sh", "XPST_TEST_OVERRIDE");
         assert!(found.is_some());
         assert_ne!(found.as_deref(), Some("/nonexistent/ffmpeg-xyz"));
-        std::env::remove_var("XPST_TEST_OVERRIDE");
     }
 
     #[test]
     fn media_bin_dir_is_under_xpst_home() {
         let _guard = env_guard();
-        let saved_bin = std::env::var_os("XPST_MEDIA_BIN_DIR");
-        let saved_config = std::env::var_os("XPST_CONFIG_DIR");
-        std::env::remove_var("XPST_MEDIA_BIN_DIR");
-        std::env::remove_var("XPST_CONFIG_DIR");
+        let _bin = EnvVar::remove("XPST_MEDIA_BIN_DIR");
+        let _config = EnvVar::remove("XPST_CONFIG_DIR");
         if let Some(dir) = media_bin_dir() {
             assert!(dir.ends_with(".xpst/bin"), "{dir:?}");
-        }
-        if let Some(value) = saved_bin {
-            std::env::set_var("XPST_MEDIA_BIN_DIR", value);
-        }
-        if let Some(value) = saved_config {
-            std::env::set_var("XPST_CONFIG_DIR", value);
         }
     }
 
@@ -522,7 +566,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        std::env::set_var("XPST_FFMPEG_PATH", &binary);
+        let _ffmpeg = EnvVar::set("XPST_FFMPEG_PATH", &binary);
         let rows = status();
         let ffmpeg = rows.iter().find(|row| row.name == "ffmpeg").unwrap();
         assert!(ffmpeg.ok);
@@ -531,7 +575,6 @@ mod tests {
             ffmpeg.path.as_deref(),
             Some(binary.to_string_lossy().as_ref())
         );
-        std::env::remove_var("XPST_FFMPEG_PATH");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -539,6 +582,9 @@ mod tests {
     fn a_fetched_binary_is_reported_as_fetched() {
         // The classification is what `media status` prints; assert it directly
         // rather than depending on which binaries this host happens to have.
+        // Every input is an argument here, so this test reads no environment
+        // variable and needs no `env_guard()` — the audit that fixed the `PATH`
+        // race checked that, rather than assuming it.
         let dir = std::env::temp_dir().join(format!("xpst-media-fetched-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -565,20 +611,10 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let saved_bin = std::env::var_os("XPST_MEDIA_BIN_DIR");
-        let saved_path = std::env::var_os("PATH");
-        std::env::set_var("XPST_MEDIA_BIN_DIR", &dir);
-        std::env::set_var("PATH", "");
+        let _bin = EnvVar::set("XPST_MEDIA_BIN_DIR", &dir);
+        let _path = EnvVar::set("PATH", "");
         let found = resolve("xpst-test-binary", "XPST_TEST_BINARY_PATH");
         assert_eq!(found.as_deref(), Some(binary.to_string_lossy().as_ref()));
-        if let Some(value) = saved_bin {
-            std::env::set_var("XPST_MEDIA_BIN_DIR", value);
-        } else {
-            std::env::remove_var("XPST_MEDIA_BIN_DIR");
-        }
-        if let Some(value) = saved_path {
-            std::env::set_var("PATH", value);
-        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
