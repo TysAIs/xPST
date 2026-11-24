@@ -8,6 +8,7 @@
 //! documents and `xpst-cli` depends on this crate, not the other way round.
 
 pub mod activity;
+pub mod analytics;
 pub mod auth_start;
 pub mod best_time;
 pub mod bio;
@@ -16,6 +17,7 @@ pub mod capabilities;
 pub mod chat;
 pub mod config_show;
 pub mod followers;
+pub mod generate;
 pub mod kb;
 pub mod preflight;
 pub mod providers;

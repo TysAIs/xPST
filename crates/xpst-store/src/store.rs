@@ -701,19 +701,66 @@ impl Store {
             .query_row(
                 "SELECT * FROM cross_post_groups WHERE content_hash = ?",
                 params![content_hash],
-                |row| {
-                    Ok(CrossPostGroup {
-                        content_hash: row.get("content_hash")?,
-                        video_id: row.get("video_id")?,
-                        caption: row.get("caption")?,
-                        source_url: row.get("source_url")?,
-                        created_at: row.get("created_at")?,
-                        platforms_json: row.get("platforms_json")?,
-                    })
-                },
+                cross_post_group_from_row,
             )
             .optional()?)
     }
+
+    /// `AnalyticsStore.get_cross_post_groups()` — newest first.
+    ///
+    /// Python's default is `limit=50, offset=0`; the MCP tool takes no
+    /// arguments, so the defaults are the contract.
+    pub fn get_cross_post_groups(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<CrossPostGroup>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "
+            SELECT * FROM cross_post_groups
+            ORDER BY created_at DESC LIMIT ? OFFSET ?
+            ",
+        )?;
+        let mut query = stmt.query(params![limit, offset])?;
+        let mut rows = Vec::new();
+        while let Some(row) = query.next()? {
+            rows.push(cross_post_group_from_row(row)?);
+        }
+        Ok(rows)
+    }
+
+    /// `AnalyticsStore.latest_for_post()` — every snapshot for one post,
+    /// oldest first, so the last element is the most recent.
+    pub fn latest_for_post(
+        &self,
+        platform: &str,
+        post_id: &str,
+    ) -> Result<Vec<SnapshotRow>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "
+            SELECT * FROM metric_snapshots
+            WHERE platform = ? AND post_id = ?
+            ORDER BY captured_at ASC
+            ",
+        )?;
+        let mut query = stmt.query(params![platform, post_id])?;
+        let mut rows = Vec::new();
+        while let Some(row) = query.next()? {
+            rows.push(snapshot_from_row(row)?);
+        }
+        Ok(rows)
+    }
+}
+
+fn cross_post_group_from_row(row: &rusqlite::Row<'_>) -> Result<CrossPostGroup, rusqlite::Error> {
+    Ok(CrossPostGroup {
+        content_hash: row.get("content_hash")?,
+        video_id: row.get("video_id")?,
+        caption: row.get("caption")?,
+        source_url: row.get("source_url")?,
+        created_at: row.get("created_at")?,
+        platforms_json: row.get("platforms_json")?,
+    })
 }
 
 fn snapshot_from_row(row: &rusqlite::Row<'_>) -> Result<SnapshotRow, rusqlite::Error> {
