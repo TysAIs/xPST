@@ -4119,6 +4119,7 @@ version = "1.3.0"
 dependencies = [
  "jiff",
  "serde_json",
+ "uuid",
  "xpst-auth",
  "xpst-authflow",
  "xpst-config",

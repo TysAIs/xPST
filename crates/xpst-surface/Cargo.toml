@@ -22,6 +22,7 @@ xpst-core = { path = "../xpst-core" }
 xpst-media = { path = "../xpst-media" }
 xpst-state = { workspace = true }
 xpst-store = { path = "../xpst-store" }
+uuid = { workspace = true }
 
 [lints]
 workspace = true

@@ -155,6 +155,87 @@ READ_ONLY_CALLS = [
             "caption": "parity fixture",
         },
     ),
+    # `xpst_auth_start` is a static plan from the provider registry: no network,
+    # no browser, no secret. `local` is a real provider with no docs URL, so the
+    # payload carries `docs_url: null`; the two unknown shapes are the
+    # `UNKNOWN_PROVIDER` document.
+    ("xpst_auth_start", {"platform": "youtube"}),
+    ("xpst_auth_start", {"platform": "local"}),
+    ("xpst_auth_start", {"platform": "nope"}),
+    ("xpst_auth_start", {}),
+    # The setup transaction. These are read-only-classified (not in
+    # `_MUTATING_TOOLS`) but they DO write `setup_transaction.json`, so they run
+    # last: nothing else in the fixture reads that file. The sequence walks the
+    # state machine — refusals first, while no transaction exists, then a real
+    # transaction through step progress, readiness merges, deferral, errors and
+    # reset.
+    ("xpst_setup_status", {}),
+    (
+        "xpst_setup_start",
+        {"selected_role_capabilities": [{"role": "source", "capability": "my_token"}]},
+    ),
+    ("xpst_setup_start", {"selected_role_capabilities": "source:tiktok"}),
+    (
+        "xpst_setup_start",
+        {"selected_role_capabilities": [{"role": "nope", "capability": "tiktok"}]},
+    ),
+    # A non-iterable selection is a Python `TypeError` the handler does not
+    # catch, so the body is `Error: 'int' object is not iterable` — not the
+    # `SETUP_REQUEST_INVALID` document.
+    ("xpst_setup_start", {"selected_role_capabilities": 5}),
+    ("xpst_setup_start", {}),
+    ("xpst_setup_status", {}),
+    (
+        "xpst_setup_resume",
+        {"step_id": "verify_source_tiktok", "step_state": "in_progress"},
+    ),
+    (
+        "xpst_setup_resume",
+        {
+            "readiness": {
+                "sources": [{"capability": "tiktok", "verified": True, "live_ready": True}]
+            }
+        },
+    ),
+    # A destination that is verified but NOT live-ready: the step goes to
+    # `error` and the transaction stays in progress, so the rows below exercise
+    # the real state machine instead of the completed-transaction early return.
+    (
+        "xpst_setup_resume",
+        {"readiness": {"video_destinations": {"youtube": {"verified": True, "live_ready": False}}}},
+    ),
+    ("xpst_setup_resume", {"readiness": {"sources": ["instagram"]}}),
+    ("xpst_setup_resume", {"step_id": "nope", "step_state": "verified"}),
+    ("xpst_setup_resume", {"step_id": "verify_source_tiktok"}),
+    ("xpst_setup_resume", {"finish_later": True}),
+    ("xpst_setup_resume", {"error": {"code": "AUTH_REQUIRED"}}),
+    ("xpst_setup_resume", {"error": "token leaked"}),
+    (
+        "xpst_setup_resume",
+        {"step_updates": {"verify_video_destination_x": {"state": "waiting_human"}}},
+    ),
+    # Now the destination is live-ready too, so completion is derived and the
+    # transaction flips to `completed`.
+    ("xpst_setup_resume", {"readiness": {"video_destinations": {"youtube": True}}}),
+    # A resume on a completed transaction is the early return: the step is not
+    # touched and no error is raised.
+    ("xpst_setup_resume", {"step_id": "nope", "step_state": "verified"}),
+    (
+        "xpst_setup_reset",
+        {"transaction_id": "00000000-0000-4000-8000-000000000000"},
+    ),
+    ("xpst_setup_reset", {}),
+    ("xpst_setup_status", {}),
+    (
+        "xpst_setup_start",
+        {
+            "selected_role_capabilities": [
+                {"role": "source", "capability": "youtube"},
+                "video_destination:x",
+            ]
+        },
+    ),
+    ("xpst_setup_reset", {}),
 ]
 
 # Calls that write the local profile, in the `default` scenario only, after
@@ -192,6 +273,19 @@ MASK_CHECKS = {"xpst_readiness": ["python"]}
 # `checked_at` on every call, so two runs never agree on it; the key is replaced
 # with a fixed marker and the rest of the document is still byte-compared.
 MASK_FIELDS = {"xpst_chat": ["checked_at"]}
+
+# Keys whose STRING value is a clock reading or a random identifier, replaced at
+# any depth. The setup transaction stamps `created_at`/`updated_at` on every
+# write, `started_at`/`completed_at` on every step transition and `verified_at`
+# on every readiness entry, and mints a fresh v4 `transaction_id` — none of them
+# is reproducible, and all of them are the document's own bookkeeping rather
+# than its verdict. A `null` is left alone so "never stamped" is still compared.
+MASK_KEYS = {
+    "xpst_setup_start": ["transaction_id", "created_at", "updated_at", "started_at", "completed_at", "verified_at"],
+    "xpst_setup_status": ["transaction_id", "created_at", "updated_at", "started_at", "completed_at", "verified_at"],
+    "xpst_setup_resume": ["transaction_id", "created_at", "updated_at", "started_at", "completed_at", "verified_at"],
+    "xpst_setup_reset": ["transaction_id", "created_at", "updated_at", "started_at", "completed_at", "verified_at"],
+}
 
 # Helper scripts the readiness and security checks probe. Pinned so the
 # `ffmpeg_available` / helper rows are the fixture's, not the machine's.
@@ -301,6 +395,22 @@ SCENARIOS = [
 ]
 
 
+def mask_clock(value, keys: list[str]):
+    """Replace the STRING value of any named key, at any depth, with `<CLOCK>`.
+
+    A `null` is left alone: "never stamped" is a fact worth comparing, and
+    masking it would hide a step that stopped being touched.
+    """
+    if isinstance(value, dict):
+        return {
+            key: ("<CLOCK>" if key in keys and isinstance(item, str) else mask_clock(item, keys))
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [mask_clock(item, keys) for item in value]
+    return value
+
+
 def fnv1a64(text: str) -> str:
     value = 0xCBF29CE484222325
     for byte in text.encode("utf-8"):
@@ -385,6 +495,17 @@ def requests_for(scenario: str) -> list[dict]:
                             "app_secret": "parity-secret-2",
                         },
                     },
+                }
+            )
+            # The setup transaction is the other deliberate carve-out: first-run
+            # onboarding happens before an operator opts into mutations, so
+            # `xpst_setup_start` must still work with mutations disabled.
+            steps.append(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 120,
+                    "method": "tools/call",
+                    "params": {"name": "xpst_setup_start", "arguments": {}},
                 }
             )
     ids = [step["id"] for step in steps if "id" in step]
@@ -526,6 +647,16 @@ def run_scenario(python: str, scenario: dict) -> dict:
                         check["message"] = "<ENV>"
                         check["details"] = "<ENV>"
                 text = json.dumps(payload, default=str)
+            mask_keys = MASK_KEYS.get(tool, [])
+            if mask_keys:
+                # A handler that raised serves `Error: <sentence>`, not JSON;
+                # there is nothing to mask in it.
+                try:
+                    payload = json.loads(text)
+                except json.JSONDecodeError:
+                    payload = None
+                if payload is not None:
+                    text = json.dumps(mask_clock(payload, mask_keys), default=str)
             recorded.append(
                 {
                     "id": step["id"],
@@ -537,6 +668,7 @@ def run_scenario(python: str, scenario: dict) -> dict:
                     "is_error": bool(result.get("isError")),
                     "mask_checks": mask_checks,
                     "mask_fields": mask_fields,
+                    "mask_keys": mask_keys,
                     "multiline": multiline,
                     "text": text,
                 }

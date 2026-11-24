@@ -26,5 +26,6 @@ pub mod preflight;
 pub mod provider_status;
 pub mod readiness;
 pub mod security;
+pub mod setup_transaction;
 pub mod stream;
 pub mod transcript;
