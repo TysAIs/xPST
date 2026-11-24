@@ -27,7 +27,25 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 45;
+const EXPECTED_SCENARIOS: usize = 47;
+
+/// The environment both engines are run under, whatever the caller inherited.
+///
+/// The capture script pins the same block (`PINNED_ENV` in
+/// `xtask/scripts/capture_local_surface.py`) and records it in the fixture, so
+/// a capture and a replay cannot disagree about the environment. A scenario's
+/// own `env` is applied after these and therefore overrides them.
+const PINNED_ENV: &[(&str, &str)] = &[
+    // `ScheduleManager._tz` is `local_zone()`, which reads TZ first, so an
+    // entry with no `timezone` field renders in the machine zone.
+    ("TZ", "UTC"),
+    // rich's log stamp is `[%x %X]`; a locale that Python adopted would change
+    // it, and stderr is part of a mismatch report.
+    ("LC_ALL", "C"),
+    ("LANG", "C"),
+    // A payload that serialises a set would otherwise vary between runs.
+    ("PYTHONHASHSEED", "0"),
+];
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -117,6 +135,11 @@ fn run(
 ) -> (i32, String, String) {
     let mut command = Command::new(binary);
     command.args(argv).env("XPST_CONFIG_DIR", config_dir);
+    // The pinned environment first; the scenario's own `env` is applied after
+    // and therefore wins.
+    for (name, value) in PINNED_ENV {
+        command.env(name, value);
+    }
     for (name, value) in env {
         command.env(
             name,
@@ -301,6 +324,26 @@ fn assert_files_match(row: &Value, profile: &Profile, scenario: &str) {
             "scenario `{scenario}`: {relative} differs from the Python engine"
         );
     }
+}
+
+#[test]
+fn the_fixture_records_the_environment_this_test_pins() {
+    // The capture and the replay are two programs; if they pin different
+    // environments the fixture is a record of a run this test never repeats,
+    // and the difference shows up as a payload mismatch with no cause.
+    let document = document();
+    let recorded = document
+        .get("environment")
+        .and_then(Value::as_object)
+        .expect("the fixture records the pinned environment");
+    let expected: serde_json::Map<String, Value> = PINNED_ENV
+        .iter()
+        .map(|(name, value)| (name.to_string(), Value::String(value.to_string())))
+        .collect();
+    assert_eq!(
+        recorded, &expected,
+        "the fixture was captured under a different environment than this test replays"
+    );
 }
 
 #[test]

@@ -9,9 +9,16 @@ engine to the shipped behaviour instead of to somebody's reading of it.
 
 Notes on determinism (the fixture is checked in and runs on every OS):
 
+* the harness pins the four environment variables that can change a rendering
+  (`PINNED_ENV`): `TZ`, `LC_ALL`, `LANG` and `PYTHONHASHSEED`. A scenario's
+  `env` may override any of them, and the fixture records the block so the Rust
+  replay applies exactly the same values;
 * every `scheduled_time` in the fixture carries an explicit UTC offset *and* a
   `timezone` field, so `scheduled_time_local` renders identically in any machine
-  zone;
+  zone. An entry *without* a `timezone` field renders in the machine zone, which
+  is why `TZ` is pinned — `schedule_list_pinned_zone` is the row that proves the
+  pin is applied, and `schedule_list_machine_zone` overrides it to prove both
+  engines read `TZ` rather than hardcoding UTC;
 * a snapshot's `modified_at` is machine-local by definition, so it is stripped
   from the recorded payload and the epoch it was set to is recorded instead —
   the test asserts the string round-trips to that instant;
@@ -41,6 +48,23 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 FIXTURE = REPO / "crates/xpst-cli/tests/fixtures/local_surface.json"
 SNAPSHOT_EPOCH = 1767225600  # 2026-01-01T00:00:00Z
+
+#: The environment both engines are run under, whatever the caller inherited.
+#: A scenario's `env` overrides any entry here (that is how a row proves a value
+#: *does* matter); the fixture records this block and
+#: `crates/xpst-cli/tests/local_surface.rs` replays exactly it, so a capture and
+#: a replay can never disagree about the environment.
+PINNED_ENV = {
+    # `ScheduleManager._tz` is `local_zone()`, which reads TZ first, so an entry
+    # with no `timezone` field renders in the machine zone.
+    "TZ": "UTC",
+    # rich's log stamp is `[%x %X]`; a locale that Python adopted would change
+    # it, and stderr is part of a mismatch report.
+    "LC_ALL": "C",
+    "LANG": "C",
+    # A payload that serialises a set would otherwise vary between runs.
+    "PYTHONHASHSEED": "0",
+}
 
 RICH_STATE = {
     "version": 2,
@@ -90,6 +114,17 @@ SCHEDULE_ENTRIES = [
     {"id": "id-bad", "caption": "no time", "status": "weird"},
     7,
 ]
+
+#: An entry with a `scheduled_time` but **no** `timezone` field: the rendering
+#: falls back to the machine zone, so it is the one shape that makes `TZ` matter.
+ZONE_ENTRY = {
+    "id": "id-zone",
+    "video_path": "",
+    "caption": "no timezone field",
+    "scheduled_time": "2026-03-01T12:00:00+00:00",
+    "platforms": [],
+    "status": "pending",
+}
 
 #: A config with one secret-looking value, so `config export` masking is
 #: exercised rather than assumed.
@@ -503,6 +538,26 @@ SCENARIOS = [
         "seed": {"schedule.json": json.dumps(SCHEDULE_ENTRIES[:1])},
         "compare": "json",
     },
+    # ── the environment the harness pins (t_d919ab2e) ─────────────────────
+    {
+        # No `timezone` field, no per-scenario override: the rendering is the
+        # pinned `TZ=UTC`. Delete the pin and this row renders in the machine
+        # zone instead, which is exactly the failure the pin exists to prevent.
+        "name": "schedule_list_pinned_zone",
+        "argv": ["schedule", "list", "--json"],
+        "seed": {"schedule.json": json.dumps([ZONE_ENTRY])},
+        "compare": "json",
+    },
+    {
+        # The same entry under a zone 14 hours ahead: both engines must follow
+        # `TZ` rather than hardcoding UTC, so the pin above cannot be hiding a
+        # machine-zone path that only one engine implements.
+        "name": "schedule_list_machine_zone",
+        "argv": ["schedule", "list", "--json"],
+        "seed": {"schedule.json": json.dumps([ZONE_ENTRY])},
+        "env": {"TZ": "Pacific/Kiritimati"},
+        "compare": "json",
+    },
 ]
 
 
@@ -544,6 +599,9 @@ def config_dir_for(scenario: dict, profile: Path) -> Path:
 
 def env_for(scenario: dict, profile: Path) -> dict[str, str]:
     env = dict(os.environ)
+    # Pin the rendering variables first; a scenario's own `env` is applied last
+    # so a row can deliberately vary one of them.
+    env.update(PINNED_ENV)
     env["XPST_CONFIG_DIR"] = str(config_dir_for(scenario, profile))
     env["PYTHONPATH"] = str(REPO / "src")
     # A scenario's HOME is a *config* sandbox, not a Python environment. A
@@ -788,11 +846,14 @@ def main() -> None:
     payload = {
         "schema_version": 1,
         "captured_from": {"repo": "TysAIs/xPST", "source": "src/xpst/cli.py"},
+        "environment": PINNED_ENV,
         "note": (
             "Captured by running the shipped Python CLI against scratch profiles. "
-            "scheduled_time values carry an explicit offset plus a timezone field so "
-            "the local rendering is machine-independent; snapshot modified_at is "
-            "stripped and its epoch recorded instead."
+            "`environment` is the block both engines are run under (a scenario's "
+            "`env` overrides it); scheduled_time values carry an explicit offset "
+            "plus a timezone field so the local rendering is machine-independent, "
+            "and an entry without one renders in the pinned TZ; snapshot "
+            "modified_at is stripped and its epoch recorded instead."
         ),
         "scenario_count": len(records),
         "scenarios": records,
