@@ -921,7 +921,17 @@ SCENARIOS = [
     {
         "name": "security_audit",
         "argv": ["security-audit", "--json"],
-        "seed": {"config.yaml": "version: 4\n"},
+        # `ffmpeg_available` is a property of the machine: the check is
+        # `resolve_ffmpeg_path() is not None`, so a runner without ffmpeg
+        # reports "FFmpeg not found" and flips `overall_status` to fail. Pin a
+        # stub through `XPST_FFMPEG_PATH` the way the readiness rows do, so the
+        # captured payload is the fixture's and not the host's.
+        "seed": {
+            "config.yaml": "version: 4\n",
+            "bin/ffmpeg": "#!/bin/sh\necho \"ffmpeg version 9.9.9-test\"\n",
+        },
+        "executable": ["bin/ffmpeg"],
+        "env": {"XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg"},
         "compare": "json",
     },
     {

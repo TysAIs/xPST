@@ -4517,10 +4517,14 @@
         "--json"
       ],
       "seed": {
-        "config.yaml": "version: 4\n"
+        "config.yaml": "version: 4\n",
+        "bin/ffmpeg": "#!/bin/sh\necho \"ffmpeg version 9.9.9-test\"\n"
       },
       "compare": "json",
       "exit_code": 0,
+      "env": {
+        "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg"
+      },
       "stdout_json": {
         "overall_status": "pass",
         "checks": [
