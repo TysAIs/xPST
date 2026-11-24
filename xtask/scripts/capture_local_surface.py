@@ -1265,7 +1265,7 @@ SCENARIOS = [
         "name": "byo_set_ok",
         "argv": ["byo", "set", "instagram", "--app-id", "1234567890", "--json"],
         "seed": {},
-        "env": {"XPST_INSTAGRAM_APP_SECRET": "abcdefgh12345678"},
+        "env": {"XPST_INSTAGRAM_APP_SECRET": "SYNTHETIC_instagram_app_secret_0001"},
         "compare": "stdout",
     },
     {

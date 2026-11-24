@@ -5477,7 +5477,7 @@
       "compare": "stdout",
       "exit_code": 0,
       "env": {
-        "XPST_INSTAGRAM_APP_SECRET": "abcdefgh12345678"
+        "XPST_INSTAGRAM_APP_SECRET": "SYNTHETIC_instagram_app_secret_0001"
       },
       "stdout": "{\"ok\": true, \"platform\": \"instagram\", \"display_name\": \"Instagram Reels\", \"configurable\": true, \"configured\": true, \"half_configured\": false, \"app_id_masked\": \"\u20267890\", \"source\": \"encrypted-store\", \"id_label\": \"Meta App ID\", \"secret_label\": \"Meta App Secret\", \"redirect_uri\": \"http://localhost:8888/callback\", \"scopes\": [\"instagram_basic\", \"instagram_content_publish\", \"pages_show_list\", \"pages_read_engagement\"], \"create_url\": \"https://developers.facebook.com/apps\", \"docs_url\": \"https://developers.facebook.com/docs/graph-api/get-started/getting-access-tokens/about-user-access-tokens#standard-access\", \"enables\": \"Publishing Reels to your own account through the official Instagram Platform API. As the app owner you stay in Meta's Standard Access: no App Review and no Business Verification.\", \"sign_in_available\": true, \"env_vars\": [\"XPST_INSTAGRAM_APP_ID\", \"XPST_INSTAGRAM_APP_SECRET\"]}\n"
     },
