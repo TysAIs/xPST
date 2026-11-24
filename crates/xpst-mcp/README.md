@@ -22,14 +22,24 @@ That is a structural property here, not a review checklist:
   from the Python registry into `tests/fixtures/python_tool_registry.json`, and
   the registry refuses to build if a row has no Python definition.
 
-## Ported tools (read-only, no network)
+## Ported tools (local, no network)
 
-| Tool | Reads | Notes |
+Every tool here answers from files the engine already wrote, or writes one of
+those files itself. None opens a socket. The four schedule writers are the
+mutating half of that set: they are consent-gated exactly as Python gates them
+(`xpst_schedule_pause` is deliberately *not* gated — stopping a queue is always
+safe).
+
+| Tool | Store | Notes |
 |---|---|---|
 | `xpst_config_show` | `$XPST_CONFIG_DIR/config.yaml` | Secrets masked by the ported masker (`xpst-config`). Returns the Python projection (`accounts.*`, `video`, `monitoring`, `schedule`). |
 | `xpst_status` | `state.json` | `StateManager.get_statistics()` field-for-field, including the `historical`/`platform_health_note` honesty markers. |
 | `xpst_rate_limit_status` | `rate_cooldowns.json` | `cooldown_report()`: idle records omitted, same duration strings, same fixed sentence. |
 | `xpst_schedule_list` | `schedule.json`, `schedule.paused.json`, `schedule.json.paused-*` | Sorted entries with `scheduled_time_local`, pause state, and the snapshot note that stops an empty queue reading as "deleted". |
+| `xpst_schedule_add` | writes `schedule.json` | `_handle_schedule_add`: `datetime.fromisoformat` on `scheduled_time` (its accept/reject set and its error sentences are the wire contract), the add-time route plan with readiness off, then `ScheduleManager.add`'s validation order and the UTC store write. A text post (no `video_path`) is stored as `content_type=text`. |
+| `xpst_schedule_cancel` | writes `schedule.json` | `recovery_service.cancel_scheduled_post` verbatim: `ok` is `found`, `cancelled` only after a real removal, `POST_NOT_FOUND` on an unknown id. The CLI adds a `removed` key and an `entry_id` inside `error`; this tool does not. |
+| `xpst_schedule_pause` | writes `schedule.paused.json` | `{"paused": true, "already_paused": …, paused_at, reason}` — the marker's own fields follow the two verdict keys, so a second pause reports the first reason. |
+| `xpst_schedule_resume` | removes `schedule.paused.json` | `{"paused": false, "was_paused": …}`. Snapshots are left alone: deleting one would destroy the only copy of a renamed queue. |
 | `xpst_providers` | captured provider catalog | Provider metadata only — no credentials, no network, no per-install state. |
 | `xpst_readiness` | `config.yaml`, credential store, helper binaries | `build_readiness_report()`: the same checks, summary and role rows the CLI prints, wrapped in `{ok, contract_version, readiness}`. Compact render, as Python's handler does. |
 | `xpst_security_audit` | `config.yaml`, credential file modes, env | `run_security_checks()`: every check reports what was observed; `dashboard_localhost` is `unobserved` because a CLI process never binds the socket. |
@@ -71,10 +81,6 @@ ledger), or it writes through an engine service that does not exist in Rust yet.
 | `xpst_run` | runs the posting pipeline, which is not ported |
 | `xpst_post` | publishes through provider adapters, which are not ported |
 | `xpst_analytics` | reads analytics.db and can refresh from platform APIs |
-| `xpst_schedule_add` | writes the schedule store through Python services, which are not ported |
-| `xpst_schedule_cancel` | mutates the schedule store through Python services, which are not ported |
-| `xpst_schedule_pause` | writes the pause marker through Python services, which are not ported |
-| `xpst_schedule_resume` | releases the pause marker through Python services, which are not ported |
 | `xpst_failures_retry` | re-uploads through provider adapters, which are not ported |
 | `xpst_health` | probes every platform over the network |
 | `xpst_backfill` | re-posts through provider adapters, which are not ported |

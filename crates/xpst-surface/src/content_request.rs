@@ -110,7 +110,19 @@ impl DestinationOverride {
 pub fn parse_destination_texts(
     raw: Option<&Value>,
 ) -> Result<BTreeMap<String, String>, ContentContractError> {
-    let mut texts = BTreeMap::new();
+    Ok(parse_destination_texts_ordered(raw)?.into_iter().collect())
+}
+
+/// `parse_destination_texts` with the caller's key order preserved.
+///
+/// Python's `dict` keeps insertion order, and `xpst_schedule_add` persists the
+/// overrides into the schedule entry — so a two-key payload must reach the store
+/// in the order the caller wrote it. The `BTreeMap` form above is right for a
+/// lookup table and wrong for a document.
+pub fn parse_destination_texts_ordered(
+    raw: Option<&Value>,
+) -> Result<Vec<(String, String)>, ContentContractError> {
+    let mut texts: Vec<(String, String)> = Vec::new();
     let Some(Value::Object(map)) = raw else {
         return Ok(texts);
     };
@@ -119,7 +131,7 @@ pub fn parse_destination_texts(
         let key = name.trim().to_lowercase();
         if !key.is_empty() {
             if let Some(text) = over.text {
-                texts.insert(key, text);
+                texts.push((key, text));
             }
         }
     }
