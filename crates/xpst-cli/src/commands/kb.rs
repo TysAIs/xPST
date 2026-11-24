@@ -755,7 +755,13 @@ fn check_queue(queue: &[QueueItem]) -> Vec<Finding> {
         let sample = failed
             .iter()
             .take(3)
-            .map(|item| format!("{} ({})", python_str(&item.source), python_str(&item.reason)))
+            .map(|item| {
+                format!(
+                    "{} ({})",
+                    python_str(&item.source),
+                    python_str(&item.reason)
+                )
+            })
             .collect::<Vec<_>>()
             .join("; ");
         findings.push(Finding {

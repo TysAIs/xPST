@@ -216,9 +216,12 @@ pub const DEVIATIONS: &[&str] = &[
      notices) for every command that touches the store; the Rust engine is silent there. \
      stdout, exit code and written files are identical, and the two-engine harness compares \
      stderr only where Python's is empty or a pure usage error.",
-    "`kb areas --workspace <invalid>` reproduces Python's uncaught `ValueError` contract — \
-     empty stdout, exit 1 — but prints the exception line (`ValueError: Invalid workspace \
-     name: …`) instead of the traceback frames, which name Python files and line numbers.",
+    "`kb areas`/`kb course`/`kb doctor`/`kb query`/`search` with an invalid `--workspace` \
+     reproduce Python's uncaught `ValueError` contract — empty stdout, exit 1 — but print the \
+     exception line (`ValueError: Invalid workspace name: …`) instead of the traceback frames, \
+     which name Python files and line numbers. The same applies to a store the Python loader \
+     raises out of: a non-object document (`AttributeError`) or a non-coercible value \
+     (`ValueError`) prints the exception line and exits 1.",
     "Usage errors print `xpst` as the program name where Click prints `python -m xpst` (the \
      harness invokes the Python engine as a module). The message body — `Usage:`, `Try '… \
      --help'`, `Error: Invalid value for '--port' / '-p': 'abc' is not a valid integer.` — is \
@@ -231,6 +234,24 @@ pub const DEVIATIONS: &[&str] = &[
      the rate limits. The renderer is shared (Python's `json.dumps` separators and insertion \
      order), so the difference is the payload itself; porting the live doctor and the full \
      validate check list are separate slices.",
+    "`kb query` and `search` always take `query_nuggets`' substring path: the embedding stack \
+     (fastembed + the vector stores) is not ported, so `mode` is always `substring` and `score` \
+     is always null. That is the same answer Python gives without the knowledge extra and on any \
+     store that holds no vectors; a machine with the extra and an embedded store would get \
+     `mode: semantic` from Python and substring hits from the Rust engine. The JSON store is the \
+     only backend read — a workspace whose nuggets live only in sqlite-vec or LanceDB reads as \
+     empty.",
+    "`kb doctor`'s optional-dependency probe asks an interpreter out-of-process \
+     (`XPST_PYTHON`, else `python3`, else `python`) with `importlib.util.find_spec`, because a \
+     Rust binary has no `sys.path`. With no interpreter at all the knowledge extra is reported \
+     absent. The finding is therefore a property of the machine, which is why the checked-in \
+     fixture masks it (`mask_findings`) and the two-engine harness pins `XPST_PYTHON` so both \
+     engines answer from the same interpreter.",
+    "`kb course`/`kb doctor` order mixed-type values (a hand-edited `order_index` that is a string \
+     beside an integer, a non-numeric `timestamp_start`) with numbers before strings instead of \
+     raising the `TypeError` Python's `sorted` raises. A store the shipped writer produced is \
+     homogeneous, so the order is identical; only a hand-corrupted file can observe the \
+     difference.",
     "Integer options are validated and rendered with Python's arbitrary-precision `int()` \
      (`--port 0900` is `:900`, `--port 10^20` prints in full). The three that are used for \
      arithmetic — `pair --ttl`, `state backup --keep`, `stream relay-config --rtmp-port` — \

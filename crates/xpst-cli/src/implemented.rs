@@ -258,7 +258,7 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "kb areas",
         "xpst-store",
-        "Discovered knowledge areas in course order (`order_index`, label, id) with their nugget counts, read from the workspace's `areas.json`; payload byte-compared with the Python CLI. An invalid `--workspace` reproduces Python's uncaught `ValueError` contract — empty stdout, exit 1 — with the exception line on stderr instead of the traceback frames.",
+        "Discovered knowledge areas in course order (`order_index`, label, id) with their nugget counts, read from the workspace's `areas.json`; payload byte-compared with the Python CLI. The reader reproduces `JsonKnowledgeStore._load_file`: a decode failure, an unknown key or a missing required key renames the file to `<name>.corrupt` and starts empty, while a non-object document escapes as Python's `AttributeError`. An invalid `--workspace` reproduces Python's uncaught `ValueError` contract — empty stdout, exit 1 — with the exception line on stderr instead of the traceback frames.",
         kb_areas,
     ),
     implemented(

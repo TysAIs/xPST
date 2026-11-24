@@ -273,7 +273,10 @@ fn nugget_from(value: &Value) -> Result<Nugget, RecordError> {
         id,
         id_key,
         point,
-        source_video_id: record.get("source_video_id").cloned().unwrap_or(Value::Null),
+        source_video_id: record
+            .get("source_video_id")
+            .cloned()
+            .unwrap_or(Value::Null),
         source_url: record.get("source_url").cloned().unwrap_or(Value::Null),
         timestamp_start: record
             .get("timestamp_start")
@@ -338,9 +341,10 @@ fn area_from(value: &Value) -> Result<Area, RecordError> {
     }
     let nugget_ids = match record.get("nugget_ids") {
         Some(Value::Sequence(items)) => items.clone(),
-        Some(Value::String(text)) | Some(Value::Timestamp(text)) => {
-            text.chars().map(|ch| Value::String(ch.to_string())).collect()
-        }
+        Some(Value::String(text)) | Some(Value::Timestamp(text)) => text
+            .chars()
+            .map(|ch| Value::String(ch.to_string()))
+            .collect(),
         Some(Value::Mapping(map)) => map.keys().cloned().collect(),
         Some(other) => {
             return Err(RecordError::Quarantine(format!(
@@ -539,7 +543,10 @@ mod tests {
         let path = dir.join("nuggets.json");
         std::fs::write(&path, "[1, 2]").unwrap();
         let error = load_nuggets(&path).unwrap_err();
-        assert!(error.starts_with("AttributeError: 'list' object"), "{error}");
+        assert!(
+            error.starts_with("AttributeError: 'list' object"),
+            "{error}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -553,7 +560,10 @@ mod tests {
         )
         .unwrap();
         let error = load_areas(&path).unwrap_err();
-        assert!(error.starts_with("ValueError: could not convert"), "{error}");
+        assert!(
+            error.starts_with("ValueError: could not convert"),
+            "{error}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

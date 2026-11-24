@@ -5,7 +5,7 @@
     "source": "src/xpst/cli.py"
   },
   "note": "Captured by running the shipped Python CLI against scratch profiles. scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent; snapshot modified_at is stripped and its epoch recorded instead.",
-  "scenario_count": 91,
+  "scenario_count": 105,
   "scenarios": [
     {
       "name": "status_empty_profile",
@@ -4785,14 +4785,12 @@
       "seed": {
         "config.yaml": "version: 4\n"
       },
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
       "env": {
         "XPST_HOME": "PROFILE"
       },
-      "stdout_json": {
-        "areas": []
-      }
+      "stdout": "{\"areas\": []}\n"
     },
     {
       "name": "kb_areas_populated",
@@ -4803,16 +4801,463 @@
       ],
       "seed": {
         "config.yaml": "version: 4\n",
-        ".xpst/knowledge/default/areas.json": "{\"b\": {\"label\": \"Beta\", \"order_index\": 1, \"nugget_ids\": [\"n1\"]}, \"a\": {\"label\": \"Alpha\", \"order_index\": 0, \"nugget_ids\": [\"n1\", \"n2\"]}}"
+        "knowledge/default/areas.json": "{\"a1\": {\"id\": \"a1\", \"label\": \"Routing\", \"centroid\": [], \"nugget_ids\": [\"n1\", \"n2\"], \"order_index\": 0}, \"a2\": {\"id\": \"a2\", \"label\": \"Empty module\", \"centroid\": [], \"nugget_ids\": [], \"order_index\": 1}}"
+      },
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "stdout": "{\"areas\": [{\"label\": \"Routing\", \"order_index\": 0, \"nuggets\": 2, \"difficulty\": null}, {\"label\": \"Empty module\", \"order_index\": 1, \"nuggets\": 0, \"difficulty\": null}]}\n"
+    },
+    {
+      "name": "kb_areas_quarantined_missing_id",
+      "argv": [
+        "kb",
+        "areas",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "knowledge/default/areas.json": "{\"a\": {\"label\": \"Alpha\", \"order_index\": 0, \"nugget_ids\": [\"n1\"]}}"
       },
       "compare": "json",
       "exit_code": 0,
       "env": {
         "XPST_HOME": "PROFILE"
       },
+      "files": {
+        "knowledge/default/areas.json.corrupt": "{\"a\": {\"label\": \"Alpha\", \"order_index\": 0, \"nugget_ids\": [\"n1\"]}}"
+      },
       "stdout_json": {
         "areas": []
       }
+    },
+    {
+      "name": "kb_course_empty",
+      "argv": [
+        "kb",
+        "course",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "stdout": "{\"workspace\": \"default\", \"areas\": []}\n"
+    },
+    {
+      "name": "kb_course_populated",
+      "argv": [
+        "kb",
+        "course",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "knowledge/default/nuggets.json": "{\"n1\": {\"id\": \"n1\", \"point\": \"Intro to routing\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 0.0, \"timestamp_end\": 12.5, \"source_url\": \"https://example.invalid/a\", \"difficulty\": \"beginner\", \"area_id\": \"a1\"}, \"n2\": {\"id\": \"n2\", \"point\": \"Advanced concurrency tuning\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 30.0, \"timestamp_end\": 45.0, \"source_url\": null, \"difficulty\": \"advanced\", \"area_id\": \"a1\"}, \"n3\": {\"id\": \"n3\", \"point\": \"Loose note about caching\", \"source_video_id\": \"vid-b\", \"timestamp_start\": 5.0, \"timestamp_end\": 9.0, \"source_url\": \"\", \"difficulty\": \"intermediate\", \"area_id\": null}}",
+        "knowledge/default/areas.json": "{\"a1\": {\"id\": \"a1\", \"label\": \"Routing\", \"centroid\": [], \"nugget_ids\": [\"n1\", \"n2\"], \"order_index\": 0}, \"a2\": {\"id\": \"a2\", \"label\": \"Empty module\", \"centroid\": [], \"nugget_ids\": [], \"order_index\": 1}}",
+        "knowledge/default/queue.json": "{\"schema_version\": 1, \"items\": [{\"id\": \"q1\", \"source\": \"https://example.invalid/one\", \"status\": \"failed\", \"reason\": \"transcript unavailable\", \"enqueued_at\": 1.0, \"seq\": 1}, {\"id\": \"q2\", \"source\": \"https://example.invalid/two\", \"status\": \"done\", \"enqueued_at\": 2.0, \"seq\": 2}, {\"id\": \"q3\", \"source\": \"https://example.invalid/three\", \"status\": \"pending\", \"enqueued_at\": 3.0, \"seq\": 3}]}",
+        "knowledge/default/manifest.json": "{\"schema_version\": 1, \"sources\": {\"vid-a\": {\"source\": \"a\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}, \"vid-b\": {\"source\": \"b\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}}, \"aliases\": {}}"
+      },
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "stdout": "{\"workspace\": \"default\", \"areas\": [{\"label\": \"Routing\", \"order\": 0, \"nuggets\": [{\"point\": \"Intro to routing\", \"difficulty\": \"beginner\", \"citation\": \"https://example.invalid/a\", \"timestamp_start\": 0.0, \"timestamp_end\": 12.5}, {\"point\": \"Advanced concurrency tuning\", \"difficulty\": \"advanced\", \"citation\": \"vid-a\", \"timestamp_start\": 30.0, \"timestamp_end\": 45.0}]}, {\"label\": \"Empty module\", \"order\": 1, \"nuggets\": []}, {\"label\": \"Unassigned\", \"order\": 2, \"nuggets\": [{\"point\": \"Loose note about caching\", \"difficulty\": \"intermediate\", \"citation\": \"vid-b\", \"timestamp_start\": 5.0, \"timestamp_end\": 9.0}]}]}\n"
+    },
+    {
+      "name": "kb_course_area_filter",
+      "argv": [
+        "kb",
+        "course",
+        "--area",
+        "a1",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "knowledge/default/nuggets.json": "{\"n1\": {\"id\": \"n1\", \"point\": \"Intro to routing\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 0.0, \"timestamp_end\": 12.5, \"source_url\": \"https://example.invalid/a\", \"difficulty\": \"beginner\", \"area_id\": \"a1\"}, \"n2\": {\"id\": \"n2\", \"point\": \"Advanced concurrency tuning\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 30.0, \"timestamp_end\": 45.0, \"source_url\": null, \"difficulty\": \"advanced\", \"area_id\": \"a1\"}, \"n3\": {\"id\": \"n3\", \"point\": \"Loose note about caching\", \"source_video_id\": \"vid-b\", \"timestamp_start\": 5.0, \"timestamp_end\": 9.0, \"source_url\": \"\", \"difficulty\": \"intermediate\", \"area_id\": null}}",
+        "knowledge/default/areas.json": "{\"a1\": {\"id\": \"a1\", \"label\": \"Routing\", \"centroid\": [], \"nugget_ids\": [\"n1\", \"n2\"], \"order_index\": 0}, \"a2\": {\"id\": \"a2\", \"label\": \"Empty module\", \"centroid\": [], \"nugget_ids\": [], \"order_index\": 1}}",
+        "knowledge/default/queue.json": "{\"schema_version\": 1, \"items\": [{\"id\": \"q1\", \"source\": \"https://example.invalid/one\", \"status\": \"failed\", \"reason\": \"transcript unavailable\", \"enqueued_at\": 1.0, \"seq\": 1}, {\"id\": \"q2\", \"source\": \"https://example.invalid/two\", \"status\": \"done\", \"enqueued_at\": 2.0, \"seq\": 2}, {\"id\": \"q3\", \"source\": \"https://example.invalid/three\", \"status\": \"pending\", \"enqueued_at\": 3.0, \"seq\": 3}]}",
+        "knowledge/default/manifest.json": "{\"schema_version\": 1, \"sources\": {\"vid-a\": {\"source\": \"a\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}, \"vid-b\": {\"source\": \"b\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}}, \"aliases\": {}}"
+      },
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "stdout": "{\"workspace\": \"default\", \"areas\": [{\"label\": \"Routing\", \"order\": 0, \"nuggets\": [{\"point\": \"Intro to routing\", \"difficulty\": \"beginner\", \"citation\": \"https://example.invalid/a\", \"timestamp_start\": 0.0, \"timestamp_end\": 12.5}, {\"point\": \"Advanced concurrency tuning\", \"difficulty\": \"advanced\", \"citation\": \"vid-a\", \"timestamp_start\": 30.0, \"timestamp_end\": 45.0}]}]}\n"
+    },
+    {
+      "name": "kb_course_unknown_area",
+      "argv": [
+        "kb",
+        "course",
+        "--area",
+        "nope",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "knowledge/default/nuggets.json": "{\"n1\": {\"id\": \"n1\", \"point\": \"Intro to routing\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 0.0, \"timestamp_end\": 12.5, \"source_url\": \"https://example.invalid/a\", \"difficulty\": \"beginner\", \"area_id\": \"a1\"}, \"n2\": {\"id\": \"n2\", \"point\": \"Advanced concurrency tuning\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 30.0, \"timestamp_end\": 45.0, \"source_url\": null, \"difficulty\": \"advanced\", \"area_id\": \"a1\"}, \"n3\": {\"id\": \"n3\", \"point\": \"Loose note about caching\", \"source_video_id\": \"vid-b\", \"timestamp_start\": 5.0, \"timestamp_end\": 9.0, \"source_url\": \"\", \"difficulty\": \"intermediate\", \"area_id\": null}}",
+        "knowledge/default/areas.json": "{\"a1\": {\"id\": \"a1\", \"label\": \"Routing\", \"centroid\": [], \"nugget_ids\": [\"n1\", \"n2\"], \"order_index\": 0}, \"a2\": {\"id\": \"a2\", \"label\": \"Empty module\", \"centroid\": [], \"nugget_ids\": [], \"order_index\": 1}}",
+        "knowledge/default/queue.json": "{\"schema_version\": 1, \"items\": [{\"id\": \"q1\", \"source\": \"https://example.invalid/one\", \"status\": \"failed\", \"reason\": \"transcript unavailable\", \"enqueued_at\": 1.0, \"seq\": 1}, {\"id\": \"q2\", \"source\": \"https://example.invalid/two\", \"status\": \"done\", \"enqueued_at\": 2.0, \"seq\": 2}, {\"id\": \"q3\", \"source\": \"https://example.invalid/three\", \"status\": \"pending\", \"enqueued_at\": 3.0, \"seq\": 3}]}",
+        "knowledge/default/manifest.json": "{\"schema_version\": 1, \"sources\": {\"vid-a\": {\"source\": \"a\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}, \"vid-b\": {\"source\": \"b\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}}, \"aliases\": {}}"
+      },
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "stdout": "{\"workspace\": \"default\", \"areas\": []}\n"
+    },
+    {
+      "name": "kb_doctor_empty",
+      "argv": [
+        "kb",
+        "doctor",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "mask_findings": [
+        "dependencies"
+      ],
+      "stdout_json": {
+        "ok": true,
+        "error_count": 0,
+        "warning_count": 1,
+        "findings": [
+          {
+            "severity": "<ENV>",
+            "check": "dependencies",
+            "message": "<ENV>"
+          },
+          {
+            "severity": "warning",
+            "check": "store",
+            "message": "store is empty (no nuggets ingested yet)"
+          },
+          {
+            "severity": "ok",
+            "check": "orphans",
+            "message": "no orphaned areas or nuggets"
+          },
+          {
+            "severity": "ok",
+            "check": "queue",
+            "message": "pending=0 in_progress=0 done=0 failed=0"
+          },
+          {
+            "severity": "ok",
+            "check": "manifest",
+            "message": "0 source(s) recorded"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kb_doctor_populated",
+      "argv": [
+        "kb",
+        "doctor",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "knowledge/default/nuggets.json": "{\"n1\": {\"id\": \"n1\", \"point\": \"Intro to routing\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 0.0, \"timestamp_end\": 12.5, \"source_url\": \"https://example.invalid/a\", \"difficulty\": \"beginner\", \"area_id\": \"a1\"}, \"n2\": {\"id\": \"n2\", \"point\": \"Advanced concurrency tuning\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 30.0, \"timestamp_end\": 45.0, \"source_url\": null, \"difficulty\": \"advanced\", \"area_id\": \"a1\"}, \"n3\": {\"id\": \"n3\", \"point\": \"Loose note about caching\", \"source_video_id\": \"vid-b\", \"timestamp_start\": 5.0, \"timestamp_end\": 9.0, \"source_url\": \"\", \"difficulty\": \"intermediate\", \"area_id\": null}}",
+        "knowledge/default/areas.json": "{\"a1\": {\"id\": \"a1\", \"label\": \"Routing\", \"centroid\": [], \"nugget_ids\": [\"n1\", \"n2\"], \"order_index\": 0}, \"a2\": {\"id\": \"a2\", \"label\": \"Empty module\", \"centroid\": [], \"nugget_ids\": [], \"order_index\": 1}}",
+        "knowledge/default/queue.json": "{\"schema_version\": 1, \"items\": [{\"id\": \"q1\", \"source\": \"https://example.invalid/one\", \"status\": \"failed\", \"reason\": \"transcript unavailable\", \"enqueued_at\": 1.0, \"seq\": 1}, {\"id\": \"q2\", \"source\": \"https://example.invalid/two\", \"status\": \"done\", \"enqueued_at\": 2.0, \"seq\": 2}, {\"id\": \"q3\", \"source\": \"https://example.invalid/three\", \"status\": \"pending\", \"enqueued_at\": 3.0, \"seq\": 3}]}",
+        "knowledge/default/manifest.json": "{\"schema_version\": 1, \"sources\": {\"vid-a\": {\"source\": \"a\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}, \"vid-b\": {\"source\": \"b\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}}, \"aliases\": {}}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "mask_findings": [
+        "dependencies"
+      ],
+      "stdout_json": {
+        "ok": true,
+        "error_count": 0,
+        "warning_count": 3,
+        "findings": [
+          {
+            "severity": "<ENV>",
+            "check": "dependencies",
+            "message": "<ENV>"
+          },
+          {
+            "severity": "ok",
+            "check": "store",
+            "message": "3 nuggets, 2 areas loaded"
+          },
+          {
+            "severity": "warning",
+            "check": "embeddings",
+            "message": "3 of 3 nuggets have no embedding and cannot be routed/recalled"
+          },
+          {
+            "severity": "warning",
+            "check": "orphaned_areas",
+            "message": "1 area(s) have no members (Empty module)"
+          },
+          {
+            "severity": "warning",
+            "check": "queue",
+            "message": "1 failed queue item(s): https://example.invalid/one (transcript unavailable)"
+          },
+          {
+            "severity": "ok",
+            "check": "queue",
+            "message": "pending=1 in_progress=0 done=1 failed=1"
+          },
+          {
+            "severity": "ok",
+            "check": "manifest",
+            "message": "2 source(s) recorded"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kb_doctor_orphans",
+      "argv": [
+        "kb",
+        "doctor",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "knowledge/default/nuggets.json": "{\"n1\": {\"id\": \"n1\", \"point\": \"One\", \"source_video_id\": \"v\", \"timestamp_start\": 0.0, \"timestamp_end\": 1.0, \"area_id\": \"gone\"}}",
+        "knowledge/default/areas.json": "{\"a1\": {\"id\": \"a1\", \"label\": \"Alpha\", \"nugget_ids\": [\"n1\", \"missing\"], \"order_index\": 0}}"
+      },
+      "compare": "json",
+      "exit_code": 1,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "mask_findings": [
+        "dependencies"
+      ],
+      "allow_nonzero": true,
+      "stdout_json": {
+        "ok": false,
+        "error_count": 2,
+        "warning_count": 1,
+        "findings": [
+          {
+            "severity": "<ENV>",
+            "check": "dependencies",
+            "message": "<ENV>"
+          },
+          {
+            "severity": "ok",
+            "check": "store",
+            "message": "1 nuggets, 1 areas loaded"
+          },
+          {
+            "severity": "warning",
+            "check": "embeddings",
+            "message": "1 of 1 nuggets have no embedding and cannot be routed/recalled"
+          },
+          {
+            "severity": "error",
+            "check": "orphaned_areas",
+            "message": "1 area membership reference(s) point at nuggets that no longer exist; re-run 'kb organize'"
+          },
+          {
+            "severity": "error",
+            "check": "orphaned_nuggets",
+            "message": "1 nugget(s) reference a non-existent area; re-run 'kb organize' to reconcile"
+          },
+          {
+            "severity": "ok",
+            "check": "queue",
+            "message": "pending=0 in_progress=0 done=0 failed=0"
+          },
+          {
+            "severity": "ok",
+            "check": "manifest",
+            "message": "0 source(s) recorded"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kb_doctor_manifest_sources_list",
+      "argv": [
+        "kb",
+        "doctor",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "knowledge/default/manifest.json": "{\"schema_version\": 1, \"sources\": [\"a\", \"b\", \"c\"], \"aliases\": {}}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "mask_findings": [
+        "dependencies"
+      ],
+      "stdout_json": {
+        "ok": true,
+        "error_count": 0,
+        "warning_count": 1,
+        "findings": [
+          {
+            "severity": "<ENV>",
+            "check": "dependencies",
+            "message": "<ENV>"
+          },
+          {
+            "severity": "warning",
+            "check": "store",
+            "message": "store is empty (no nuggets ingested yet)"
+          },
+          {
+            "severity": "ok",
+            "check": "orphans",
+            "message": "no orphaned areas or nuggets"
+          },
+          {
+            "severity": "ok",
+            "check": "queue",
+            "message": "pending=0 in_progress=0 done=0 failed=0"
+          },
+          {
+            "severity": "ok",
+            "check": "manifest",
+            "message": "3 source(s) recorded"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kb_query_hits",
+      "argv": [
+        "kb",
+        "query",
+        "ing",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "knowledge/default/nuggets.json": "{\"n1\": {\"id\": \"n1\", \"point\": \"Intro to routing\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 0.0, \"timestamp_end\": 12.5, \"source_url\": \"https://example.invalid/a\", \"difficulty\": \"beginner\", \"area_id\": \"a1\"}, \"n2\": {\"id\": \"n2\", \"point\": \"Advanced concurrency tuning\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 30.0, \"timestamp_end\": 45.0, \"source_url\": null, \"difficulty\": \"advanced\", \"area_id\": \"a1\"}, \"n3\": {\"id\": \"n3\", \"point\": \"Loose note about caching\", \"source_video_id\": \"vid-b\", \"timestamp_start\": 5.0, \"timestamp_end\": 9.0, \"source_url\": \"\", \"difficulty\": \"intermediate\", \"area_id\": null}}",
+        "knowledge/default/areas.json": "{\"a1\": {\"id\": \"a1\", \"label\": \"Routing\", \"centroid\": [], \"nugget_ids\": [\"n1\", \"n2\"], \"order_index\": 0}, \"a2\": {\"id\": \"a2\", \"label\": \"Empty module\", \"centroid\": [], \"nugget_ids\": [], \"order_index\": 1}}",
+        "knowledge/default/queue.json": "{\"schema_version\": 1, \"items\": [{\"id\": \"q1\", \"source\": \"https://example.invalid/one\", \"status\": \"failed\", \"reason\": \"transcript unavailable\", \"enqueued_at\": 1.0, \"seq\": 1}, {\"id\": \"q2\", \"source\": \"https://example.invalid/two\", \"status\": \"done\", \"enqueued_at\": 2.0, \"seq\": 2}, {\"id\": \"q3\", \"source\": \"https://example.invalid/three\", \"status\": \"pending\", \"enqueued_at\": 3.0, \"seq\": 3}]}",
+        "knowledge/default/manifest.json": "{\"schema_version\": 1, \"sources\": {\"vid-a\": {\"source\": \"a\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}, \"vid-b\": {\"source\": \"b\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}}, \"aliases\": {}}"
+      },
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "stdout": "{\"workspace\": \"default\", \"query\": \"ing\", \"mode\": \"substring\", \"count\": 3, \"nuggets\": [{\"point\": \"Intro to routing\", \"citation\": \"https://example.invalid/a\", \"source_url\": \"https://example.invalid/a\", \"timestamp_start\": 0.0, \"timestamp_end\": 12.5, \"score\": null, \"area_id\": \"a1\"}, {\"point\": \"Advanced concurrency tuning\", \"citation\": \"vid-a\", \"source_url\": null, \"timestamp_start\": 30.0, \"timestamp_end\": 45.0, \"score\": null, \"area_id\": \"a1\"}, {\"point\": \"Loose note about caching\", \"citation\": \"vid-b\", \"source_url\": \"\", \"timestamp_start\": 5.0, \"timestamp_end\": 9.0, \"score\": null, \"area_id\": null}]}\n"
+    },
+    {
+      "name": "kb_query_limit",
+      "argv": [
+        "kb",
+        "query",
+        "ing",
+        "--limit",
+        "2",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "knowledge/default/nuggets.json": "{\"n1\": {\"id\": \"n1\", \"point\": \"Intro to routing\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 0.0, \"timestamp_end\": 12.5, \"source_url\": \"https://example.invalid/a\", \"difficulty\": \"beginner\", \"area_id\": \"a1\"}, \"n2\": {\"id\": \"n2\", \"point\": \"Advanced concurrency tuning\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 30.0, \"timestamp_end\": 45.0, \"source_url\": null, \"difficulty\": \"advanced\", \"area_id\": \"a1\"}, \"n3\": {\"id\": \"n3\", \"point\": \"Loose note about caching\", \"source_video_id\": \"vid-b\", \"timestamp_start\": 5.0, \"timestamp_end\": 9.0, \"source_url\": \"\", \"difficulty\": \"intermediate\", \"area_id\": null}}",
+        "knowledge/default/areas.json": "{\"a1\": {\"id\": \"a1\", \"label\": \"Routing\", \"centroid\": [], \"nugget_ids\": [\"n1\", \"n2\"], \"order_index\": 0}, \"a2\": {\"id\": \"a2\", \"label\": \"Empty module\", \"centroid\": [], \"nugget_ids\": [], \"order_index\": 1}}",
+        "knowledge/default/queue.json": "{\"schema_version\": 1, \"items\": [{\"id\": \"q1\", \"source\": \"https://example.invalid/one\", \"status\": \"failed\", \"reason\": \"transcript unavailable\", \"enqueued_at\": 1.0, \"seq\": 1}, {\"id\": \"q2\", \"source\": \"https://example.invalid/two\", \"status\": \"done\", \"enqueued_at\": 2.0, \"seq\": 2}, {\"id\": \"q3\", \"source\": \"https://example.invalid/three\", \"status\": \"pending\", \"enqueued_at\": 3.0, \"seq\": 3}]}",
+        "knowledge/default/manifest.json": "{\"schema_version\": 1, \"sources\": {\"vid-a\": {\"source\": \"a\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}, \"vid-b\": {\"source\": \"b\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}}, \"aliases\": {}}"
+      },
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "stdout": "{\"workspace\": \"default\", \"query\": \"ing\", \"mode\": \"substring\", \"count\": 2, \"nuggets\": [{\"point\": \"Intro to routing\", \"citation\": \"https://example.invalid/a\", \"source_url\": \"https://example.invalid/a\", \"timestamp_start\": 0.0, \"timestamp_end\": 12.5, \"score\": null, \"area_id\": \"a1\"}, {\"point\": \"Advanced concurrency tuning\", \"citation\": \"vid-a\", \"source_url\": null, \"timestamp_start\": 30.0, \"timestamp_end\": 45.0, \"score\": null, \"area_id\": \"a1\"}]}\n"
+    },
+    {
+      "name": "kb_query_no_hits",
+      "argv": [
+        "kb",
+        "query",
+        "zzz",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "knowledge/default/nuggets.json": "{\"n1\": {\"id\": \"n1\", \"point\": \"Intro to routing\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 0.0, \"timestamp_end\": 12.5, \"source_url\": \"https://example.invalid/a\", \"difficulty\": \"beginner\", \"area_id\": \"a1\"}, \"n2\": {\"id\": \"n2\", \"point\": \"Advanced concurrency tuning\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 30.0, \"timestamp_end\": 45.0, \"source_url\": null, \"difficulty\": \"advanced\", \"area_id\": \"a1\"}, \"n3\": {\"id\": \"n3\", \"point\": \"Loose note about caching\", \"source_video_id\": \"vid-b\", \"timestamp_start\": 5.0, \"timestamp_end\": 9.0, \"source_url\": \"\", \"difficulty\": \"intermediate\", \"area_id\": null}}",
+        "knowledge/default/areas.json": "{\"a1\": {\"id\": \"a1\", \"label\": \"Routing\", \"centroid\": [], \"nugget_ids\": [\"n1\", \"n2\"], \"order_index\": 0}, \"a2\": {\"id\": \"a2\", \"label\": \"Empty module\", \"centroid\": [], \"nugget_ids\": [], \"order_index\": 1}}",
+        "knowledge/default/queue.json": "{\"schema_version\": 1, \"items\": [{\"id\": \"q1\", \"source\": \"https://example.invalid/one\", \"status\": \"failed\", \"reason\": \"transcript unavailable\", \"enqueued_at\": 1.0, \"seq\": 1}, {\"id\": \"q2\", \"source\": \"https://example.invalid/two\", \"status\": \"done\", \"enqueued_at\": 2.0, \"seq\": 2}, {\"id\": \"q3\", \"source\": \"https://example.invalid/three\", \"status\": \"pending\", \"enqueued_at\": 3.0, \"seq\": 3}]}",
+        "knowledge/default/manifest.json": "{\"schema_version\": 1, \"sources\": {\"vid-a\": {\"source\": \"a\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}, \"vid-b\": {\"source\": \"b\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}}, \"aliases\": {}}"
+      },
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "stdout": "{\"workspace\": \"default\", \"query\": \"zzz\", \"mode\": \"substring\", \"count\": 0, \"nuggets\": []}\n"
+    },
+    {
+      "name": "search_hits",
+      "argv": [
+        "search",
+        "ing",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "knowledge/default/nuggets.json": "{\"n1\": {\"id\": \"n1\", \"point\": \"Intro to routing\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 0.0, \"timestamp_end\": 12.5, \"source_url\": \"https://example.invalid/a\", \"difficulty\": \"beginner\", \"area_id\": \"a1\"}, \"n2\": {\"id\": \"n2\", \"point\": \"Advanced concurrency tuning\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 30.0, \"timestamp_end\": 45.0, \"source_url\": null, \"difficulty\": \"advanced\", \"area_id\": \"a1\"}, \"n3\": {\"id\": \"n3\", \"point\": \"Loose note about caching\", \"source_video_id\": \"vid-b\", \"timestamp_start\": 5.0, \"timestamp_end\": 9.0, \"source_url\": \"\", \"difficulty\": \"intermediate\", \"area_id\": null}}",
+        "knowledge/default/areas.json": "{\"a1\": {\"id\": \"a1\", \"label\": \"Routing\", \"centroid\": [], \"nugget_ids\": [\"n1\", \"n2\"], \"order_index\": 0}, \"a2\": {\"id\": \"a2\", \"label\": \"Empty module\", \"centroid\": [], \"nugget_ids\": [], \"order_index\": 1}}",
+        "knowledge/default/queue.json": "{\"schema_version\": 1, \"items\": [{\"id\": \"q1\", \"source\": \"https://example.invalid/one\", \"status\": \"failed\", \"reason\": \"transcript unavailable\", \"enqueued_at\": 1.0, \"seq\": 1}, {\"id\": \"q2\", \"source\": \"https://example.invalid/two\", \"status\": \"done\", \"enqueued_at\": 2.0, \"seq\": 2}, {\"id\": \"q3\", \"source\": \"https://example.invalid/three\", \"status\": \"pending\", \"enqueued_at\": 3.0, \"seq\": 3}]}",
+        "knowledge/default/manifest.json": "{\"schema_version\": 1, \"sources\": {\"vid-a\": {\"source\": \"a\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}, \"vid-b\": {\"source\": \"b\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}}, \"aliases\": {}}"
+      },
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "stdout": "{\n  \"workspace\": \"default\",\n  \"query\": \"ing\",\n  \"mode\": \"substring\",\n  \"count\": 3,\n  \"nuggets\": [\n    {\n      \"point\": \"Intro to routing\",\n      \"citation\": \"https://example.invalid/a\",\n      \"source_url\": \"https://example.invalid/a\",\n      \"timestamp_start\": 0.0,\n      \"timestamp_end\": 12.5,\n      \"score\": null,\n      \"area_id\": \"a1\"\n    },\n    {\n      \"point\": \"Advanced concurrency tuning\",\n      \"citation\": \"vid-a\",\n      \"source_url\": null,\n      \"timestamp_start\": 30.0,\n      \"timestamp_end\": 45.0,\n      \"score\": null,\n      \"area_id\": \"a1\"\n    },\n    {\n      \"point\": \"Loose note about caching\",\n      \"citation\": \"vid-b\",\n      \"source_url\": \"\",\n      \"timestamp_start\": 5.0,\n      \"timestamp_end\": 9.0,\n      \"score\": null,\n      \"area_id\": null\n    }\n  ]\n}\n"
+    },
+    {
+      "name": "search_no_hits",
+      "argv": [
+        "search",
+        "zzz",
+        "--json"
+      ],
+      "seed": {
+        "config.yaml": "version: 4\n",
+        "knowledge/default/nuggets.json": "{\"n1\": {\"id\": \"n1\", \"point\": \"Intro to routing\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 0.0, \"timestamp_end\": 12.5, \"source_url\": \"https://example.invalid/a\", \"difficulty\": \"beginner\", \"area_id\": \"a1\"}, \"n2\": {\"id\": \"n2\", \"point\": \"Advanced concurrency tuning\", \"source_video_id\": \"vid-a\", \"timestamp_start\": 30.0, \"timestamp_end\": 45.0, \"source_url\": null, \"difficulty\": \"advanced\", \"area_id\": \"a1\"}, \"n3\": {\"id\": \"n3\", \"point\": \"Loose note about caching\", \"source_video_id\": \"vid-b\", \"timestamp_start\": 5.0, \"timestamp_end\": 9.0, \"source_url\": \"\", \"difficulty\": \"intermediate\", \"area_id\": null}}",
+        "knowledge/default/areas.json": "{\"a1\": {\"id\": \"a1\", \"label\": \"Routing\", \"centroid\": [], \"nugget_ids\": [\"n1\", \"n2\"], \"order_index\": 0}, \"a2\": {\"id\": \"a2\", \"label\": \"Empty module\", \"centroid\": [], \"nugget_ids\": [], \"order_index\": 1}}",
+        "knowledge/default/queue.json": "{\"schema_version\": 1, \"items\": [{\"id\": \"q1\", \"source\": \"https://example.invalid/one\", \"status\": \"failed\", \"reason\": \"transcript unavailable\", \"enqueued_at\": 1.0, \"seq\": 1}, {\"id\": \"q2\", \"source\": \"https://example.invalid/two\", \"status\": \"done\", \"enqueued_at\": 2.0, \"seq\": 2}, {\"id\": \"q3\", \"source\": \"https://example.invalid/three\", \"status\": \"pending\", \"enqueued_at\": 3.0, \"seq\": 3}]}",
+        "knowledge/default/manifest.json": "{\"schema_version\": 1, \"sources\": {\"vid-a\": {\"source\": \"a\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}, \"vid-b\": {\"source\": \"b\", \"embed_model\": \"m\", \"embed_dim\": 3, \"recorded_at\": 0.0}}, \"aliases\": {}}"
+      },
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "stdout": "{\n  \"workspace\": \"default\",\n  \"query\": \"zzz\",\n  \"mode\": \"substring\",\n  \"count\": 0,\n  \"nuggets\": []\n}\n"
     },
     {
       "name": "schedule_remove_ok",

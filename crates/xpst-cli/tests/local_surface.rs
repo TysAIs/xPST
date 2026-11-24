@@ -27,7 +27,7 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 91;
+const EXPECTED_SCENARIOS: usize = 105;
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -194,7 +194,7 @@ fn env_for(row: &Value, profile: &Profile) -> Vec<(String, String)> {
 
 /// Replace the scratch profile's absolute path with `<PROFILE>` everywhere in a
 /// payload, and blank the wall-clock fields the fixture masks.
-fn normalize(value: &mut Value, profile: &Profile, mask: &[String]) {
+fn normalize(value: &mut Value, profile: &Profile, mask: &[String], mask_findings: &[String]) {
     let root = profile.path().display().to_string();
     fn walk(value: &mut Value, root: &str) {
         match value {
@@ -215,6 +215,43 @@ fn normalize(value: &mut Value, profile: &Profile, mask: &[String]) {
                 map.insert(path.clone(), Value::String("<TS>".to_string()));
             }
         }
+        // `kb doctor`'s dependency probe asks an interpreter what is installed,
+        // so its answer is a property of the machine, not of the engine. Blank
+        // the named findings and decrement the severity count each contributed;
+        // every other finding and the remaining counts are still compared.
+        if !mask_findings.is_empty() {
+            let mut warnings = 0u64;
+            let mut errors = 0u64;
+            if let Some(findings) = map.get_mut("findings").and_then(Value::as_array_mut) {
+                for finding in findings.iter_mut() {
+                    let Some(object) = finding.as_object_mut() else {
+                        continue;
+                    };
+                    let check = object
+                        .get("check")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    if !mask_findings.iter().any(|name| name == &check) {
+                        continue;
+                    }
+                    match object.get("severity").and_then(Value::as_str) {
+                        Some("warning") => warnings += 1,
+                        Some("error") => errors += 1,
+                        _ => {}
+                    }
+                    object.insert("severity".to_string(), Value::String("<ENV>".to_string()));
+                    object.insert("message".to_string(), Value::String("<ENV>".to_string()));
+                }
+            }
+            for (key, count) in [("warning_count", warnings), ("error_count", errors)] {
+                if count == 0 {
+                    continue;
+                }
+                let current = map.get(key).and_then(Value::as_u64).unwrap_or(0);
+                map.insert(key.to_string(), Value::from(current.saturating_sub(count)));
+            }
+        }
     }
 }
 
@@ -230,6 +267,19 @@ fn fnv1a64(text: &str) -> String {
         value = value.wrapping_mul(0x0000_0100_0000_01b3);
     }
     format!("{value:016x}")
+}
+
+fn mask_findings_for(row: &Value) -> Vec<String> {
+    row.get("mask_findings")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn mask_for(row: &Value) -> Vec<String> {
@@ -398,7 +448,12 @@ fn every_recorded_scenario_matches_the_python_engine() {
                             "scenario `{name}` did not print JSON ({error}):\n{stdout}\n{stderr}"
                         )
                     });
-                normalize(&mut actual, &profile, &mask_for(row));
+                normalize(
+                    &mut actual,
+                    &profile,
+                    &mask_for(row),
+                    &mask_findings_for(row),
+                );
                 assert_payload_matches(&row["stdout_json"], &actual, name);
                 assert_files_match(row, &profile, name);
             }
