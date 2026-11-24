@@ -5,7 +5,7 @@
     "source": "src/xpst/cli.py"
   },
   "note": "Captured by running the shipped Python CLI against scratch profiles. scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent; snapshot modified_at is stripped and its epoch recorded instead.",
-  "scenario_count": 88,
+  "scenario_count": 91,
   "scenarios": [
     {
       "name": "status_empty_profile",
@@ -14,62 +14,9 @@
         "--json"
       ],
       "seed": {},
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": {
-        "version": 2,
-        "total_videos_tracked": 0,
-        "total_processed": 0,
-        "cross_posted_count": 0,
-        "by_platform": {
-          "youtube": 0,
-          "x": 0,
-          "instagram": 0,
-          "tiktok": 0,
-          "threads": 0
-        },
-        "last_check": null,
-        "last_wake_check": null,
-        "dead_letter_count": 0,
-        "platform_health": {
-          "youtube": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "x": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "instagram": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "tiktok": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "threads": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          }
-        },
-        "platform_health_note": "platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness."
-      }
+      "stdout": "{\"version\": 2, \"total_videos_tracked\": 0, \"total_processed\": 0, \"cross_posted_count\": 0, \"by_platform\": {\"youtube\": 0, \"x\": 0, \"instagram\": 0, \"tiktok\": 0, \"threads\": 0}, \"last_check\": null, \"last_wake_check\": null, \"dead_letter_count\": 0, \"platform_health\": {\"youtube\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"x\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"instagram\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"tiktok\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"threads\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}}, \"platform_health_note\": \"platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness.\"}\n"
     },
     {
       "name": "status_rich_state",
@@ -80,41 +27,9 @@
       "seed": {
         "state.json": "{\n  \"version\": 2,\n  \"posted_videos\": {\n    \"v1\": {\n      \"source_platform\": \"tiktok\",\n      \"source_url\": \"https://example.invalid/v1\",\n      \"posted_to\": {\n        \"youtube\": {\n          \"id\": \"a\",\n          \"deleted\": true\n        },\n        \"x\": {\n          \"id\": \"b\"\n        },\n        \"bluesky\": {\n          \"id\": \"c\"\n        }\n      },\n      \"errors\": {\n        \"instagram\": {\n          \"error\": \"boom\",\n          \"timestamp\": null,\n          \"count\": 2\n        }\n      }\n    },\n    \"v2\": {\n      \"posted_to\": {},\n      \"errors\": {}\n    }\n  },\n  \"health\": {\n    \"total_processed\": 5,\n    \"last_check\": \"2026-01-02T03:04:05\",\n    \"last_wake_check\": null,\n    \"platforms\": {\n      \"youtube\": {\n        \"status\": \"ok\",\n        \"last_success\": \"2026-01-01T00:00:00\",\n        \"failures\": 0\n      },\n      \"x\": {\n        \"status\": \"error\",\n        \"failures\": 3\n      }\n    }\n  }\n}"
       },
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": {
-        "version": 2,
-        "total_videos_tracked": 2,
-        "total_processed": 5,
-        "cross_posted_count": 3,
-        "by_platform": {
-          "youtube": 1,
-          "x": 1,
-          "instagram": 0,
-          "tiktok": 0,
-          "threads": 0
-        },
-        "last_check": "2026-01-02T03:04:05",
-        "last_wake_check": null,
-        "dead_letter_count": 1,
-        "platform_health": {
-          "youtube": {
-            "status": "ok",
-            "last_success": "2026-01-01T00:00:00",
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "x": {
-            "status": "error",
-            "last_success": null,
-            "failures": 3,
-            "historical": true,
-            "source": "state_history"
-          }
-        },
-        "platform_health_note": "platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness."
-      }
+      "stdout": "{\"version\": 2, \"total_videos_tracked\": 2, \"total_processed\": 5, \"cross_posted_count\": 3, \"by_platform\": {\"youtube\": 1, \"x\": 1, \"instagram\": 0, \"tiktok\": 0, \"threads\": 0}, \"last_check\": \"2026-01-02T03:04:05\", \"last_wake_check\": null, \"dead_letter_count\": 1, \"platform_health\": {\"youtube\": {\"status\": \"ok\", \"last_success\": \"2026-01-01T00:00:00\", \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"x\": {\"status\": \"error\", \"last_success\": null, \"failures\": 3, \"historical\": true, \"source\": \"state_history\"}}, \"platform_health_note\": \"platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness.\"}\n"
     },
     {
       "name": "status_corrupt_state",
@@ -125,62 +40,9 @@
       "seed": {
         "state.json": "{not json"
       },
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": {
-        "version": 2,
-        "total_videos_tracked": 0,
-        "total_processed": 0,
-        "cross_posted_count": 0,
-        "by_platform": {
-          "youtube": 0,
-          "x": 0,
-          "instagram": 0,
-          "tiktok": 0,
-          "threads": 0
-        },
-        "last_check": null,
-        "last_wake_check": null,
-        "dead_letter_count": 0,
-        "platform_health": {
-          "youtube": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "x": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "instagram": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "tiktok": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "threads": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          }
-        },
-        "platform_health_note": "platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness."
-      }
+      "stdout": "{\"version\": 2, \"total_videos_tracked\": 0, \"total_processed\": 0, \"cross_posted_count\": 0, \"by_platform\": {\"youtube\": 0, \"x\": 0, \"instagram\": 0, \"tiktok\": 0, \"threads\": 0}, \"last_check\": null, \"last_wake_check\": null, \"dead_letter_count\": 0, \"platform_health\": {\"youtube\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"x\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"instagram\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"tiktok\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"threads\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}}, \"platform_health_note\": \"platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness.\"}\n"
     },
     {
       "name": "status_legacy_v1",
@@ -191,34 +53,9 @@
       "seed": {
         "state.json": "{\"posted_videos\": {\"old\": {\"posted_to\": {\"youtube\": {\"id\": \"x\"}}}}, \"health\": {\"total_processed\": 1, \"platforms\": {\"youtube\": {\"status\": \"ok\", \"failures\": 0}}}}"
       },
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": {
-        "version": 2,
-        "total_videos_tracked": 1,
-        "total_processed": 1,
-        "cross_posted_count": 1,
-        "by_platform": {
-          "youtube": 1,
-          "x": 0,
-          "instagram": 0,
-          "tiktok": 0,
-          "threads": 0
-        },
-        "last_check": null,
-        "last_wake_check": null,
-        "dead_letter_count": 0,
-        "platform_health": {
-          "youtube": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          }
-        },
-        "platform_health_note": "platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness."
-      }
+      "stdout": "{\"version\": 2, \"total_videos_tracked\": 1, \"total_processed\": 1, \"cross_posted_count\": 1, \"by_platform\": {\"youtube\": 1, \"x\": 0, \"instagram\": 0, \"tiktok\": 0, \"threads\": 0}, \"last_check\": null, \"last_wake_check\": null, \"dead_letter_count\": 0, \"platform_health\": {\"youtube\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}}, \"platform_health_note\": \"platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness.\"}\n"
     },
     {
       "name": "status_health_without_platforms",
@@ -243,62 +80,9 @@
       "seed": {
         "state.json": "{\"cross_posted\": {\"tiktok:abc\": {\"youtube\": {\"post_id\": \"p1\", \"url\": \"u\", \"timestamp\": \"t\"}}}}"
       },
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": {
-        "version": 2,
-        "total_videos_tracked": 1,
-        "total_processed": 0,
-        "cross_posted_count": 1,
-        "by_platform": {
-          "youtube": 1,
-          "x": 0,
-          "instagram": 0,
-          "tiktok": 0,
-          "threads": 0
-        },
-        "last_check": null,
-        "last_wake_check": null,
-        "dead_letter_count": 0,
-        "platform_health": {
-          "youtube": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "x": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "instagram": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "tiktok": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "threads": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          }
-        },
-        "platform_health_note": "platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness."
-      }
+      "stdout": "{\"version\": 2, \"total_videos_tracked\": 1, \"total_processed\": 0, \"cross_posted_count\": 1, \"by_platform\": {\"youtube\": 1, \"x\": 0, \"instagram\": 0, \"tiktok\": 0, \"threads\": 0}, \"last_check\": null, \"last_wake_check\": null, \"dead_letter_count\": 0, \"platform_health\": {\"youtube\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"x\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"instagram\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"tiktok\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"threads\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}}, \"platform_health_note\": \"platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness.\"}\n"
     },
     {
       "name": "status_backup_recovery",
@@ -310,62 +94,9 @@
         "state.json": "[]",
         "backups/state_0000000000000000100.json": "{\"version\": 2, \"posted_videos\": {\"b\": {\"posted_to\": {\"x\": {\"id\": \"1\"}}}}}"
       },
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": {
-        "version": 2,
-        "total_videos_tracked": 1,
-        "total_processed": 0,
-        "cross_posted_count": 1,
-        "by_platform": {
-          "youtube": 0,
-          "x": 1,
-          "instagram": 0,
-          "tiktok": 0,
-          "threads": 0
-        },
-        "last_check": null,
-        "last_wake_check": null,
-        "dead_letter_count": 0,
-        "platform_health": {
-          "youtube": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "x": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "instagram": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "tiktok": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "threads": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          }
-        },
-        "platform_health_note": "platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness."
-      }
+      "stdout": "{\"version\": 2, \"total_videos_tracked\": 1, \"total_processed\": 0, \"cross_posted_count\": 1, \"by_platform\": {\"youtube\": 0, \"x\": 1, \"instagram\": 0, \"tiktok\": 0, \"threads\": 0}, \"last_check\": null, \"last_wake_check\": null, \"dead_letter_count\": 0, \"platform_health\": {\"youtube\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"x\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"instagram\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"tiktok\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"threads\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}}, \"platform_health_note\": \"platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness.\"}\n"
     },
     {
       "name": "failures_list_rich",
@@ -377,23 +108,9 @@
       "seed": {
         "state.json": "{\n  \"version\": 2,\n  \"posted_videos\": {\n    \"v1\": {\n      \"source_platform\": \"tiktok\",\n      \"source_url\": \"https://example.invalid/v1\",\n      \"posted_to\": {\n        \"youtube\": {\n          \"id\": \"a\",\n          \"deleted\": true\n        },\n        \"x\": {\n          \"id\": \"b\"\n        },\n        \"bluesky\": {\n          \"id\": \"c\"\n        }\n      },\n      \"errors\": {\n        \"instagram\": {\n          \"error\": \"boom\",\n          \"timestamp\": null,\n          \"count\": 2\n        }\n      }\n    },\n    \"v2\": {\n      \"posted_to\": {},\n      \"errors\": {}\n    }\n  },\n  \"health\": {\n    \"total_processed\": 5,\n    \"last_check\": \"2026-01-02T03:04:05\",\n    \"last_wake_check\": null,\n    \"platforms\": {\n      \"youtube\": {\n        \"status\": \"ok\",\n        \"last_success\": \"2026-01-01T00:00:00\",\n        \"failures\": 0\n      },\n      \"x\": {\n        \"status\": \"error\",\n        \"failures\": 3\n      }\n    }\n  }\n}"
       },
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": {
-        "failures": [
-          {
-            "video_id": "v1",
-            "platform": "instagram",
-            "error": "boom",
-            "timestamp": null,
-            "count": 2,
-            "source_url": "https://example.invalid/v1",
-            "status": "open",
-            "resolved": false,
-            "age_hours": null
-          }
-        ]
-      }
+      "stdout": "{\"failures\": [{\"video_id\": \"v1\", \"platform\": \"instagram\", \"error\": \"boom\", \"timestamp\": null, \"count\": 2, \"source_url\": \"https://example.invalid/v1\", \"status\": \"open\", \"resolved\": false, \"age_hours\": null}]}\n"
     },
     {
       "name": "failures_list_empty",
@@ -403,11 +120,9 @@
         "--json"
       ],
       "seed": {},
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": {
-        "failures": []
-      }
+      "stdout": "{\"failures\": []}\n"
     },
     {
       "name": "schedule_list_missing_store",
@@ -417,9 +132,9 @@
         "--json"
       ],
       "seed": {},
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": []
+      "stdout": "[]\n"
     },
     {
       "name": "schedule_list_empty_store",
@@ -431,9 +146,9 @@
       "seed": {
         "schedule.json": "[]"
       },
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": []
+      "stdout": "[]\n"
     },
     {
       "name": "schedule_list_entries",
@@ -445,39 +160,9 @@
       "seed": {
         "schedule.json": "[{\"id\": \"id-late\", \"video_path\": \"/media/clip.mp4\", \"caption\": \"later\", \"scheduled_time\": \"2026-02-01T12:00:00+00:00\", \"timezone\": \"UTC\", \"platforms\": [\"youtube\", \"x\"], \"status\": \"pending\"}, {\"id\": \"id-early\", \"video_path\": \"\", \"caption\": \"text post\", \"scheduled_time\": \"2026-01-15T09:30:00+00:00\", \"timezone\": \"America/New_York\", \"platforms\": [], \"status\": \"completed\"}, {\"id\": \"id-bad\", \"caption\": \"no time\", \"status\": \"weird\"}, 7]"
       },
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": [
-        {
-          "id": "id-bad",
-          "caption": "no time",
-          "status": "weird",
-          "scheduled_time_local": null
-        },
-        {
-          "id": "id-early",
-          "video_path": "",
-          "caption": "text post",
-          "scheduled_time": "2026-01-15T09:30:00+00:00",
-          "timezone": "America/New_York",
-          "platforms": [],
-          "status": "completed",
-          "scheduled_time_local": "2026-01-15T04:30:00-05:00"
-        },
-        {
-          "id": "id-late",
-          "video_path": "/media/clip.mp4",
-          "caption": "later",
-          "scheduled_time": "2026-02-01T12:00:00+00:00",
-          "timezone": "UTC",
-          "platforms": [
-            "youtube",
-            "x"
-          ],
-          "status": "pending",
-          "scheduled_time_local": "2026-02-01T12:00:00+00:00"
-        }
-      ]
+      "stdout": "[{\"id\": \"id-bad\", \"caption\": \"no time\", \"status\": \"weird\", \"scheduled_time_local\": null}, {\"id\": \"id-early\", \"video_path\": \"\", \"caption\": \"text post\", \"scheduled_time\": \"2026-01-15T09:30:00+00:00\", \"timezone\": \"America/New_York\", \"platforms\": [], \"status\": \"completed\", \"scheduled_time_local\": \"2026-01-15T04:30:00-05:00\"}, {\"id\": \"id-late\", \"video_path\": \"/media/clip.mp4\", \"caption\": \"later\", \"scheduled_time\": \"2026-02-01T12:00:00+00:00\", \"timezone\": \"UTC\", \"platforms\": [\"youtube\", \"x\"], \"status\": \"pending\", \"scheduled_time_local\": \"2026-02-01T12:00:00+00:00\"}]\n"
     },
     {
       "name": "schedule_list_paused",
@@ -490,40 +175,9 @@
         "schedule.json": "[{\"id\": \"id-late\", \"video_path\": \"/media/clip.mp4\", \"caption\": \"later\", \"scheduled_time\": \"2026-02-01T12:00:00+00:00\", \"timezone\": \"UTC\", \"platforms\": [\"youtube\", \"x\"], \"status\": \"pending\"}, {\"id\": \"id-early\", \"video_path\": \"\", \"caption\": \"text post\", \"scheduled_time\": \"2026-01-15T09:30:00+00:00\", \"timezone\": \"America/New_York\", \"platforms\": [], \"status\": \"completed\"}]",
         "schedule.paused.json": "{\"paused_at\": \"2026-01-01T00:00:00+00:00\", \"reason\": \"operator pause\"}"
       },
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": {
-        "entries": [
-          {
-            "id": "id-early",
-            "video_path": "",
-            "caption": "text post",
-            "scheduled_time": "2026-01-15T09:30:00+00:00",
-            "timezone": "America/New_York",
-            "platforms": [],
-            "status": "completed",
-            "scheduled_time_local": "2026-01-15T04:30:00-05:00"
-          },
-          {
-            "id": "id-late",
-            "video_path": "/media/clip.mp4",
-            "caption": "later",
-            "scheduled_time": "2026-02-01T12:00:00+00:00",
-            "timezone": "UTC",
-            "platforms": [
-              "youtube",
-              "x"
-            ],
-            "status": "pending",
-            "scheduled_time_local": "2026-02-01T12:00:00+00:00"
-          }
-        ],
-        "paused": {
-          "paused": true,
-          "paused_at": "2026-01-01T00:00:00+00:00",
-          "reason": "operator pause"
-        }
-      }
+      "stdout": "{\"entries\": [{\"id\": \"id-early\", \"video_path\": \"\", \"caption\": \"text post\", \"scheduled_time\": \"2026-01-15T09:30:00+00:00\", \"timezone\": \"America/New_York\", \"platforms\": [], \"status\": \"completed\", \"scheduled_time_local\": \"2026-01-15T04:30:00-05:00\"}, {\"id\": \"id-late\", \"video_path\": \"/media/clip.mp4\", \"caption\": \"later\", \"scheduled_time\": \"2026-02-01T12:00:00+00:00\", \"timezone\": \"UTC\", \"platforms\": [\"youtube\", \"x\"], \"status\": \"pending\", \"scheduled_time_local\": \"2026-02-01T12:00:00+00:00\"}], \"paused\": {\"paused\": true, \"paused_at\": \"2026-01-01T00:00:00+00:00\", \"reason\": \"operator pause\"}}\n"
     },
     {
       "name": "schedule_list_snapshots",
@@ -564,9 +218,9 @@
       "seed": {
         "schedule.json": "{}"
       },
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": []
+      "stdout": "[]\n"
     },
     {
       "name": "schedule_list_unreadable_pause",
@@ -578,16 +232,9 @@
       "seed": {
         "schedule.paused.json": "[1,2,3]"
       },
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": {
-        "entries": [],
-        "paused": {
-          "paused": true,
-          "paused_at": null,
-          "reason": "unreadable pause marker"
-        }
-      }
+      "stdout": "{\"entries\": [], \"paused\": {\"paused\": true, \"paused_at\": null, \"reason\": \"unreadable pause marker\"}}\n"
     },
     {
       "name": "status_explicit_config_missing",
@@ -614,65 +261,12 @@
         "alt/state.json": "{\"version\": 2, \"posted_videos\": {\"z\": {\"posted_to\": {\"threads\": {\"id\": \"t\"}}}}}",
         "state.json": "{\"version\": 2, \"posted_videos\": {\"ignored\": {\"posted_to\": {}}}}"
       },
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
       "substitutions": {
         "ALT": "alt/config.yaml"
       },
-      "stdout_json": {
-        "version": 2,
-        "total_videos_tracked": 1,
-        "total_processed": 0,
-        "cross_posted_count": 1,
-        "by_platform": {
-          "youtube": 0,
-          "x": 0,
-          "instagram": 0,
-          "tiktok": 0,
-          "threads": 1
-        },
-        "last_check": null,
-        "last_wake_check": null,
-        "dead_letter_count": 0,
-        "platform_health": {
-          "youtube": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "x": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "instagram": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "tiktok": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          },
-          "threads": {
-            "status": "ok",
-            "last_success": null,
-            "failures": 0,
-            "historical": true,
-            "source": "state_history"
-          }
-        },
-        "platform_health_note": "platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness."
-      }
+      "stdout": "{\"version\": 2, \"total_videos_tracked\": 1, \"total_processed\": 0, \"cross_posted_count\": 1, \"by_platform\": {\"youtube\": 0, \"x\": 0, \"instagram\": 0, \"tiktok\": 0, \"threads\": 1}, \"last_check\": null, \"last_wake_check\": null, \"dead_letter_count\": 0, \"platform_health\": {\"youtube\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"x\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"instagram\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"tiktok\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}, \"threads\": {\"status\": \"ok\", \"last_success\": null, \"failures\": 0, \"historical\": true, \"source\": \"state_history\"}}, \"platform_health_note\": \"platform_health is historical: it counts local post outcomes, not a live check. Run `xpst doctor` (or `xpst health`) for current auth/readiness.\"}\n"
     },
     {
       "name": "config_export_masked",
@@ -740,6 +334,53 @@
         "ok": false,
         "error": "Config file not found: <PROFILE>/does-not-exist.yaml"
       }
+    },
+    {
+      "name": "config_show_masked",
+      "argv": [
+        "config",
+        "show",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n"
+      },
+      "compare": "stdout",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "stdout": "{\"version\": 4, \"accounts\": {\"youtube\": {\"enabled\": true, \"client_secret\": \"***\"}}, \"monitoring\": {\"log_level\": \"INFO\"}}\n"
+    },
+    {
+      "name": "config_show_raw",
+      "argv": [
+        "config",
+        "show",
+        "--raw",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    client_secret: super-secret-value\nmonitoring:\n  log_level: INFO\n"
+      },
+      "compare": "stdout",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "stdout": "{\"version\": 4, \"accounts\": {\"youtube\": {\"enabled\": true, \"client_secret\": \"super-secret-value\"}}, \"monitoring\": {\"log_level\": \"INFO\"}}\n"
+    },
+    {
+      "name": "config_show_missing",
+      "argv": [
+        "config",
+        "show",
+        "--file",
+        "MISSING",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 2,
+      "config_dir": ".xpst",
+      "allow_nonzero": true,
+      "stdout": "{\"ok\": false, \"error\": {\"code\": \"CONFIG_FILE_NOT_FOUND\", \"message\": \"Config file not found: <PROFILE>/does-not-exist.yaml\", \"path\": \"<PROFILE>/does-not-exist.yaml\", \"hint\": \"run `xpst wizard` or `xpst setup` to create one\"}}\n"
     },
     {
       "name": "config_set_bool",
@@ -2959,14 +2600,9 @@
       "seed": {
         "schedule.paused.json": "{\"paused_at\": \"2026-01-01T00:00:00+00:00\", \"reason\": \"operator pause\"}"
       },
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": {
-        "paused": true,
-        "already_paused": true,
-        "paused_at": "2026-01-01T00:00:00+00:00",
-        "reason": "operator pause"
-      }
+      "stdout": "{\"paused\": true, \"already_paused\": true, \"paused_at\": \"2026-01-01T00:00:00+00:00\", \"reason\": \"operator pause\"}\n"
     },
     {
       "name": "schedule_resume",
@@ -2978,12 +2614,9 @@
       "seed": {
         "schedule.paused.json": "{\"paused_at\": \"2026-01-01T00:00:00+00:00\", \"reason\": \"operator pause\"}"
       },
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": {
-        "paused": false,
-        "was_paused": true
-      }
+      "stdout": "{\"paused\": false, \"was_paused\": true}\n"
     },
     {
       "name": "schedule_resume_not_paused",
@@ -2993,12 +2626,9 @@
         "--json"
       ],
       "seed": {},
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": {
-        "paused": false,
-        "was_paused": false
-      }
+      "stdout": "{\"paused\": false, \"was_paused\": false}\n"
     },
     {
       "name": "schedule_list_ignores_root_config",
@@ -3012,23 +2642,9 @@
       "seed": {
         "schedule.json": "[{\"id\": \"id-late\", \"video_path\": \"/media/clip.mp4\", \"caption\": \"later\", \"scheduled_time\": \"2026-02-01T12:00:00+00:00\", \"timezone\": \"UTC\", \"platforms\": [\"youtube\", \"x\"], \"status\": \"pending\"}]"
       },
-      "compare": "json",
+      "compare": "stdout",
       "exit_code": 0,
-      "stdout_json": [
-        {
-          "id": "id-late",
-          "video_path": "/media/clip.mp4",
-          "caption": "later",
-          "scheduled_time": "2026-02-01T12:00:00+00:00",
-          "timezone": "UTC",
-          "platforms": [
-            "youtube",
-            "x"
-          ],
-          "status": "pending",
-          "scheduled_time_local": "2026-02-01T12:00:00+00:00"
-        }
-      ]
+      "stdout": "[{\"id\": \"id-late\", \"video_path\": \"/media/clip.mp4\", \"caption\": \"later\", \"scheduled_time\": \"2026-02-01T12:00:00+00:00\", \"timezone\": \"UTC\", \"platforms\": [\"youtube\", \"x\"], \"status\": \"pending\", \"scheduled_time_local\": \"2026-02-01T12:00:00+00:00\"}]\n"
     },
     {
       "name": "providers_pristine",

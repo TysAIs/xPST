@@ -24,6 +24,18 @@ Notes on determinism (the fixture is checked in and runs on every OS):
   whose content after the run is part of the expectation, which is how the
   config write path is held to the same bytes as the Python engine).
 
+`compare` decides what is asserted:
+
+* `json` — the parsed payload (structural; for rows whose payload carries a
+  wall clock or a machine-local mtime);
+* `stdout` — the exact stdout bytes, profile path normalized. This is the mode
+  every deterministic `--json` command uses: Python prints `json.dumps`
+  defaults (`, ` / `: ` separators, insertion order), so a byte case is the only
+  thing that catches a renderer regression;
+* `digest` — an FNV-1a digest of the exact stdout, for payloads too large to
+  check in (`providers`);
+* `divergence` / `exit` — a recorded difference, or an exit code only.
+
 The script refuses to write a fixture with no scenarios, and asserts the
 recorded count, so an emptied fixture cannot silently turn the parity test into
 a no-op.
@@ -147,19 +159,19 @@ SCENARIOS = [
         "name": "status_empty_profile",
         "argv": ["status", "--json"],
         "seed": {},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "status_rich_state",
         "argv": ["status", "--json"],
         "seed": {"state.json": json.dumps(RICH_STATE, indent=2)},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "status_corrupt_state",
         "argv": ["status", "--json"],
         "seed": {"state.json": "{not json"},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "status_legacy_v1",
@@ -175,7 +187,7 @@ SCENARIOS = [
                 }
             )
         },
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         # Python raises KeyError('platforms') and exits 1 on this shape; the
@@ -209,7 +221,7 @@ SCENARIOS = [
                 }
             )
         },
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "status_backup_recovery",
@@ -220,37 +232,37 @@ SCENARIOS = [
                 {"version": 2, "posted_videos": {"b": {"posted_to": {"x": {"id": "1"}}}}}
             ),
         },
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "failures_list_rich",
         "argv": ["failures", "list", "--json"],
         "seed": {"state.json": json.dumps(RICH_STATE, indent=2)},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "failures_list_empty",
         "argv": ["failures", "list", "--json"],
         "seed": {},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_list_missing_store",
         "argv": ["schedule", "list", "--json"],
         "seed": {},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_list_empty_store",
         "argv": ["schedule", "list", "--json"],
         "seed": {"schedule.json": "[]"},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_list_entries",
         "argv": ["schedule", "list", "--json"],
         "seed": {"schedule.json": json.dumps(SCHEDULE_ENTRIES)},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_list_paused",
@@ -261,7 +273,7 @@ SCENARIOS = [
                 {"paused_at": "2026-01-01T00:00:00+00:00", "reason": "operator pause"}
             ),
         },
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_list_snapshots",
@@ -277,13 +289,13 @@ SCENARIOS = [
         "name": "schedule_list_non_array",
         "argv": ["schedule", "list", "--json"],
         "seed": {"schedule.json": "{}"},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_list_unreadable_pause",
         "argv": ["schedule", "list", "--json"],
         "seed": {"schedule.paused.json": "[1,2,3]"},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "status_explicit_config_missing",
@@ -311,7 +323,7 @@ SCENARIOS = [
                 {"version": 2, "posted_videos": {"ignored": {"posted_to": {}}}}
             ),
         },
-        "compare": "json",
+        "compare": "stdout",
     },
     # ── the local write surface (t_8e065790) ──────────────────────────────
     {
@@ -337,6 +349,32 @@ SCENARIOS = [
         "seed": {},
         "allow_nonzero": True,
         "compare": "json",
+    },
+    # `config show` resolves `~/.xpst/config.yaml` from HOME in the Python engine
+    # (it ignores XPST_CONFIG_DIR), so the profile is pinned to `<profile>/.xpst`
+    # and both engines read the same file. These are byte cases: the payload is
+    # the raw YAML document, so key order and separators are the whole contract.
+    {
+        "name": "config_show_masked",
+        "config_dir": ".xpst",
+        "argv": ["config", "show", "--json"],
+        "seed": {".xpst/config.yaml": SECRET_CONFIG},
+        "compare": "stdout",
+    },
+    {
+        "name": "config_show_raw",
+        "config_dir": ".xpst",
+        "argv": ["config", "show", "--raw", "--json"],
+        "seed": {".xpst/config.yaml": SECRET_CONFIG},
+        "compare": "stdout",
+    },
+    {
+        "name": "config_show_missing",
+        "config_dir": ".xpst",
+        "argv": ["config", "show", "--file", "MISSING", "--json"],
+        "seed": {},
+        "allow_nonzero": True,
+        "compare": "stdout",
     },
     {
         "name": "config_set_bool",
@@ -519,7 +557,7 @@ SCENARIOS = [
                 {"paused_at": "2026-01-01T00:00:00+00:00", "reason": "operator pause"}
             )
         },
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_resume",
@@ -529,19 +567,19 @@ SCENARIOS = [
                 {"paused_at": "2026-01-01T00:00:00+00:00", "reason": "operator pause"}
             )
         },
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_resume_not_paused",
         "argv": ["schedule", "resume", "--json"],
         "seed": {},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_list_ignores_root_config",
         "argv": ["--config", "MISSING", "schedule", "list", "--json"],
         "seed": {"schedule.json": json.dumps(SCHEDULE_ENTRIES[:1])},
-        "compare": "json",
+        "compare": "stdout",
     },
     # ── the provider surface (t_53b960e8) ─────────────────────────────────
     #
