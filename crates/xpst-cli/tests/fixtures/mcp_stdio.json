@@ -68,6 +68,9 @@
         ]
       ],
       "collection_runs": [],
+      "credentials": {},
+      "files": [],
+      "config_yaml_after": null,
       "steps": [
         {
           "id": 1,
@@ -1563,6 +1566,9 @@
         ]
       ],
       "collection_runs": [],
+      "credentials": {},
+      "files": [],
+      "config_yaml_after": null,
       "steps": [
         {
           "id": 1,
@@ -1756,6 +1762,9 @@
         ]
       ],
       "collection_runs": [],
+      "credentials": {},
+      "files": [],
+      "config_yaml_after": null,
       "steps": [
         {
           "id": 1,
@@ -1917,6 +1926,9 @@
         ]
       ],
       "collection_runs": [],
+      "credentials": {},
+      "files": [],
+      "config_yaml_after": null,
       "steps": [
         {
           "id": 1,
@@ -2627,6 +2639,9 @@
           2
         ]
       ],
+      "credentials": {},
+      "files": [],
+      "config_yaml_after": null,
       "steps": [
         {
           "id": 1,
@@ -2797,6 +2812,313 @@
           ],
           "multiline": false,
           "text": "{\"live\": false, \"snapshot_count\": 6, \"platforms\": {\"instagram\": {\"posts\": 1, \"views\": 800, \"likes\": 20, \"comments\": 4, \"shares\": 1, \"collection_status\": \"unknown\", \"collection_status_label\": \"Collection status unknown\", \"collection_status_source\": null, \"collection_error\": null, \"recorded_collection_error\": null, \"last_collection_attempt_at\": null, \"captured_row_statuses\": [\"unknown\"]}, \"threads\": {\"posts\": 1, \"views\": null, \"likes\": null, \"comments\": null, \"shares\": null, \"collection_status\": \"unknown\", \"collection_status_label\": \"Collection status unknown\", \"collection_status_source\": null, \"collection_error\": null, \"recorded_collection_error\": null, \"last_collection_attempt_at\": null, \"captured_row_statuses\": [\"unknown\"]}, \"x\": {\"posts\": 3, \"views\": 2999, \"likes\": 49, \"comments\": 29, \"shares\": 19, \"collection_status\": \"ok\", \"collection_status_label\": \"Collection ok\", \"collection_status_source\": \"recorded\", \"collection_error\": null, \"recorded_collection_error\": null, \"last_collection_attempt_at\": \"2026-11-21T00:00:00+00:00\", \"captured_row_statuses\": [\"failed\", \"ok\"]}, \"youtube\": {\"posts\": 1, \"views\": 1000, \"likes\": 50, \"comments\": 10, \"shares\": 5, \"collection_status\": \"failed\", \"collection_status_label\": \"Collection failed\", \"collection_status_source\": \"recorded\", \"collection_error\": {\"error\": \"quota exceeded\"}, \"recorded_collection_error\": \"quota exceeded\", \"last_collection_attempt_at\": \"2026-11-21T00:00:00+00:00\", \"captured_row_statuses\": [\"unknown\"]}}, \"collection_status\": {\"youtube\": {\"status\": \"failed\", \"source\": \"recorded\", \"error\": \"quota exceeded\", \"last_attempt_at\": \"2026-11-21T00:00:00+00:00\"}, \"x\": {\"status\": \"ok\", \"source\": \"recorded\", \"error\": null, \"last_attempt_at\": \"2026-11-21T00:00:00+00:00\"}, \"instagram\": {\"status\": \"unknown\", \"source\": null, \"error\": null, \"last_attempt_at\": null}, \"tiktok\": {\"status\": \"unknown\", \"source\": null, \"error\": null, \"last_attempt_at\": null}, \"threads\": {\"status\": \"unknown\", \"source\": null, \"error\": null, \"last_attempt_at\": null}}, \"posts\": [{\"platform\": \"instagram\", \"post_id\": \"ig-2\", \"captured_at\": \"2026-11-19T00:00:00+00:00\", \"views\": 800, \"likes\": 20, \"comments\": 4, \"shares\": 1, \"reposts\": null, \"saves\": null, \"collection_status\": \"unknown\", \"collection_error\": null}, {\"platform\": \"threads\", \"post_id\": \"th-5\", \"captured_at\": \"2026-11-16T00:00:00+00:00\", \"views\": null, \"likes\": null, \"comments\": null, \"shares\": null, \"reposts\": null, \"saves\": null, \"collection_status\": \"unknown\", \"collection_error\": null}, {\"platform\": \"x\", \"post_id\": \"x-1\", \"captured_at\": \"2026-11-20T00:00:00+00:00\", \"views\": 2000, \"likes\": 40, \"comments\": 20, \"shares\": 10, \"reposts\": null, \"saves\": null, \"collection_status\": \"ok\", \"collection_error\": null, \"quotes\": 3, \"bookmarks\": 7}, {\"platform\": \"x\", \"post_id\": \"x-3\", \"captured_at\": \"2026-11-18T00:00:00+00:00\", \"views\": 0, \"likes\": 0, \"comments\": 0, \"shares\": 0, \"reposts\": null, \"saves\": null, \"collection_status\": \"ok\", \"collection_error\": null}, {\"platform\": \"x\", \"post_id\": \"x-6\", \"captured_at\": \"2026-11-17T00:00:00+00:00\", \"views\": 999, \"likes\": 9, \"comments\": 9, \"shares\": 9, \"reposts\": null, \"saves\": null, \"collection_status\": \"failed\", \"collection_error\": null}, {\"platform\": \"youtube\", \"post_id\": \"yt-1\", \"captured_at\": \"2026-11-20T00:00:00+00:00\", \"views\": 1000, \"likes\": 50, \"comments\": 10, \"shares\": 5, \"reposts\": null, \"saves\": null, \"collection_status\": \"unknown\", \"collection_error\": null}], \"outcome_report\": {\"generated_at\": \"<CLOCK>\", \"live\": false, \"data_source\": \"recorded\", \"platforms\": {\"youtube\": {\"platform\": \"youtube\", \"ownership_verified\": false, \"ownership_checked\": true, \"has_data\": false, \"data_source\": null, \"data_source_label\": \"No data\", \"note\": \"Collection failed on the last attempt: quota exceeded.\", \"collection_status\": \"failed\", \"collection_status_label\": \"Collection failed\", \"collection_status_source\": \"recorded\", \"last_collection_attempt_at\": \"2026-11-21T00:00:00+00:00\", \"recorded_collection_error\": \"quota exceeded\", \"collection_error\": null, \"unavailable\": null, \"posts_recorded\": 0, \"posts_with_metrics\": 0, \"metrics_available\": [\"comments\", \"likes\", \"views\"], \"metrics_missing\": [\"reposts\", \"saves\", \"shares\"], \"totals\": null, \"last_captured\": null, \"staleness_hours\": null, \"staleness\": \"unknown\", \"freshness\": \"unknown\", \"outcomes\": [], \"dropped\": {\"unowned\": 0, \"ownership_unverified\": 2}}, \"x\": {\"platform\": \"x\", \"ownership_verified\": true, \"ownership_checked\": true, \"has_data\": true, \"data_source\": \"recorded\", \"data_source_label\": \"Recorded (stale)\", \"note\": null, \"collection_status\": \"ok\", \"collection_status_label\": \"Collection ok\", \"collection_status_source\": \"recorded\", \"last_collection_attempt_at\": \"2026-11-21T00:00:00+00:00\", \"recorded_collection_error\": null, \"collection_error\": null, \"unavailable\": null, \"posts_recorded\": 5, \"posts_with_metrics\": 3, \"metrics_available\": [\"bookmarks\", \"comments\", \"likes\", \"quotes\", \"reposts\", \"shares\", \"views\"], \"metrics_missing\": [\"saves\"], \"totals\": {\"views\": 2000, \"likes\": 40, \"comments\": 20, \"shares\": 10}, \"last_captured\": \"2026-11-20T00:00:00+00:00\", \"staleness_hours\": \"<CLOCK>\", \"staleness\": \"stale\", \"freshness\": \"stale\", \"outcomes\": [{\"post_id\": \"x-foreign\", \"video_id\": \"vid-theta\", \"url\": null, \"published_at\": \"2026-11-17T01:00:00+00:00\", \"status\": \"published\", \"outcome_source\": \"publish_record\", \"counted_in_totals\": false, \"metric_source\": null, \"collection_status\": null, \"captured_at\": null, \"metrics\": null}, {\"post_id\": \"x-6\", \"video_id\": \"vid-zeta\", \"url\": \"https://example.invalid/x-6\", \"published_at\": \"2026-11-15T01:00:00+00:00\", \"status\": \"published\", \"outcome_source\": \"publish_record\", \"counted_in_totals\": false, \"metric_source\": \"recorded\", \"collection_status\": \"failed\", \"captured_at\": \"2026-11-17T00:00:00+00:00\", \"metrics\": {\"views\": 999, \"likes\": 9, \"comments\": 9, \"shares\": 9}}, {\"post_id\": \"x-4\", \"video_id\": \"vid-delta\", \"url\": null, \"published_at\": \"2026-11-13T01:00:00+00:00\", \"status\": \"published\", \"outcome_source\": \"publish_record\", \"counted_in_totals\": false, \"metric_source\": null, \"collection_status\": null, \"captured_at\": null, \"metrics\": null}, {\"post_id\": \"x-3\", \"video_id\": \"vid-gamma\", \"url\": null, \"published_at\": \"2026-11-12T01:00:00+00:00\", \"status\": \"deleted\", \"outcome_source\": \"publish_record\", \"counted_in_totals\": false, \"metric_source\": \"recorded\", \"collection_status\": \"ok\", \"captured_at\": \"2026-11-18T00:00:00+00:00\", \"metrics\": {\"views\": 0, \"likes\": 0, \"comments\": 0, \"shares\": 0}}, {\"post_id\": \"x-1\", \"video_id\": \"vid-alpha\", \"url\": \"https://example.invalid/x-1\", \"published_at\": \"2026-11-10T01:00:00+00:00\", \"status\": \"published\", \"outcome_source\": \"publish_record\", \"counted_in_totals\": true, \"metric_source\": \"recorded\", \"collection_status\": \"ok\", \"captured_at\": \"2026-11-20T00:00:00+00:00\", \"metrics\": {\"views\": 2000, \"likes\": 40, \"comments\": 20, \"shares\": 10}}], \"dropped\": {\"unowned\": 1, \"ownership_unverified\": 0}}, \"instagram\": {\"platform\": \"instagram\", \"ownership_verified\": true, \"ownership_checked\": true, \"has_data\": true, \"data_source\": \"recorded\", \"data_source_label\": \"Recorded (stale)\", \"note\": \"Recorded numbers carry no collection status (unknown) \\u2014 whether the capture completed cannot be confirmed.\", \"collection_status\": \"unknown\", \"collection_status_label\": \"Collection status unknown\", \"collection_status_source\": null, \"last_collection_attempt_at\": null, \"recorded_collection_error\": null, \"collection_error\": null, \"unavailable\": null, \"posts_recorded\": 1, \"posts_with_metrics\": 1, \"metrics_available\": [\"comments\", \"likes\", \"saves\", \"shares\", \"views\"], \"metrics_missing\": [\"reposts\"], \"totals\": {\"views\": 800, \"likes\": 20, \"comments\": 4, \"shares\": 1}, \"last_captured\": \"2026-11-19T00:00:00+00:00\", \"staleness_hours\": \"<CLOCK>\", \"staleness\": \"stale\", \"freshness\": \"stale\", \"outcomes\": [{\"post_id\": \"ig-2\", \"video_id\": \"vid-beta\", \"url\": \"https://example.invalid/ig-2\", \"published_at\": \"2026-11-11T01:00:00+00:00\", \"status\": \"published\", \"outcome_source\": \"publish_record\", \"counted_in_totals\": true, \"metric_source\": \"recorded\", \"collection_status\": \"unknown\", \"captured_at\": \"2026-11-19T00:00:00+00:00\", \"metrics\": {\"views\": 800, \"likes\": 20, \"comments\": 4, \"shares\": 1}}], \"dropped\": {\"unowned\": 0, \"ownership_unverified\": 0}}, \"tiktok\": {\"platform\": \"tiktok\", \"ownership_verified\": false, \"ownership_checked\": false, \"has_data\": false, \"data_source\": null, \"data_source_label\": \"No data\", \"note\": \"No posts recorded for this platform\", \"collection_status\": \"unknown\", \"collection_status_label\": \"Collection status unknown\", \"collection_status_source\": null, \"last_collection_attempt_at\": null, \"recorded_collection_error\": null, \"collection_error\": null, \"unavailable\": null, \"posts_recorded\": 0, \"posts_with_metrics\": 0, \"metrics_available\": [\"comments\", \"likes\", \"shares\", \"views\"], \"metrics_missing\": [\"reposts\", \"saves\"], \"totals\": null, \"last_captured\": null, \"staleness_hours\": null, \"staleness\": \"unknown\", \"freshness\": \"unknown\", \"outcomes\": [], \"dropped\": {\"unowned\": 0, \"ownership_unverified\": 0}}, \"threads\": {\"platform\": \"threads\", \"ownership_verified\": true, \"ownership_checked\": true, \"has_data\": false, \"data_source\": null, \"data_source_label\": \"No data\", \"note\": \"Posts are recorded, but no metrics have been captured yet\", \"collection_status\": \"unknown\", \"collection_status_label\": \"Collection status unknown\", \"collection_status_source\": null, \"last_collection_attempt_at\": null, \"recorded_collection_error\": null, \"collection_error\": null, \"unavailable\": null, \"posts_recorded\": 1, \"posts_with_metrics\": 0, \"metrics_available\": [\"comments\", \"likes\", \"quotes\", \"reposts\", \"shares\", \"views\"], \"metrics_missing\": [\"saves\"], \"totals\": null, \"last_captured\": null, \"staleness_hours\": null, \"staleness\": \"unknown\", \"freshness\": \"unknown\", \"outcomes\": [{\"post_id\": \"th-5\", \"video_id\": \"vid-epsilon\", \"url\": null, \"published_at\": \"2026-11-14T01:00:00+00:00\", \"status\": \"published\", \"outcome_source\": \"publish_record\", \"counted_in_totals\": false, \"metric_source\": null, \"collection_status\": null, \"captured_at\": null, \"metrics\": null}], \"dropped\": {\"unowned\": 0, \"ownership_unverified\": 0}}}, \"diagnostics\": {\"unowned_ids_excluded\": [\"x:vid-eta\"], \"ownership_unverified_platforms\": [\"youtube\"], \"collection_failed_platforms\": [], \"unknown_collection_status_platforms\": [\"instagram\", \"tiktok\", \"threads\"], \"untrusted_recorded_platforms\": [\"youtube\"], \"unavailable_platforms\": {}}}}"
+        }
+      ]
+    },
+    {
+      "name": "writers",
+      "env": {
+        "XPST_MCP_ALLOW_MUTATIONS": "1",
+        "XPST_FFMPEG_PATH": "<PROFILE>/bin/ffmpeg",
+        "XPST_FFPROBE_PATH": "<PROFILE>/bin/ffprobe",
+        "XPST_YTDLP_PATH": "<PROFILE>/bin/yt-dlp"
+      },
+      "seed": {
+        "config.yaml": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    channel_id: chan-parity\n  x:\n    enabled: true\n  messenger:\n    enabled: true\n    page_id: '1234567890'\n    auto_reply: false\n    reply_rules:\n      old: stale rule\n    comment_reply_enabled: true\n    comment_platforms:\n    - instagram\nrate_limits:\n  youtube: 9\n"
+      },
+      "snapshots": [
+        [
+          "youtube",
+          "yt-1",
+          "2026-11-10T00:00:00+00:00",
+          900,
+          40,
+          8,
+          4
+        ],
+        [
+          "youtube",
+          "yt-1",
+          "2026-11-20T00:00:00+00:00",
+          1000,
+          50,
+          10,
+          5
+        ],
+        [
+          "x",
+          "x-1",
+          "2026-11-20T00:00:00+00:00",
+          2000,
+          40,
+          20,
+          10
+        ],
+        [
+          "youtube",
+          "yt-2",
+          "2026-11-19T00:00:00+00:00",
+          500,
+          null,
+          5,
+          2
+        ],
+        [
+          "instagram",
+          "ig-2",
+          "2026-11-19T00:00:00+00:00",
+          800,
+          20,
+          4,
+          1
+        ],
+        [
+          "x",
+          "x-3",
+          "2026-11-18T00:00:00+00:00",
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "collection_runs": [],
+      "credentials": {
+        "youtube_token": "{\"token\": \"parity-token\"}",
+        "messenger_page_token": "parity-page-token"
+      },
+      "files": [
+        "credentials/youtube_token.json",
+        "sessions/youtube-parity.json",
+        "sessions/x-parity.json"
+      ],
+      "config_yaml_after": "version: 4\naccounts:\n  tiktok:\n    username: ''\n    cookies_from_browser: false\n    cookies_file: null\n    proxy: null\n    enabled: true\n    client_key: ''\n    client_secret: ''\n    access_token: ''\n    refresh_token: ''\n    sandbox: false\n    draft_mode: auto\n    publish_mode: auto\n    browser_headless: true\n    provider: local\n    aggregator:\n      api_key_ref: zernio_api_key\n      account_id: ''\n      profile_id: ''\n      vendor_schedule: false\n      scoped_key: true\n  youtube:\n    enabled: false\n    client_secrets: <PROFILE>/credentials/youtube_client_secrets.json\n    token_file: <PROFILE>/credentials/youtube_token.json\n    channel_id: chan-parity\n    username: ''\n    proxy: null\n  x:\n    enabled: true\n    cookies_file: <PROFILE>/credentials/x_cookies.json\n    username: ''\n    proxy: null\n    auth_mode: cookies\n  instagram:\n    enabled: true\n    session_file: <PROFILE>/credentials/instagram_session.json\n    username: ''\n    proxy: null\n    auth_mode: graph_api\n    device_id: null\n    graph_access_token: ''\n    graph_ig_user_id: ''\n    app_id: ''\n    account_type: ''\n    account_type_source: ''\n  threads:\n    enabled: false\n    graph_access_token: ''\n    threads_user_id: ''\n    proxy: null\n    app_id: ''\n  bluesky:\n    enabled: false\n    identifier: ''\n    service: https://bsky.social\n    proxy: null\n  messenger:\n    enabled: false\n    page_id: '1234567890'\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    verify_token: ''\n    webhook_path: /webhook/messenger\n    auto_reply: true\n    reply_rules: {}\n    proxy: null\n  facebook:\n    enabled: false\n    page_id: ''\n    page_name: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    graph_user_token: ''\n    login_config_id: ''\n    proxy: null\n  local:\n    path: ''\nvideo:\n  download_dir: <PROFILE>/.xpst/downloads\n  cleanup_after_post: false\n  encoding:\n    youtube:\n      passthrough: false\n      resolution: 1920\n      bitrate: 8M\n      maxrate: 10M\n      bufsize: 12M\n      profile: high\n      gop: 15\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    instagram:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      profile: high\n      level: '4.0'\n      gop: 72\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    x:\n      resolution: 1920\n      bitrate: 10M\n      maxrate: 12M\n      profile: high\n      level: '4.0'\n      gop: 90\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    tiktok:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      bufsize: 20M\n      profile: high\n      level: '4.0'\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n      hw_encoder: null\nreliability:\n  max_retries: 3\n  retry_backoff: 2\n  circuit_breaker_threshold: 5\n  circuit_breaker_reset: 3600\nmonitoring:\n  log_level: INFO\n  log_file: <PROFILE>/.xpst/logs/xpst.log\n  log_rotation: 10 MB\n  healthcheck_port: 8080\n  enable_metrics: true\n  dashboard_username: ''\n  dashboard_password_hash: ''\n  health_check_interval: 300\nanti_bot:\n  caption_variation: false\nschedule:\n  check_interval: 900\n  catchup_window: 172800\n  catchup_times_per_day: 3\n  analytics_snapshot_enabled: false\n  analytics_snapshot_interval: 3600\n  posting_paused: false\nchat:\n  twitch_channels: []\n  kick_channels: []\n  youtube_video_id: ''\n  max_messages: 500\n  youtube_poll_interval_s: 2.0\nnotifications:\n  enabled: false\n  on_success: true\n  on_failure: true\n  discord:\n    webhook_url: ''\n  telegram:\n    bot_token: ''\n    chat_id: ''\nrate_limits:\n  youtube: 9\n  instagram: 5\n  x: 5\n  tiktok: 5\n  threads: 5\n  facebook: 5\nbio:\n  handle: ''\n  links: []\nshortcuts:\n  dashboard: Ctrl+1\n  content: Ctrl+2\n  analytics: Ctrl+3\n  connect: Ctrl+4\n  schedule: Ctrl+5\n  refresh: Ctrl+R\n  quit: Ctrl+Q\nfirst_run_complete: false\nprovider_mode: official\n",
+      "steps": [
+        {
+          "id": 1,
+          "method": "initialize",
+          "result": {
+            "capabilities": {
+              "tools": {
+                "listChanged": false
+              }
+            },
+            "protocolVersion": "2024-11-05",
+            "serverInfo": {
+              "name": "xpst-mcp",
+              "version": "1.3.0"
+            }
+          }
+        },
+        {
+          "id": 2,
+          "method": "tools/list",
+          "count": 46,
+          "names": [
+            "xpst_run",
+            "xpst_post",
+            "xpst_analytics",
+            "xpst_cross_post_analytics",
+            "xpst_followers",
+            "xpst_best_time",
+            "xpst_security_audit",
+            "xpst_suggest_caption",
+            "xpst_generate_ideas",
+            "xpst_transcript",
+            "xpst_search",
+            "xpst_activity",
+            "xpst_schedule_list",
+            "xpst_schedule_add",
+            "xpst_schedule_cancel",
+            "xpst_schedule_pause",
+            "xpst_schedule_resume",
+            "xpst_failures_retry",
+            "xpst_health",
+            "xpst_status",
+            "xpst_rate_limit_status",
+            "xpst_backfill",
+            "xpst_config_show",
+            "xpst_auth_status",
+            "xpst_byo_app",
+            "xpst_bio_get",
+            "xpst_capabilities",
+            "xpst_preflight",
+            "xpst_readiness",
+            "xpst_auth_start",
+            "xpst_providers",
+            "xpst_disconnect",
+            "xpst_delete",
+            "messenger_send",
+            "messenger_set_rules",
+            "xpst_messenger_check_comments",
+            "kb_add",
+            "kb_query",
+            "kb_organize",
+            "kb_areas",
+            "xpst_setup_start",
+            "xpst_setup_status",
+            "xpst_setup_resume",
+            "xpst_setup_reset",
+            "xpst_stream",
+            "xpst_chat"
+          ],
+          "digest": "2f1d723594eed7ae"
+        },
+        {
+          "id": 400,
+          "method": "tools/call",
+          "tool": "messenger_set_rules",
+          "arguments": {
+            "rules": {
+              "price": "Here is the price list",
+              "*": "Thanks for reaching out"
+            }
+          },
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": true,
+          "text": "{\n  \"ok\": true,\n  \"auto_reply\": true,\n  \"reply_rules\": {\n    \"price\": \"Here is the price list\",\n    \"*\": \"Thanks for reaching out\"\n  }\n}"
+        },
+        {
+          "id": 401,
+          "method": "tools/call",
+          "tool": "messenger_set_rules",
+          "arguments": {
+            "rules": {
+              "price": 5
+            },
+            "auto_reply": false
+          },
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": true,
+          "text": "{\n  \"ok\": true,\n  \"auto_reply\": false,\n  \"reply_rules\": {\n    \"price\": \"5\"\n  }\n}"
+        },
+        {
+          "id": 402,
+          "method": "tools/call",
+          "tool": "messenger_set_rules",
+          "arguments": {
+            "rules": {}
+          },
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": true,
+          "text": "{\n  \"ok\": true,\n  \"auto_reply\": true,\n  \"reply_rules\": {}\n}"
+        },
+        {
+          "id": 403,
+          "method": "tools/call",
+          "tool": "messenger_set_rules",
+          "arguments": {
+            "rules": "abc"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "Error: 'str' object has no attribute 'items'"
+        },
+        {
+          "id": 404,
+          "method": "tools/call",
+          "tool": "messenger_set_rules",
+          "arguments": {},
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": true,
+          "text": "{\n  \"ok\": true,\n  \"auto_reply\": true,\n  \"reply_rules\": {}\n}"
+        },
+        {
+          "id": 405,
+          "method": "tools/call",
+          "tool": "xpst_disconnect",
+          "arguments": {
+            "platform": "youtube"
+          },
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": true,
+          "text": "{\n  \"success\": true,\n  \"platform\": \"youtube\",\n  \"removed\": [\n    \"youtube_token\",\n    \"youtube_token.json\",\n    \"sessions/youtube-parity.json\"\n  ],\n  \"disabled\": true\n}"
+        },
+        {
+          "id": 406,
+          "method": "tools/call",
+          "tool": "xpst_disconnect",
+          "arguments": {
+            "platform": "youtube"
+          },
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": true,
+          "text": "{\n  \"success\": true,\n  \"platform\": \"youtube\",\n  \"removed\": [],\n  \"disabled\": false\n}"
+        },
+        {
+          "id": 407,
+          "method": "tools/call",
+          "tool": "xpst_disconnect",
+          "arguments": {
+            "platform": "nope"
+          },
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": true,
+          "text": "{\n  \"success\": false,\n  \"platform\": \"nope\",\n  \"removed\": [],\n  \"disabled\": false,\n  \"error\": \"Unknown platform: nope\"\n}"
+        },
+        {
+          "id": 408,
+          "method": "tools/call",
+          "tool": "xpst_disconnect",
+          "arguments": {},
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "Error: 'platform'"
+        },
+        {
+          "id": 409,
+          "method": "tools/call",
+          "tool": "xpst_disconnect",
+          "arguments": {
+            "platform": 5
+          },
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": true,
+          "text": "{\n  \"success\": false,\n  \"platform\": 5,\n  \"removed\": [],\n  \"disabled\": false,\n  \"error\": \"Unknown platform: 5\"\n}"
+        },
+        {
+          "id": 410,
+          "method": "tools/call",
+          "tool": "xpst_disconnect",
+          "arguments": {
+            "platform": "messenger"
+          },
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": true,
+          "text": "{\n  \"success\": true,\n  \"platform\": \"messenger\",\n  \"removed\": [\n    \"messenger_page_token\"\n  ],\n  \"disabled\": true\n}"
         }
       ]
     }

@@ -13,6 +13,7 @@
 //! what makes an exact JSON diff possible in `crates/xpst-cli`.
 
 use std::path::Path;
+use std::sync::OnceLock;
 
 use serde_json::Value as JsonValue;
 use thiserror::Error;
@@ -394,6 +395,70 @@ pub fn python_style_json(value: &Value) -> Result<String, String> {
 /// config snapshot — because both report the *model* (defaults included), not
 /// the file. A file-only projection reports a defaulted field as absent.
 pub const PYTHON_CONFIG_MODEL: &str = include_str!("resources/python_config_model.json");
+
+/// The document `XPSTConfig.save()` writes for a pristine profile.
+///
+/// Captured, not transcribed: `xtask/scripts/capture_config_save.py` runs the
+/// shipped `XPSTConfig.load()` + `save()` on a fresh profile and records the
+/// bytes. It is the *base* of every save — `save()` rebuilds the whole file from
+/// the dataclass model, so a field the model has and this document lacks is a
+/// field the save drops (see `xpst_surface::config_save`).
+///
+/// The two scratch roots the capture used are templated: `<PROFILE>` is the
+/// config directory and `<HOME>` is the user's home. They are different on
+/// purpose — the shipped loader rebases the credential paths onto the config
+/// directory but leaves `video.download_dir`/`monitoring.log_file` under `~`,
+/// and one shared directory would hide that.
+pub const SAVE_DEFAULTS_YAML: &str = include_str!("resources/config_save_defaults.yaml");
+
+/// Parse [`SAVE_DEFAULTS_YAML`] and substitute the two path roots.
+///
+/// A corrupt embedded resource is a build defect, so it is an error the caller
+/// prints rather than a panic.
+pub fn save_defaults(config_dir: &str, home: &str) -> Result<Value, String> {
+    let mut document = yaml::from_str(SAVE_DEFAULTS_YAML)
+        .map_err(|err| format!("embedded save defaults: {err}"))?;
+    substitute_roots(&mut document, config_dir, home);
+    Ok(document)
+}
+
+fn substitute_roots(value: &mut Value, config_dir: &str, home: &str) {
+    match value {
+        Value::String(text) => {
+            if text.contains("<PROFILE>") || text.contains("<HOME>") {
+                *text = text
+                    .replace("<PROFILE>", config_dir)
+                    .replace("<HOME>", home);
+            }
+        }
+        Value::Sequence(items) => items
+            .iter_mut()
+            .for_each(|item| substitute_roots(item, config_dir, home)),
+        Value::Mapping(map) => {
+            for (_, item) in map.iter_mut() {
+                substitute_roots(item, config_dir, home);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The *dataclass* defaults of one nested config class, as a YAML value.
+///
+/// `path` is the dotted model path (`video.encoding_youtube`, `reliability`,
+/// `monitoring`, `schedule`). Python constructs these as `ClassName(**block)`,
+/// so a partial block in `config.yaml` falls back to the dataclass default —
+/// usually `None` — and NOT to the shipped preset. `save()` then writes that
+/// object, so a `video.encoding.youtube: {resolution: 1080}` block saves every
+/// other encoding field as `null`. Reading the captured `repr_defaults` is what
+/// keeps that behaviour instead of inventing the preset.
+pub fn class_defaults(path: &str) -> Option<Value> {
+    static MODEL: OnceLock<Option<serde_json::Value>> = OnceLock::new();
+    let model = MODEL
+        .get_or_init(|| serde_json::from_str(PYTHON_CONFIG_MODEL).ok())
+        .as_ref()?;
+    model.get("repr_defaults")?.get(path).map(output::from_json)
+}
 
 /// Merge an operator's `config.yaml` onto the captured model.
 ///

@@ -1,0 +1,994 @@
+{
+  "captured_from": "XPSTConfig.load() + save() (src/xpst/config.py)",
+  "note": "Recorded by xtask/scripts/capture_config_save.py. `defaults` is the pristine save document (the writer's base shape and key order); `env_rules` holds one row per XPST_* override; every scenario is the exact config.yaml bytes the shipped engine wrote.",
+  "defaults": "version: 4\naccounts:\n  tiktok:\n    username: ''\n    cookies_from_browser: false\n    cookies_file: null\n    proxy: null\n    enabled: true\n    client_key: ''\n    client_secret: ''\n    access_token: ''\n    refresh_token: ''\n    sandbox: false\n    draft_mode: auto\n    publish_mode: auto\n    browser_headless: true\n    provider: local\n    aggregator:\n      api_key_ref: zernio_api_key\n      account_id: ''\n      profile_id: ''\n      vendor_schedule: false\n      scoped_key: true\n  youtube:\n    enabled: true\n    client_secrets: <PROFILE>/credentials/youtube_client_secrets.json\n    token_file: <PROFILE>/credentials/youtube_token.json\n    channel_id: ''\n    username: ''\n    proxy: null\n  x:\n    enabled: true\n    cookies_file: <PROFILE>/credentials/x_cookies.json\n    username: ''\n    proxy: null\n    auth_mode: cookies\n  instagram:\n    enabled: true\n    session_file: <PROFILE>/credentials/instagram_session.json\n    username: ''\n    proxy: null\n    auth_mode: graph_api\n    device_id: null\n    graph_access_token: ''\n    graph_ig_user_id: ''\n    app_id: ''\n    account_type: ''\n    account_type_source: ''\n  threads:\n    enabled: false\n    graph_access_token: ''\n    threads_user_id: ''\n    proxy: null\n    app_id: ''\n  bluesky:\n    enabled: false\n    identifier: ''\n    service: https://bsky.social\n    proxy: null\n  messenger:\n    enabled: false\n    page_id: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    verify_token: ''\n    webhook_path: /webhook/messenger\n    auto_reply: false\n    reply_rules: {}\n    proxy: null\n  facebook:\n    enabled: false\n    page_id: ''\n    page_name: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    graph_user_token: ''\n    login_config_id: ''\n    proxy: null\n  local:\n    path: ''\nvideo:\n  download_dir: <HOME>/.xpst/downloads\n  cleanup_after_post: false\n  encoding:\n    youtube:\n      passthrough: false\n      resolution: 1920\n      bitrate: 8M\n      maxrate: 10M\n      bufsize: 12M\n      profile: high\n      gop: 15\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    instagram:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      profile: high\n      level: '4.0'\n      gop: 72\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    x:\n      resolution: 1920\n      bitrate: 10M\n      maxrate: 12M\n      profile: high\n      level: '4.0'\n      gop: 90\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    tiktok:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      bufsize: 20M\n      profile: high\n      level: '4.0'\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n      hw_encoder: null\nreliability:\n  max_retries: 3\n  retry_backoff: 2\n  circuit_breaker_threshold: 5\n  circuit_breaker_reset: 3600\nmonitoring:\n  log_level: INFO\n  log_file: <HOME>/.xpst/logs/xpst.log\n  log_rotation: 10 MB\n  healthcheck_port: 8080\n  enable_metrics: true\n  dashboard_username: ''\n  dashboard_password_hash: ''\n  health_check_interval: 300\nanti_bot:\n  caption_variation: false\nschedule:\n  check_interval: 900\n  catchup_window: 172800\n  catchup_times_per_day: 3\n  analytics_snapshot_enabled: false\n  analytics_snapshot_interval: 3600\n  posting_paused: false\nchat:\n  twitch_channels: []\n  kick_channels: []\n  youtube_video_id: ''\n  max_messages: 500\n  youtube_poll_interval_s: 2.0\nnotifications:\n  enabled: false\n  on_success: true\n  on_failure: true\n  discord:\n    webhook_url: ''\n  telegram:\n    bot_token: ''\n    chat_id: ''\nrate_limits:\n  youtube: 5\n  instagram: 5\n  x: 5\n  tiktok: 5\n  threads: 5\n  facebook: 5\nbio:\n  handle: ''\n  links: []\nshortcuts:\n  dashboard: Ctrl+1\n  content: Ctrl+2\n  analytics: Ctrl+3\n  connect: Ctrl+4\n  schedule: Ctrl+5\n  refresh: Ctrl+R\n  quit: Ctrl+Q\nfirst_run_complete: false\nprovider_mode: official\n",
+  "env_rules": [
+    {
+      "var": "XPST_TIKTOK_USERNAME",
+      "probe": "parity-tiktok",
+      "changes": [
+        {
+          "path": "accounts.tiktok.username",
+          "value": "parity-tiktok"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_TIKTOK_COOKIES_FROM_BROWSER",
+      "probe": "yes",
+      "changes": [
+        {
+          "path": "accounts.tiktok.cookies_from_browser",
+          "value": true
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_TIKTOK_PROXY",
+      "probe": "http://proxy.invalid:8080",
+      "changes": [
+        {
+          "path": "accounts.tiktok.proxy",
+          "value": "http://proxy.invalid:8080"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_TIKTOK_PROVIDER",
+      "probe": "  ZERNIO  ",
+      "changes": [
+        {
+          "path": "accounts.tiktok.provider",
+          "value": "zernio"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_TIKTOK_AGGREGATOR_ACCOUNT_ID",
+      "probe": "agg-account",
+      "changes": [
+        {
+          "path": "accounts.tiktok.aggregator.account_id",
+          "value": "agg-account"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_TIKTOK_AGGREGATOR_PROFILE_ID",
+      "probe": "agg-profile",
+      "changes": [
+        {
+          "path": "accounts.tiktok.aggregator.profile_id",
+          "value": "agg-profile"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_ZERNIO_API_KEY_REF",
+      "probe": "parity_key_ref",
+      "changes": [
+        {
+          "path": "accounts.tiktok.aggregator.api_key_ref",
+          "value": "parity_key_ref"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_YOUTUBE_ENABLED",
+      "probe": "no",
+      "changes": [
+        {
+          "path": "accounts.youtube.enabled",
+          "value": false
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_YOUTUBE_CLIENT_SECRETS",
+      "probe": "/parity/client_secrets.json",
+      "changes": [
+        {
+          "path": "accounts.youtube.client_secrets",
+          "value": "/parity/client_secrets.json"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_YOUTUBE_TOKEN_FILE",
+      "probe": "/parity/token.json",
+      "changes": [
+        {
+          "path": "accounts.youtube.token_file",
+          "value": "/parity/token.json"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_YOUTUBE_PROXY",
+      "probe": "http://proxy.invalid:8081",
+      "changes": [
+        {
+          "path": "accounts.youtube.proxy",
+          "value": "http://proxy.invalid:8081"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_YOUTUBE_CHANNEL_ID",
+      "probe": "chan-env",
+      "changes": [
+        {
+          "path": "accounts.youtube.channel_id",
+          "value": "chan-env"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_YOUTUBE_USERNAME",
+      "probe": "yt-env",
+      "changes": [
+        {
+          "path": "accounts.youtube.username",
+          "value": "yt-env"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_X_ENABLED",
+      "probe": "no",
+      "changes": [
+        {
+          "path": "accounts.x.enabled",
+          "value": false
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_X_COOKIES_FILE",
+      "probe": "/parity/x_cookies.json",
+      "changes": [
+        {
+          "path": "accounts.x.cookies_file",
+          "value": "/parity/x_cookies.json"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_X_PROXY",
+      "probe": "http://proxy.invalid:8082",
+      "changes": [
+        {
+          "path": "accounts.x.proxy",
+          "value": "http://proxy.invalid:8082"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_X_AUTH_MODE",
+      "probe": "api",
+      "changes": [
+        {
+          "path": "accounts.x.auth_mode",
+          "value": "api"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_X_API_KEY",
+      "probe": "x-api-key",
+      "changes": [],
+      "removed": []
+    },
+    {
+      "var": "XPST_X_API_SECRET",
+      "probe": "x-api-secret",
+      "changes": [],
+      "removed": []
+    },
+    {
+      "var": "XPST_X_ACCESS_TOKEN",
+      "probe": "x-access-token",
+      "changes": [],
+      "removed": []
+    },
+    {
+      "var": "XPST_X_ACCESS_TOKEN_SECRET",
+      "probe": "x-access-secret",
+      "changes": [],
+      "removed": []
+    },
+    {
+      "var": "XPST_X_BEARER_TOKEN",
+      "probe": "x-bearer",
+      "changes": [],
+      "removed": []
+    },
+    {
+      "var": "XPST_X_USERNAME",
+      "probe": "x-env",
+      "changes": [
+        {
+          "path": "accounts.x.username",
+          "value": "x-env"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_INSTAGRAM_ENABLED",
+      "probe": "no",
+      "changes": [
+        {
+          "path": "accounts.instagram.enabled",
+          "value": false
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_INSTAGRAM_SESSION_FILE",
+      "probe": "/parity/instagram_session.json",
+      "changes": [
+        {
+          "path": "accounts.instagram.session_file",
+          "value": "/parity/instagram_session.json"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_INSTAGRAM_USERNAME",
+      "probe": "ig-env",
+      "changes": [
+        {
+          "path": "accounts.instagram.username",
+          "value": "ig-env"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_INSTAGRAM_PROXY",
+      "probe": "http://proxy.invalid:8083",
+      "changes": [
+        {
+          "path": "accounts.instagram.proxy",
+          "value": "http://proxy.invalid:8083"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_INSTAGRAM_AUTH_MODE",
+      "probe": "session",
+      "changes": [
+        {
+          "path": "accounts.instagram.auth_mode",
+          "value": "session"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_INSTAGRAM_GRAPH_ACCESS_TOKEN",
+      "probe": "ig-graph-token",
+      "changes": [
+        {
+          "path": "accounts.instagram.graph_access_token",
+          "value": "ig-graph-token"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_INSTAGRAM_GRAPH_IG_USER_ID",
+      "probe": "ig-user-id",
+      "changes": [
+        {
+          "path": "accounts.instagram.graph_ig_user_id",
+          "value": "ig-user-id"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_INSTAGRAM_APP_ID",
+      "probe": "ig-app-id",
+      "changes": [
+        {
+          "path": "accounts.instagram.app_id",
+          "value": "ig-app-id"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_INSTAGRAM_APP_SECRET",
+      "probe": "ig-app-secret",
+      "changes": [],
+      "removed": []
+    },
+    {
+      "var": "XPST_TIKTOK_CLIENT_KEY",
+      "probe": "tt-client-key",
+      "changes": [
+        {
+          "path": "accounts.tiktok.client_key",
+          "value": "tt-client-key"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_TIKTOK_ACCESS_TOKEN",
+      "probe": "tt-access-token",
+      "changes": [
+        {
+          "path": "accounts.tiktok.access_token",
+          "value": "tt-access-token"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_TIKTOK_REFRESH_TOKEN",
+      "probe": "tt-refresh-token",
+      "changes": [
+        {
+          "path": "accounts.tiktok.refresh_token",
+          "value": "tt-refresh-token"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_TIKTOK_SANDBOX",
+      "probe": "yes",
+      "changes": [
+        {
+          "path": "accounts.tiktok.sandbox",
+          "value": true
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_TIKTOK_PUBLISH_MODE",
+      "probe": "  BROWSER  ",
+      "changes": [
+        {
+          "path": "accounts.tiktok.publish_mode",
+          "value": "browser"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_TIKTOK_BROWSER_HEADLESS",
+      "probe": "no",
+      "changes": [
+        {
+          "path": "accounts.tiktok.browser_headless",
+          "value": false
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_BLUESKY_ENABLED",
+      "probe": "yes",
+      "changes": [
+        {
+          "path": "accounts.bluesky.enabled",
+          "value": true
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_BLUESKY_IDENTIFIER",
+      "probe": "bsky-env",
+      "changes": [
+        {
+          "path": "accounts.bluesky.identifier",
+          "value": "bsky-env"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_BLUESKY_SERVICE",
+      "probe": "https://bsky.invalid",
+      "changes": [
+        {
+          "path": "accounts.bluesky.service",
+          "value": "https://bsky.invalid"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_BLUESKY_PROXY",
+      "probe": "http://proxy.invalid:8084",
+      "changes": [
+        {
+          "path": "accounts.bluesky.proxy",
+          "value": "http://proxy.invalid:8084"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_THREADS_ENABLED",
+      "probe": "yes",
+      "changes": [
+        {
+          "path": "accounts.threads.enabled",
+          "value": true
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_THREADS_GRAPH_ACCESS_TOKEN",
+      "probe": "th-token",
+      "changes": [
+        {
+          "path": "accounts.threads.graph_access_token",
+          "value": "th-token"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_THREADS_USER_ID",
+      "probe": "th-user",
+      "changes": [
+        {
+          "path": "accounts.threads.threads_user_id",
+          "value": "th-user"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_THREADS_APP_ID",
+      "probe": "th-app-id",
+      "changes": [
+        {
+          "path": "accounts.threads.app_id",
+          "value": "th-app-id"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_THREADS_APP_SECRET",
+      "probe": "th-app-secret",
+      "changes": [],
+      "removed": []
+    },
+    {
+      "var": "XPST_THREADS_PROXY",
+      "probe": "http://proxy.invalid:8085",
+      "changes": [
+        {
+          "path": "accounts.threads.proxy",
+          "value": "http://proxy.invalid:8085"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_MESSENGER_ENABLED",
+      "probe": "yes",
+      "changes": [
+        {
+          "path": "accounts.messenger.enabled",
+          "value": true
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_MESSENGER_PAGE_ACCESS_TOKEN",
+      "probe": "ms-token",
+      "changes": [
+        {
+          "path": "accounts.messenger.page_access_token",
+          "value": "ms-token"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_MESSENGER_APP_ID",
+      "probe": "ms-app-id",
+      "changes": [
+        {
+          "path": "accounts.messenger.app_id",
+          "value": "ms-app-id"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_MESSENGER_APP_SECRET",
+      "probe": "ms-app-secret",
+      "changes": [
+        {
+          "path": "accounts.messenger.app_secret",
+          "value": "ms-app-secret"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_MESSENGER_VERIFY_TOKEN",
+      "probe": "ms-verify",
+      "changes": [
+        {
+          "path": "accounts.messenger.verify_token",
+          "value": "ms-verify"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_MESSENGER_PAGE_ID",
+      "probe": "ms-page",
+      "changes": [
+        {
+          "path": "accounts.messenger.page_id",
+          "value": "ms-page"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_MESSENGER_AUTO_REPLY",
+      "probe": "yes",
+      "changes": [
+        {
+          "path": "accounts.messenger.auto_reply",
+          "value": true
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_MESSENGER_REPLY_RULES",
+      "probe": "{\"hi\": \"hello\"}",
+      "changes": [
+        {
+          "path": "accounts.messenger.reply_rules.hi",
+          "value": "hello"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_MESSENGER_COMMENT_REPLY_ENABLED",
+      "probe": "yes",
+      "changes": [],
+      "removed": []
+    },
+    {
+      "var": "XPST_MESSENGER_COMMENT_PLATFORMS",
+      "probe": "instagram, facebook",
+      "changes": [],
+      "removed": []
+    },
+    {
+      "var": "XPST_MESSENGER_PROXY",
+      "probe": "http://proxy.invalid:8086",
+      "changes": [
+        {
+          "path": "accounts.messenger.proxy",
+          "value": "http://proxy.invalid:8086"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_LOCAL_PATH",
+      "probe": "/parity/local",
+      "changes": [
+        {
+          "path": "accounts.local.path",
+          "value": "/parity/local"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_MAX_RETRIES",
+      "probe": "9",
+      "changes": [
+        {
+          "path": "reliability.max_retries",
+          "value": 9
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_ANALYTICS_SNAPSHOT_ENABLED",
+      "probe": "yes",
+      "changes": [
+        {
+          "path": "schedule.analytics_snapshot_enabled",
+          "value": true
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_ANALYTICS_SNAPSHOT_INTERVAL",
+      "probe": "120",
+      "changes": [
+        {
+          "path": "schedule.analytics_snapshot_interval",
+          "value": 120
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_LOG_LEVEL",
+      "probe": "DEBUG",
+      "changes": [
+        {
+          "path": "monitoring.log_level",
+          "value": "DEBUG"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_LOG_FILE",
+      "probe": "/parity/xpst.log",
+      "changes": [
+        {
+          "path": "monitoring.log_file",
+          "value": "/parity/xpst.log"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_NOTIFICATIONS_ENABLED",
+      "probe": "yes",
+      "changes": [
+        {
+          "path": "notifications.enabled",
+          "value": true
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_DISCORD_WEBHOOK_URL",
+      "probe": "https://example.invalid/env-hook",
+      "changes": [
+        {
+          "path": "notifications.discord.webhook_url",
+          "value": "https://example.invalid/env-hook"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_TELEGRAM_BOT_TOKEN",
+      "probe": "tg-token",
+      "changes": [
+        {
+          "path": "notifications.telegram.bot_token",
+          "value": "tg-token"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_TELEGRAM_CHAT_ID",
+      "probe": "tg-chat",
+      "changes": [
+        {
+          "path": "notifications.telegram.chat_id",
+          "value": "tg-chat"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "var": "XPST_PROVIDER_MODE",
+      "probe": "  Community  ",
+      "changes": [
+        {
+          "path": "provider_mode",
+          "value": "  community  "
+        }
+      ],
+      "removed": []
+    }
+  ],
+  "secret_env": {
+    "env": {
+      "XPST_TIKTOK_CLIENT_SECRET": "parity-client-secret"
+    },
+    "config_yaml": "version: 4\naccounts:\n  tiktok:\n    username: ''\n    cookies_from_browser: false\n    cookies_file: null\n    proxy: null\n    enabled: true\n    client_key: ''\n    client_secret: ''\n    access_token: ''\n    refresh_token: ''\n    sandbox: false\n    draft_mode: auto\n    publish_mode: auto\n    browser_headless: true\n    provider: local\n    aggregator:\n      api_key_ref: zernio_api_key\n      account_id: ''\n      profile_id: ''\n      vendor_schedule: false\n      scoped_key: true\n  youtube:\n    enabled: true\n    client_secrets: <PROFILE>/credentials/youtube_client_secrets.json\n    token_file: <PROFILE>/credentials/youtube_token.json\n    channel_id: ''\n    username: ''\n    proxy: null\n  x:\n    enabled: true\n    cookies_file: <PROFILE>/credentials/x_cookies.json\n    username: ''\n    proxy: null\n    auth_mode: cookies\n  instagram:\n    enabled: true\n    session_file: <PROFILE>/credentials/instagram_session.json\n    username: ''\n    proxy: null\n    auth_mode: graph_api\n    device_id: null\n    graph_access_token: ''\n    graph_ig_user_id: ''\n    app_id: ''\n    account_type: ''\n    account_type_source: ''\n  threads:\n    enabled: false\n    graph_access_token: ''\n    threads_user_id: ''\n    proxy: null\n    app_id: ''\n  bluesky:\n    enabled: false\n    identifier: ''\n    service: https://bsky.social\n    proxy: null\n  messenger:\n    enabled: false\n    page_id: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    verify_token: ''\n    webhook_path: /webhook/messenger\n    auto_reply: false\n    reply_rules: {}\n    proxy: null\n  facebook:\n    enabled: false\n    page_id: ''\n    page_name: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    graph_user_token: ''\n    login_config_id: ''\n    proxy: null\n  local:\n    path: ''\nvideo:\n  download_dir: <HOME>/.xpst/downloads\n  cleanup_after_post: false\n  encoding:\n    youtube:\n      passthrough: false\n      resolution: 1920\n      bitrate: 8M\n      maxrate: 10M\n      bufsize: 12M\n      profile: high\n      gop: 15\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    instagram:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      profile: high\n      level: '4.0'\n      gop: 72\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    x:\n      resolution: 1920\n      bitrate: 10M\n      maxrate: 12M\n      profile: high\n      level: '4.0'\n      gop: 90\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    tiktok:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      bufsize: 20M\n      profile: high\n      level: '4.0'\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n      hw_encoder: null\nreliability:\n  max_retries: 3\n  retry_backoff: 2\n  circuit_breaker_threshold: 5\n  circuit_breaker_reset: 3600\nmonitoring:\n  log_level: INFO\n  log_file: <HOME>/.xpst/logs/xpst.log\n  log_rotation: 10 MB\n  healthcheck_port: 8080\n  enable_metrics: true\n  dashboard_username: ''\n  dashboard_password_hash: ''\n  health_check_interval: 300\nanti_bot:\n  caption_variation: false\nschedule:\n  check_interval: 900\n  catchup_window: 172800\n  catchup_times_per_day: 3\n  analytics_snapshot_enabled: false\n  analytics_snapshot_interval: 3600\n  posting_paused: false\nchat:\n  twitch_channels: []\n  kick_channels: []\n  youtube_video_id: ''\n  max_messages: 500\n  youtube_poll_interval_s: 2.0\nnotifications:\n  enabled: false\n  on_success: true\n  on_failure: true\n  discord:\n    webhook_url: ''\n  telegram:\n    bot_token: ''\n    chat_id: ''\nrate_limits:\n  youtube: 5\n  instagram: 5\n  x: 5\n  tiktok: 5\n  threads: 5\n  facebook: 5\nbio:\n  handle: ''\n  links: []\nshortcuts:\n  dashboard: Ctrl+1\n  content: Ctrl+2\n  analytics: Ctrl+3\n  connect: Ctrl+4\n  schedule: Ctrl+5\n  refresh: Ctrl+R\n  quit: Ctrl+Q\nfirst_run_complete: false\nprovider_mode: official\n",
+    "stored_secret": "parity-client-secret"
+  },
+  "bad_env": {
+    "env": {
+      "XPST_MAX_RETRIES": "not-a-number"
+    },
+    "error": "ValueError: invalid literal for int() with base 10: 'not-a-number'"
+  },
+  "scenarios": [
+    {
+      "name": "pristine",
+      "seed": null,
+      "env": {},
+      "mutation": null,
+      "credentials_seeded": {},
+      "files_seeded": [],
+      "payload": null,
+      "config_yaml": "version: 4\naccounts:\n  tiktok:\n    username: ''\n    cookies_from_browser: false\n    cookies_file: null\n    proxy: null\n    enabled: true\n    client_key: ''\n    client_secret: ''\n    access_token: ''\n    refresh_token: ''\n    sandbox: false\n    draft_mode: auto\n    publish_mode: auto\n    browser_headless: true\n    provider: local\n    aggregator:\n      api_key_ref: zernio_api_key\n      account_id: ''\n      profile_id: ''\n      vendor_schedule: false\n      scoped_key: true\n  youtube:\n    enabled: true\n    client_secrets: <PROFILE>/credentials/youtube_client_secrets.json\n    token_file: <PROFILE>/credentials/youtube_token.json\n    channel_id: ''\n    username: ''\n    proxy: null\n  x:\n    enabled: true\n    cookies_file: <PROFILE>/credentials/x_cookies.json\n    username: ''\n    proxy: null\n    auth_mode: cookies\n  instagram:\n    enabled: true\n    session_file: <PROFILE>/credentials/instagram_session.json\n    username: ''\n    proxy: null\n    auth_mode: graph_api\n    device_id: null\n    graph_access_token: ''\n    graph_ig_user_id: ''\n    app_id: ''\n    account_type: ''\n    account_type_source: ''\n  threads:\n    enabled: false\n    graph_access_token: ''\n    threads_user_id: ''\n    proxy: null\n    app_id: ''\n  bluesky:\n    enabled: false\n    identifier: ''\n    service: https://bsky.social\n    proxy: null\n  messenger:\n    enabled: false\n    page_id: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    verify_token: ''\n    webhook_path: /webhook/messenger\n    auto_reply: false\n    reply_rules: {}\n    proxy: null\n  facebook:\n    enabled: false\n    page_id: ''\n    page_name: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    graph_user_token: ''\n    login_config_id: ''\n    proxy: null\n  local:\n    path: ''\nvideo:\n  download_dir: <HOME>/.xpst/downloads\n  cleanup_after_post: false\n  encoding:\n    youtube:\n      passthrough: false\n      resolution: 1920\n      bitrate: 8M\n      maxrate: 10M\n      bufsize: 12M\n      profile: high\n      gop: 15\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    instagram:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      profile: high\n      level: '4.0'\n      gop: 72\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    x:\n      resolution: 1920\n      bitrate: 10M\n      maxrate: 12M\n      profile: high\n      level: '4.0'\n      gop: 90\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    tiktok:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      bufsize: 20M\n      profile: high\n      level: '4.0'\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n      hw_encoder: null\nreliability:\n  max_retries: 3\n  retry_backoff: 2\n  circuit_breaker_threshold: 5\n  circuit_breaker_reset: 3600\nmonitoring:\n  log_level: INFO\n  log_file: <HOME>/.xpst/logs/xpst.log\n  log_rotation: 10 MB\n  healthcheck_port: 8080\n  enable_metrics: true\n  dashboard_username: ''\n  dashboard_password_hash: ''\n  health_check_interval: 300\nanti_bot:\n  caption_variation: false\nschedule:\n  check_interval: 900\n  catchup_window: 172800\n  catchup_times_per_day: 3\n  analytics_snapshot_enabled: false\n  analytics_snapshot_interval: 3600\n  posting_paused: false\nchat:\n  twitch_channels: []\n  kick_channels: []\n  youtube_video_id: ''\n  max_messages: 500\n  youtube_poll_interval_s: 2.0\nnotifications:\n  enabled: false\n  on_success: true\n  on_failure: true\n  discord:\n    webhook_url: ''\n  telegram:\n    bot_token: ''\n    chat_id: ''\nrate_limits:\n  youtube: 5\n  instagram: 5\n  x: 5\n  tiktok: 5\n  threads: 5\n  facebook: 5\nbio:\n  handle: ''\n  links: []\nshortcuts:\n  dashboard: Ctrl+1\n  content: Ctrl+2\n  analytics: Ctrl+3\n  connect: Ctrl+4\n  schedule: Ctrl+5\n  refresh: Ctrl+R\n  quit: Ctrl+Q\nfirst_run_complete: false\nprovider_mode: official\n",
+      "files_after": [
+        "config.yaml"
+      ],
+      "credential_keys_after": {}
+    },
+    {
+      "name": "partial",
+      "seed": "version: 4\naccounts:\n  youtube:\n    enabled: false\n    channel_id: chan-parity\n  x:\n    cookies_file: ~/.crosspstr/credentials/x_cookies.json\n    auth_mode: cookies\n  instagram:\n    account_type: business\n    account_type_source: graph_api\n  tiktok:\n    aggregator:\n      account_id: agg-account\n  messenger:\n    enabled: true\n    page_id: '1234567890'\n    auto_reply: true\n    reply_rules:\n      price: Here is the price list\n      '*': Thanks for reaching out\n    comment_platforms:\n    - instagram\nvideo:\n  download_dir: ~/.crosspstr/downloads\n  encoding:\n    youtube:\n      resolution: 1080\nreliability:\n  max_retries: 7\nmonitoring:\n  log_level: DEBUG\nschedule:\n  check_interval: 120\nnotifications:\n  enabled: true\n  discord:\n    webhook_url: https://example.invalid/hook\n  telegram:\n    chat_id: '42'\nrate_limits:\n  youtube: 9\nbio:\n  handle: parity\n  links:\n  - label: Site\n    url: https://example.invalid\n  - label: ''\n    url: https://example.invalid/dropped\n  - not-a-mapping\nchat:\n  twitch_channels:\n  - alpha\n  - '  '\n  - beta\n  max_messages: 42\nanti_bot:\n  caption_variation: true\nshortcuts:\n  dashboard: Ctrl+9\nfirst_run_complete: true\nprovider_mode: community\n",
+      "env": {},
+      "mutation": null,
+      "credentials_seeded": {},
+      "files_seeded": [],
+      "payload": null,
+      "config_yaml": "version: 4\naccounts:\n  tiktok:\n    username: ''\n    cookies_from_browser: false\n    cookies_file: null\n    proxy: null\n    enabled: true\n    client_key: ''\n    client_secret: ''\n    access_token: ''\n    refresh_token: ''\n    sandbox: false\n    draft_mode: auto\n    publish_mode: auto\n    browser_headless: true\n    provider: local\n    aggregator:\n      api_key_ref: zernio_api_key\n      account_id: agg-account\n      profile_id: ''\n      vendor_schedule: false\n      scoped_key: true\n  youtube:\n    enabled: false\n    client_secrets: <PROFILE>/credentials/youtube_client_secrets.json\n    token_file: <PROFILE>/credentials/youtube_token.json\n    channel_id: chan-parity\n    username: ''\n    proxy: null\n  x:\n    enabled: true\n    cookies_file: <PROFILE>/credentials/x_cookies.json\n    username: ''\n    proxy: null\n    auth_mode: cookies\n  instagram:\n    enabled: true\n    session_file: <PROFILE>/credentials/instagram_session.json\n    username: ''\n    proxy: null\n    auth_mode: graph_api\n    device_id: null\n    graph_access_token: ''\n    graph_ig_user_id: ''\n    app_id: ''\n    account_type: business\n    account_type_source: graph_api\n  threads:\n    enabled: false\n    graph_access_token: ''\n    threads_user_id: ''\n    proxy: null\n    app_id: ''\n  bluesky:\n    enabled: false\n    identifier: ''\n    service: https://bsky.social\n    proxy: null\n  messenger:\n    enabled: true\n    page_id: '1234567890'\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    verify_token: ''\n    webhook_path: /webhook/messenger\n    auto_reply: true\n    reply_rules:\n      price: Here is the price list\n      '*': Thanks for reaching out\n    proxy: null\n  facebook:\n    enabled: false\n    page_id: ''\n    page_name: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    graph_user_token: ''\n    login_config_id: ''\n    proxy: null\n  local:\n    path: ''\nvideo:\n  download_dir: <HOME>/.xpst/downloads\n  cleanup_after_post: false\n  encoding:\n    youtube:\n      passthrough: false\n      resolution: 1080\n      bitrate: null\n      maxrate: null\n      bufsize: null\n      profile: null\n      gop: null\n      fps: null\n      color: bt709\n      pix_fmt: yuv420p\n    instagram:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      profile: high\n      level: '4.0'\n      gop: 72\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    x:\n      resolution: 1920\n      bitrate: 10M\n      maxrate: 12M\n      profile: high\n      level: '4.0'\n      gop: 90\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    tiktok:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      bufsize: 20M\n      profile: high\n      level: '4.0'\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n      hw_encoder: null\nreliability:\n  max_retries: 7\n  retry_backoff: 2\n  circuit_breaker_threshold: 5\n  circuit_breaker_reset: 3600\nmonitoring:\n  log_level: DEBUG\n  log_file: <HOME>/.xpst/logs/xpst.log\n  log_rotation: 10 MB\n  healthcheck_port: 8080\n  enable_metrics: true\n  dashboard_username: ''\n  dashboard_password_hash: ''\n  health_check_interval: 300\nanti_bot:\n  caption_variation: true\nschedule:\n  check_interval: 120\n  catchup_window: 172800\n  catchup_times_per_day: 3\n  analytics_snapshot_enabled: false\n  analytics_snapshot_interval: 3600\n  posting_paused: false\nchat:\n  twitch_channels:\n  - alpha\n  - beta\n  kick_channels: []\n  youtube_video_id: ''\n  max_messages: 42\n  youtube_poll_interval_s: 2.0\nnotifications:\n  enabled: true\n  on_success: true\n  on_failure: true\n  discord:\n    webhook_url: https://example.invalid/hook\n  telegram:\n    bot_token: ''\n    chat_id: '42'\nrate_limits:\n  youtube: 9\n  instagram: 5\n  x: 5\n  tiktok: 5\n  threads: 5\n  facebook: 5\nbio:\n  handle: parity\n  links:\n  - label: Site\n    url: https://example.invalid\nshortcuts:\n  dashboard: Ctrl+9\nfirst_run_complete: true\nprovider_mode: community\n",
+      "files_after": [
+        "config.yaml"
+      ],
+      "credential_keys_after": {}
+    },
+    {
+      "name": "messenger_rules",
+      "seed": null,
+      "env": {},
+      "mutation": {
+        "kind": "messenger_rules",
+        "rules": {
+          "price": "Here is the price list",
+          "*": "Thanks for reaching out"
+        },
+        "auto_reply": true
+      },
+      "credentials_seeded": {},
+      "files_seeded": [],
+      "payload": {
+        "ok": true,
+        "auto_reply": true,
+        "reply_rules": {
+          "price": "Here is the price list",
+          "*": "Thanks for reaching out"
+        }
+      },
+      "config_yaml": "version: 4\naccounts:\n  tiktok:\n    username: ''\n    cookies_from_browser: false\n    cookies_file: null\n    proxy: null\n    enabled: true\n    client_key: ''\n    client_secret: ''\n    access_token: ''\n    refresh_token: ''\n    sandbox: false\n    draft_mode: auto\n    publish_mode: auto\n    browser_headless: true\n    provider: local\n    aggregator:\n      api_key_ref: zernio_api_key\n      account_id: ''\n      profile_id: ''\n      vendor_schedule: false\n      scoped_key: true\n  youtube:\n    enabled: true\n    client_secrets: <PROFILE>/credentials/youtube_client_secrets.json\n    token_file: <PROFILE>/credentials/youtube_token.json\n    channel_id: ''\n    username: ''\n    proxy: null\n  x:\n    enabled: true\n    cookies_file: <PROFILE>/credentials/x_cookies.json\n    username: ''\n    proxy: null\n    auth_mode: cookies\n  instagram:\n    enabled: true\n    session_file: <PROFILE>/credentials/instagram_session.json\n    username: ''\n    proxy: null\n    auth_mode: graph_api\n    device_id: null\n    graph_access_token: ''\n    graph_ig_user_id: ''\n    app_id: ''\n    account_type: ''\n    account_type_source: ''\n  threads:\n    enabled: false\n    graph_access_token: ''\n    threads_user_id: ''\n    proxy: null\n    app_id: ''\n  bluesky:\n    enabled: false\n    identifier: ''\n    service: https://bsky.social\n    proxy: null\n  messenger:\n    enabled: false\n    page_id: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    verify_token: ''\n    webhook_path: /webhook/messenger\n    auto_reply: true\n    reply_rules:\n      price: Here is the price list\n      '*': Thanks for reaching out\n    proxy: null\n  facebook:\n    enabled: false\n    page_id: ''\n    page_name: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    graph_user_token: ''\n    login_config_id: ''\n    proxy: null\n  local:\n    path: ''\nvideo:\n  download_dir: <HOME>/.xpst/downloads\n  cleanup_after_post: false\n  encoding:\n    youtube:\n      passthrough: false\n      resolution: 1920\n      bitrate: 8M\n      maxrate: 10M\n      bufsize: 12M\n      profile: high\n      gop: 15\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    instagram:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      profile: high\n      level: '4.0'\n      gop: 72\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    x:\n      resolution: 1920\n      bitrate: 10M\n      maxrate: 12M\n      profile: high\n      level: '4.0'\n      gop: 90\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    tiktok:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      bufsize: 20M\n      profile: high\n      level: '4.0'\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n      hw_encoder: null\nreliability:\n  max_retries: 3\n  retry_backoff: 2\n  circuit_breaker_threshold: 5\n  circuit_breaker_reset: 3600\nmonitoring:\n  log_level: INFO\n  log_file: <HOME>/.xpst/logs/xpst.log\n  log_rotation: 10 MB\n  healthcheck_port: 8080\n  enable_metrics: true\n  dashboard_username: ''\n  dashboard_password_hash: ''\n  health_check_interval: 300\nanti_bot:\n  caption_variation: false\nschedule:\n  check_interval: 900\n  catchup_window: 172800\n  catchup_times_per_day: 3\n  analytics_snapshot_enabled: false\n  analytics_snapshot_interval: 3600\n  posting_paused: false\nchat:\n  twitch_channels: []\n  kick_channels: []\n  youtube_video_id: ''\n  max_messages: 500\n  youtube_poll_interval_s: 2.0\nnotifications:\n  enabled: false\n  on_success: true\n  on_failure: true\n  discord:\n    webhook_url: ''\n  telegram:\n    bot_token: ''\n    chat_id: ''\nrate_limits:\n  youtube: 5\n  instagram: 5\n  x: 5\n  tiktok: 5\n  threads: 5\n  facebook: 5\nbio:\n  handle: ''\n  links: []\nshortcuts:\n  dashboard: Ctrl+1\n  content: Ctrl+2\n  analytics: Ctrl+3\n  connect: Ctrl+4\n  schedule: Ctrl+5\n  refresh: Ctrl+R\n  quit: Ctrl+Q\nfirst_run_complete: false\nprovider_mode: official\n",
+      "files_after": [
+        "config.yaml"
+      ],
+      "credential_keys_after": {}
+    },
+    {
+      "name": "messenger_rules_coerced",
+      "seed": null,
+      "env": {},
+      "mutation": {
+        "kind": "messenger_rules",
+        "rules": {
+          "price": "Here is the price list",
+          "*": 5
+        },
+        "auto_reply": false
+      },
+      "credentials_seeded": {},
+      "files_seeded": [],
+      "payload": {
+        "ok": true,
+        "auto_reply": false,
+        "reply_rules": {
+          "price": "Here is the price list",
+          "*": "5"
+        }
+      },
+      "config_yaml": "version: 4\naccounts:\n  tiktok:\n    username: ''\n    cookies_from_browser: false\n    cookies_file: null\n    proxy: null\n    enabled: true\n    client_key: ''\n    client_secret: ''\n    access_token: ''\n    refresh_token: ''\n    sandbox: false\n    draft_mode: auto\n    publish_mode: auto\n    browser_headless: true\n    provider: local\n    aggregator:\n      api_key_ref: zernio_api_key\n      account_id: ''\n      profile_id: ''\n      vendor_schedule: false\n      scoped_key: true\n  youtube:\n    enabled: true\n    client_secrets: <PROFILE>/credentials/youtube_client_secrets.json\n    token_file: <PROFILE>/credentials/youtube_token.json\n    channel_id: ''\n    username: ''\n    proxy: null\n  x:\n    enabled: true\n    cookies_file: <PROFILE>/credentials/x_cookies.json\n    username: ''\n    proxy: null\n    auth_mode: cookies\n  instagram:\n    enabled: true\n    session_file: <PROFILE>/credentials/instagram_session.json\n    username: ''\n    proxy: null\n    auth_mode: graph_api\n    device_id: null\n    graph_access_token: ''\n    graph_ig_user_id: ''\n    app_id: ''\n    account_type: ''\n    account_type_source: ''\n  threads:\n    enabled: false\n    graph_access_token: ''\n    threads_user_id: ''\n    proxy: null\n    app_id: ''\n  bluesky:\n    enabled: false\n    identifier: ''\n    service: https://bsky.social\n    proxy: null\n  messenger:\n    enabled: false\n    page_id: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    verify_token: ''\n    webhook_path: /webhook/messenger\n    auto_reply: false\n    reply_rules:\n      price: Here is the price list\n      '*': '5'\n    proxy: null\n  facebook:\n    enabled: false\n    page_id: ''\n    page_name: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    graph_user_token: ''\n    login_config_id: ''\n    proxy: null\n  local:\n    path: ''\nvideo:\n  download_dir: <HOME>/.xpst/downloads\n  cleanup_after_post: false\n  encoding:\n    youtube:\n      passthrough: false\n      resolution: 1920\n      bitrate: 8M\n      maxrate: 10M\n      bufsize: 12M\n      profile: high\n      gop: 15\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    instagram:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      profile: high\n      level: '4.0'\n      gop: 72\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    x:\n      resolution: 1920\n      bitrate: 10M\n      maxrate: 12M\n      profile: high\n      level: '4.0'\n      gop: 90\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    tiktok:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      bufsize: 20M\n      profile: high\n      level: '4.0'\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n      hw_encoder: null\nreliability:\n  max_retries: 3\n  retry_backoff: 2\n  circuit_breaker_threshold: 5\n  circuit_breaker_reset: 3600\nmonitoring:\n  log_level: INFO\n  log_file: <HOME>/.xpst/logs/xpst.log\n  log_rotation: 10 MB\n  healthcheck_port: 8080\n  enable_metrics: true\n  dashboard_username: ''\n  dashboard_password_hash: ''\n  health_check_interval: 300\nanti_bot:\n  caption_variation: false\nschedule:\n  check_interval: 900\n  catchup_window: 172800\n  catchup_times_per_day: 3\n  analytics_snapshot_enabled: false\n  analytics_snapshot_interval: 3600\n  posting_paused: false\nchat:\n  twitch_channels: []\n  kick_channels: []\n  youtube_video_id: ''\n  max_messages: 500\n  youtube_poll_interval_s: 2.0\nnotifications:\n  enabled: false\n  on_success: true\n  on_failure: true\n  discord:\n    webhook_url: ''\n  telegram:\n    bot_token: ''\n    chat_id: ''\nrate_limits:\n  youtube: 5\n  instagram: 5\n  x: 5\n  tiktok: 5\n  threads: 5\n  facebook: 5\nbio:\n  handle: ''\n  links: []\nshortcuts:\n  dashboard: Ctrl+1\n  content: Ctrl+2\n  analytics: Ctrl+3\n  connect: Ctrl+4\n  schedule: Ctrl+5\n  refresh: Ctrl+R\n  quit: Ctrl+Q\nfirst_run_complete: false\nprovider_mode: official\n",
+      "files_after": [
+        "config.yaml"
+      ],
+      "credential_keys_after": {}
+    },
+    {
+      "name": "disconnect_youtube",
+      "seed": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    channel_id: chan-parity\n  x:\n    enabled: true\n",
+      "env": {},
+      "mutation": {
+        "kind": "disconnect",
+        "platform": "youtube"
+      },
+      "credentials_seeded": {
+        "youtube_token": "{\"token\": \"parity-token\"}"
+      },
+      "files_seeded": [
+        "credentials/youtube_token.json",
+        "sessions/youtube-parity.json",
+        "sessions/x-parity.json",
+        "credentials/x_cookies.json"
+      ],
+      "payload": {
+        "success": true,
+        "platform": "youtube",
+        "removed": [
+          "youtube_token",
+          "youtube_token.json",
+          "sessions/youtube-parity.json"
+        ],
+        "disabled": true
+      },
+      "config_yaml": "version: 4\naccounts:\n  tiktok:\n    username: ''\n    cookies_from_browser: false\n    cookies_file: null\n    proxy: null\n    enabled: true\n    client_key: ''\n    client_secret: ''\n    access_token: ''\n    refresh_token: ''\n    sandbox: false\n    draft_mode: auto\n    publish_mode: auto\n    browser_headless: true\n    provider: local\n    aggregator:\n      api_key_ref: zernio_api_key\n      account_id: ''\n      profile_id: ''\n      vendor_schedule: false\n      scoped_key: true\n  youtube:\n    enabled: false\n    client_secrets: <PROFILE>/credentials/youtube_client_secrets.json\n    token_file: <PROFILE>/credentials/youtube_token.json\n    channel_id: chan-parity\n    username: ''\n    proxy: null\n  x:\n    enabled: true\n    cookies_file: <PROFILE>/credentials/x_cookies.json\n    username: ''\n    proxy: null\n    auth_mode: cookies\n  instagram:\n    enabled: true\n    session_file: <PROFILE>/credentials/instagram_session.json\n    username: ''\n    proxy: null\n    auth_mode: graph_api\n    device_id: null\n    graph_access_token: ''\n    graph_ig_user_id: ''\n    app_id: ''\n    account_type: ''\n    account_type_source: ''\n  threads:\n    enabled: false\n    graph_access_token: ''\n    threads_user_id: ''\n    proxy: null\n    app_id: ''\n  bluesky:\n    enabled: false\n    identifier: ''\n    service: https://bsky.social\n    proxy: null\n  messenger:\n    enabled: false\n    page_id: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    verify_token: ''\n    webhook_path: /webhook/messenger\n    auto_reply: false\n    reply_rules: {}\n    proxy: null\n  facebook:\n    enabled: false\n    page_id: ''\n    page_name: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    graph_user_token: ''\n    login_config_id: ''\n    proxy: null\n  local:\n    path: ''\nvideo:\n  download_dir: <HOME>/.xpst/downloads\n  cleanup_after_post: false\n  encoding:\n    youtube:\n      passthrough: false\n      resolution: 1920\n      bitrate: 8M\n      maxrate: 10M\n      bufsize: 12M\n      profile: high\n      gop: 15\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    instagram:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      profile: high\n      level: '4.0'\n      gop: 72\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    x:\n      resolution: 1920\n      bitrate: 10M\n      maxrate: 12M\n      profile: high\n      level: '4.0'\n      gop: 90\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    tiktok:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      bufsize: 20M\n      profile: high\n      level: '4.0'\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n      hw_encoder: null\nreliability:\n  max_retries: 3\n  retry_backoff: 2\n  circuit_breaker_threshold: 5\n  circuit_breaker_reset: 3600\nmonitoring:\n  log_level: INFO\n  log_file: <HOME>/.xpst/logs/xpst.log\n  log_rotation: 10 MB\n  healthcheck_port: 8080\n  enable_metrics: true\n  dashboard_username: ''\n  dashboard_password_hash: ''\n  health_check_interval: 300\nanti_bot:\n  caption_variation: false\nschedule:\n  check_interval: 900\n  catchup_window: 172800\n  catchup_times_per_day: 3\n  analytics_snapshot_enabled: false\n  analytics_snapshot_interval: 3600\n  posting_paused: false\nchat:\n  twitch_channels: []\n  kick_channels: []\n  youtube_video_id: ''\n  max_messages: 500\n  youtube_poll_interval_s: 2.0\nnotifications:\n  enabled: false\n  on_success: true\n  on_failure: true\n  discord:\n    webhook_url: ''\n  telegram:\n    bot_token: ''\n    chat_id: ''\nrate_limits:\n  youtube: 5\n  instagram: 5\n  x: 5\n  tiktok: 5\n  threads: 5\n  facebook: 5\nbio:\n  handle: ''\n  links: []\nshortcuts:\n  dashboard: Ctrl+1\n  content: Ctrl+2\n  analytics: Ctrl+3\n  connect: Ctrl+4\n  schedule: Ctrl+5\n  refresh: Ctrl+R\n  quit: Ctrl+Q\nfirst_run_complete: false\nprovider_mode: official\n",
+      "files_after": [
+        "config.yaml",
+        "credentials/.fallback_salt",
+        "credentials/.fallback_secret",
+        "credentials/x_cookies.json",
+        "sessions/x-parity.json"
+      ],
+      "credential_keys_after": []
+    },
+    {
+      "name": "disconnect_unknown",
+      "seed": "version: 4\naccounts:\n  youtube:\n    enabled: true\n    channel_id: chan-parity\n  x:\n    enabled: true\n",
+      "env": {},
+      "mutation": {
+        "kind": "disconnect",
+        "platform": "nope"
+      },
+      "credentials_seeded": {
+        "youtube_token": "{\"token\": \"parity-token\"}"
+      },
+      "files_seeded": [
+        "credentials/youtube_token.json",
+        "sessions/youtube-parity.json",
+        "sessions/x-parity.json",
+        "credentials/x_cookies.json"
+      ],
+      "payload": {
+        "success": false,
+        "platform": "nope",
+        "removed": [],
+        "disabled": false,
+        "error": "Unknown platform: nope"
+      },
+      "config_yaml": "version: 4\naccounts:\n  tiktok:\n    username: ''\n    cookies_from_browser: false\n    cookies_file: null\n    proxy: null\n    enabled: true\n    client_key: ''\n    client_secret: ''\n    access_token: ''\n    refresh_token: ''\n    sandbox: false\n    draft_mode: auto\n    publish_mode: auto\n    browser_headless: true\n    provider: local\n    aggregator:\n      api_key_ref: zernio_api_key\n      account_id: ''\n      profile_id: ''\n      vendor_schedule: false\n      scoped_key: true\n  youtube:\n    enabled: true\n    client_secrets: <PROFILE>/credentials/youtube_client_secrets.json\n    token_file: <PROFILE>/credentials/youtube_token.json\n    channel_id: chan-parity\n    username: ''\n    proxy: null\n  x:\n    enabled: true\n    cookies_file: <PROFILE>/credentials/x_cookies.json\n    username: ''\n    proxy: null\n    auth_mode: cookies\n  instagram:\n    enabled: true\n    session_file: <PROFILE>/credentials/instagram_session.json\n    username: ''\n    proxy: null\n    auth_mode: graph_api\n    device_id: null\n    graph_access_token: ''\n    graph_ig_user_id: ''\n    app_id: ''\n    account_type: ''\n    account_type_source: ''\n  threads:\n    enabled: false\n    graph_access_token: ''\n    threads_user_id: ''\n    proxy: null\n    app_id: ''\n  bluesky:\n    enabled: false\n    identifier: ''\n    service: https://bsky.social\n    proxy: null\n  messenger:\n    enabled: false\n    page_id: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    verify_token: ''\n    webhook_path: /webhook/messenger\n    auto_reply: false\n    reply_rules: {}\n    proxy: null\n  facebook:\n    enabled: false\n    page_id: ''\n    page_name: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    graph_user_token: ''\n    login_config_id: ''\n    proxy: null\n  local:\n    path: ''\nvideo:\n  download_dir: <HOME>/.xpst/downloads\n  cleanup_after_post: false\n  encoding:\n    youtube:\n      passthrough: false\n      resolution: 1920\n      bitrate: 8M\n      maxrate: 10M\n      bufsize: 12M\n      profile: high\n      gop: 15\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    instagram:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      profile: high\n      level: '4.0'\n      gop: 72\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    x:\n      resolution: 1920\n      bitrate: 10M\n      maxrate: 12M\n      profile: high\n      level: '4.0'\n      gop: 90\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    tiktok:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      bufsize: 20M\n      profile: high\n      level: '4.0'\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n      hw_encoder: null\nreliability:\n  max_retries: 3\n  retry_backoff: 2\n  circuit_breaker_threshold: 5\n  circuit_breaker_reset: 3600\nmonitoring:\n  log_level: INFO\n  log_file: <HOME>/.xpst/logs/xpst.log\n  log_rotation: 10 MB\n  healthcheck_port: 8080\n  enable_metrics: true\n  dashboard_username: ''\n  dashboard_password_hash: ''\n  health_check_interval: 300\nanti_bot:\n  caption_variation: false\nschedule:\n  check_interval: 900\n  catchup_window: 172800\n  catchup_times_per_day: 3\n  analytics_snapshot_enabled: false\n  analytics_snapshot_interval: 3600\n  posting_paused: false\nchat:\n  twitch_channels: []\n  kick_channels: []\n  youtube_video_id: ''\n  max_messages: 500\n  youtube_poll_interval_s: 2.0\nnotifications:\n  enabled: false\n  on_success: true\n  on_failure: true\n  discord:\n    webhook_url: ''\n  telegram:\n    bot_token: ''\n    chat_id: ''\nrate_limits:\n  youtube: 5\n  instagram: 5\n  x: 5\n  tiktok: 5\n  threads: 5\n  facebook: 5\nbio:\n  handle: ''\n  links: []\nshortcuts:\n  dashboard: Ctrl+1\n  content: Ctrl+2\n  analytics: Ctrl+3\n  connect: Ctrl+4\n  schedule: Ctrl+5\n  refresh: Ctrl+R\n  quit: Ctrl+Q\nfirst_run_complete: false\nprovider_mode: official\n",
+      "files_after": [
+        "config.yaml",
+        "credentials/.fallback_salt",
+        "credentials/.fallback_secret",
+        "credentials/x_cookies.json",
+        "credentials/youtube_token.enc",
+        "credentials/youtube_token.json",
+        "sessions/x-parity.json",
+        "sessions/youtube-parity.json"
+      ],
+      "credential_keys_after": [
+        "youtube_token.enc"
+      ]
+    },
+    {
+      "name": "disconnect_already_disabled",
+      "seed": "version: 4\naccounts:\n  youtube:\n    enabled: false\n",
+      "env": {},
+      "mutation": {
+        "kind": "disconnect",
+        "platform": "youtube"
+      },
+      "credentials_seeded": {
+        "youtube_token": "{\"token\": \"parity-token\"}"
+      },
+      "files_seeded": [
+        "credentials/youtube_token.json",
+        "sessions/youtube-parity.json",
+        "sessions/x-parity.json",
+        "credentials/x_cookies.json"
+      ],
+      "payload": {
+        "success": true,
+        "platform": "youtube",
+        "removed": [
+          "youtube_token",
+          "youtube_token.json",
+          "sessions/youtube-parity.json"
+        ],
+        "disabled": false
+      },
+      "config_yaml": "version: 4\naccounts:\n  tiktok:\n    username: ''\n    cookies_from_browser: false\n    cookies_file: null\n    proxy: null\n    enabled: true\n    client_key: ''\n    client_secret: ''\n    access_token: ''\n    refresh_token: ''\n    sandbox: false\n    draft_mode: auto\n    publish_mode: auto\n    browser_headless: true\n    provider: local\n    aggregator:\n      api_key_ref: zernio_api_key\n      account_id: ''\n      profile_id: ''\n      vendor_schedule: false\n      scoped_key: true\n  youtube:\n    enabled: false\n    client_secrets: <PROFILE>/credentials/youtube_client_secrets.json\n    token_file: <PROFILE>/credentials/youtube_token.json\n    channel_id: ''\n    username: ''\n    proxy: null\n  x:\n    enabled: true\n    cookies_file: <PROFILE>/credentials/x_cookies.json\n    username: ''\n    proxy: null\n    auth_mode: cookies\n  instagram:\n    enabled: true\n    session_file: <PROFILE>/credentials/instagram_session.json\n    username: ''\n    proxy: null\n    auth_mode: graph_api\n    device_id: null\n    graph_access_token: ''\n    graph_ig_user_id: ''\n    app_id: ''\n    account_type: ''\n    account_type_source: ''\n  threads:\n    enabled: false\n    graph_access_token: ''\n    threads_user_id: ''\n    proxy: null\n    app_id: ''\n  bluesky:\n    enabled: false\n    identifier: ''\n    service: https://bsky.social\n    proxy: null\n  messenger:\n    enabled: false\n    page_id: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    verify_token: ''\n    webhook_path: /webhook/messenger\n    auto_reply: false\n    reply_rules: {}\n    proxy: null\n  facebook:\n    enabled: false\n    page_id: ''\n    page_name: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    graph_user_token: ''\n    login_config_id: ''\n    proxy: null\n  local:\n    path: ''\nvideo:\n  download_dir: <HOME>/.xpst/downloads\n  cleanup_after_post: false\n  encoding:\n    youtube:\n      passthrough: false\n      resolution: 1920\n      bitrate: 8M\n      maxrate: 10M\n      bufsize: 12M\n      profile: high\n      gop: 15\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    instagram:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      profile: high\n      level: '4.0'\n      gop: 72\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    x:\n      resolution: 1920\n      bitrate: 10M\n      maxrate: 12M\n      profile: high\n      level: '4.0'\n      gop: 90\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    tiktok:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      bufsize: 20M\n      profile: high\n      level: '4.0'\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n      hw_encoder: null\nreliability:\n  max_retries: 3\n  retry_backoff: 2\n  circuit_breaker_threshold: 5\n  circuit_breaker_reset: 3600\nmonitoring:\n  log_level: INFO\n  log_file: <HOME>/.xpst/logs/xpst.log\n  log_rotation: 10 MB\n  healthcheck_port: 8080\n  enable_metrics: true\n  dashboard_username: ''\n  dashboard_password_hash: ''\n  health_check_interval: 300\nanti_bot:\n  caption_variation: false\nschedule:\n  check_interval: 900\n  catchup_window: 172800\n  catchup_times_per_day: 3\n  analytics_snapshot_enabled: false\n  analytics_snapshot_interval: 3600\n  posting_paused: false\nchat:\n  twitch_channels: []\n  kick_channels: []\n  youtube_video_id: ''\n  max_messages: 500\n  youtube_poll_interval_s: 2.0\nnotifications:\n  enabled: false\n  on_success: true\n  on_failure: true\n  discord:\n    webhook_url: ''\n  telegram:\n    bot_token: ''\n    chat_id: ''\nrate_limits:\n  youtube: 5\n  instagram: 5\n  x: 5\n  tiktok: 5\n  threads: 5\n  facebook: 5\nbio:\n  handle: ''\n  links: []\nshortcuts:\n  dashboard: Ctrl+1\n  content: Ctrl+2\n  analytics: Ctrl+3\n  connect: Ctrl+4\n  schedule: Ctrl+5\n  refresh: Ctrl+R\n  quit: Ctrl+Q\nfirst_run_complete: false\nprovider_mode: official\n",
+      "files_after": [
+        "config.yaml",
+        "credentials/.fallback_salt",
+        "credentials/.fallback_secret",
+        "credentials/x_cookies.json",
+        "sessions/x-parity.json"
+      ],
+      "credential_keys_after": []
+    },
+    {
+      "name": "disconnect_messenger",
+      "seed": "version: 4\naccounts:\n  messenger:\n    enabled: true\n",
+      "env": {},
+      "mutation": {
+        "kind": "disconnect",
+        "platform": "messenger"
+      },
+      "credentials_seeded": {
+        "messenger_page_token": "parity-page-token"
+      },
+      "files_seeded": [],
+      "payload": {
+        "success": true,
+        "platform": "messenger",
+        "removed": [
+          "messenger_page_token"
+        ],
+        "disabled": true
+      },
+      "config_yaml": "version: 4\naccounts:\n  tiktok:\n    username: ''\n    cookies_from_browser: false\n    cookies_file: null\n    proxy: null\n    enabled: true\n    client_key: ''\n    client_secret: ''\n    access_token: ''\n    refresh_token: ''\n    sandbox: false\n    draft_mode: auto\n    publish_mode: auto\n    browser_headless: true\n    provider: local\n    aggregator:\n      api_key_ref: zernio_api_key\n      account_id: ''\n      profile_id: ''\n      vendor_schedule: false\n      scoped_key: true\n  youtube:\n    enabled: true\n    client_secrets: <PROFILE>/credentials/youtube_client_secrets.json\n    token_file: <PROFILE>/credentials/youtube_token.json\n    channel_id: ''\n    username: ''\n    proxy: null\n  x:\n    enabled: true\n    cookies_file: <PROFILE>/credentials/x_cookies.json\n    username: ''\n    proxy: null\n    auth_mode: cookies\n  instagram:\n    enabled: true\n    session_file: <PROFILE>/credentials/instagram_session.json\n    username: ''\n    proxy: null\n    auth_mode: graph_api\n    device_id: null\n    graph_access_token: ''\n    graph_ig_user_id: ''\n    app_id: ''\n    account_type: ''\n    account_type_source: ''\n  threads:\n    enabled: false\n    graph_access_token: ''\n    threads_user_id: ''\n    proxy: null\n    app_id: ''\n  bluesky:\n    enabled: false\n    identifier: ''\n    service: https://bsky.social\n    proxy: null\n  messenger:\n    enabled: false\n    page_id: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    verify_token: ''\n    webhook_path: /webhook/messenger\n    auto_reply: false\n    reply_rules: {}\n    proxy: null\n  facebook:\n    enabled: false\n    page_id: ''\n    page_name: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    graph_user_token: ''\n    login_config_id: ''\n    proxy: null\n  local:\n    path: ''\nvideo:\n  download_dir: <HOME>/.xpst/downloads\n  cleanup_after_post: false\n  encoding:\n    youtube:\n      passthrough: false\n      resolution: 1920\n      bitrate: 8M\n      maxrate: 10M\n      bufsize: 12M\n      profile: high\n      gop: 15\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    instagram:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      profile: high\n      level: '4.0'\n      gop: 72\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    x:\n      resolution: 1920\n      bitrate: 10M\n      maxrate: 12M\n      profile: high\n      level: '4.0'\n      gop: 90\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    tiktok:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      bufsize: 20M\n      profile: high\n      level: '4.0'\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n      hw_encoder: null\nreliability:\n  max_retries: 3\n  retry_backoff: 2\n  circuit_breaker_threshold: 5\n  circuit_breaker_reset: 3600\nmonitoring:\n  log_level: INFO\n  log_file: <HOME>/.xpst/logs/xpst.log\n  log_rotation: 10 MB\n  healthcheck_port: 8080\n  enable_metrics: true\n  dashboard_username: ''\n  dashboard_password_hash: ''\n  health_check_interval: 300\nanti_bot:\n  caption_variation: false\nschedule:\n  check_interval: 900\n  catchup_window: 172800\n  catchup_times_per_day: 3\n  analytics_snapshot_enabled: false\n  analytics_snapshot_interval: 3600\n  posting_paused: false\nchat:\n  twitch_channels: []\n  kick_channels: []\n  youtube_video_id: ''\n  max_messages: 500\n  youtube_poll_interval_s: 2.0\nnotifications:\n  enabled: false\n  on_success: true\n  on_failure: true\n  discord:\n    webhook_url: ''\n  telegram:\n    bot_token: ''\n    chat_id: ''\nrate_limits:\n  youtube: 5\n  instagram: 5\n  x: 5\n  tiktok: 5\n  threads: 5\n  facebook: 5\nbio:\n  handle: ''\n  links: []\nshortcuts:\n  dashboard: Ctrl+1\n  content: Ctrl+2\n  analytics: Ctrl+3\n  connect: Ctrl+4\n  schedule: Ctrl+5\n  refresh: Ctrl+R\n  quit: Ctrl+Q\nfirst_run_complete: false\nprovider_mode: official\n",
+      "files_after": [
+        "config.yaml",
+        "credentials/.fallback_salt",
+        "credentials/.fallback_secret"
+      ],
+      "credential_keys_after": []
+    },
+    {
+      "name": "env_overrides",
+      "seed": null,
+      "env": {
+        "XPST_YOUTUBE_ENABLED": "false",
+        "XPST_X_USERNAME": "parity-handle",
+        "XPST_MESSENGER_REPLY_RULES": "{\"hi\": \"hello\"}",
+        "XPST_MESSENGER_COMMENT_PLATFORMS": "instagram, facebook",
+        "XPST_MAX_RETRIES": "9",
+        "XPST_PROVIDER_MODE": "Community",
+        "XPST_LOG_FILE": "~/parity.log"
+      },
+      "mutation": null,
+      "credentials_seeded": {},
+      "files_seeded": [],
+      "payload": null,
+      "config_yaml": "version: 4\naccounts:\n  tiktok:\n    username: ''\n    cookies_from_browser: false\n    cookies_file: null\n    proxy: null\n    enabled: true\n    client_key: ''\n    client_secret: ''\n    access_token: ''\n    refresh_token: ''\n    sandbox: false\n    draft_mode: auto\n    publish_mode: auto\n    browser_headless: true\n    provider: local\n    aggregator:\n      api_key_ref: zernio_api_key\n      account_id: ''\n      profile_id: ''\n      vendor_schedule: false\n      scoped_key: true\n  youtube:\n    enabled: false\n    client_secrets: <PROFILE>/credentials/youtube_client_secrets.json\n    token_file: <PROFILE>/credentials/youtube_token.json\n    channel_id: ''\n    username: ''\n    proxy: null\n  x:\n    enabled: true\n    cookies_file: <PROFILE>/credentials/x_cookies.json\n    username: parity-handle\n    proxy: null\n    auth_mode: cookies\n  instagram:\n    enabled: true\n    session_file: <PROFILE>/credentials/instagram_session.json\n    username: ''\n    proxy: null\n    auth_mode: graph_api\n    device_id: null\n    graph_access_token: ''\n    graph_ig_user_id: ''\n    app_id: ''\n    account_type: ''\n    account_type_source: ''\n  threads:\n    enabled: false\n    graph_access_token: ''\n    threads_user_id: ''\n    proxy: null\n    app_id: ''\n  bluesky:\n    enabled: false\n    identifier: ''\n    service: https://bsky.social\n    proxy: null\n  messenger:\n    enabled: false\n    page_id: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    verify_token: ''\n    webhook_path: /webhook/messenger\n    auto_reply: false\n    reply_rules:\n      hi: hello\n    proxy: null\n  facebook:\n    enabled: false\n    page_id: ''\n    page_name: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    graph_user_token: ''\n    login_config_id: ''\n    proxy: null\n  local:\n    path: ''\nvideo:\n  download_dir: <HOME>/.xpst/downloads\n  cleanup_after_post: false\n  encoding:\n    youtube:\n      passthrough: false\n      resolution: 1920\n      bitrate: 8M\n      maxrate: 10M\n      bufsize: 12M\n      profile: high\n      gop: 15\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    instagram:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      profile: high\n      level: '4.0'\n      gop: 72\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    x:\n      resolution: 1920\n      bitrate: 10M\n      maxrate: 12M\n      profile: high\n      level: '4.0'\n      gop: 90\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    tiktok:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      bufsize: 20M\n      profile: high\n      level: '4.0'\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n      hw_encoder: null\nreliability:\n  max_retries: 9\n  retry_backoff: 2\n  circuit_breaker_threshold: 5\n  circuit_breaker_reset: 3600\nmonitoring:\n  log_level: INFO\n  log_file: <HOME>/parity.log\n  log_rotation: 10 MB\n  healthcheck_port: 8080\n  enable_metrics: true\n  dashboard_username: ''\n  dashboard_password_hash: ''\n  health_check_interval: 300\nanti_bot:\n  caption_variation: false\nschedule:\n  check_interval: 900\n  catchup_window: 172800\n  catchup_times_per_day: 3\n  analytics_snapshot_enabled: false\n  analytics_snapshot_interval: 3600\n  posting_paused: false\nchat:\n  twitch_channels: []\n  kick_channels: []\n  youtube_video_id: ''\n  max_messages: 500\n  youtube_poll_interval_s: 2.0\nnotifications:\n  enabled: false\n  on_success: true\n  on_failure: true\n  discord:\n    webhook_url: ''\n  telegram:\n    bot_token: ''\n    chat_id: ''\nrate_limits:\n  youtube: 5\n  instagram: 5\n  x: 5\n  tiktok: 5\n  threads: 5\n  facebook: 5\nbio:\n  handle: ''\n  links: []\nshortcuts:\n  dashboard: Ctrl+1\n  content: Ctrl+2\n  analytics: Ctrl+3\n  connect: Ctrl+4\n  schedule: Ctrl+5\n  refresh: Ctrl+R\n  quit: Ctrl+Q\nfirst_run_complete: false\nprovider_mode: community\n",
+      "files_after": [
+        "config.yaml"
+      ],
+      "credential_keys_after": {}
+    }
+  ]
+}

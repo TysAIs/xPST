@@ -46,7 +46,7 @@ use serde_json::{json, Value};
 const FIXTURE: &str = include_str!("fixtures/mcp_stdio.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing.
-const EXPECTED_SCENARIOS: usize = 5;
+const EXPECTED_SCENARIOS: usize = 6;
 
 /// The state file every scenario starts from, byte-identical to `STATE` in the
 /// capture script. It carries two recorded failures so `xpst_activity` answers a
@@ -332,11 +332,30 @@ fn profile(name: &str, scenario: &Value) -> PathBuf {
         std::fs::write(dir.join(name), body).expect("seed file");
     }
     // Scenario-specific seed files (the `mutations` queue, the `analytics`
-    // state), byte-identical to the capture script's `seed` block.
+    // state, the `writers` config), byte-identical to the capture script's
+    // `seed` block.
     if let Some(files) = scenario.get("seed").and_then(Value::as_object) {
         for (name, body) in files {
             std::fs::write(dir.join(name), body.as_str().unwrap_or_default())
                 .expect("seed scenario file");
+        }
+    }
+    // The encrypted store the `writers` scenario disconnects from, written
+    // through the same `CredentialStore` the capture script uses.
+    if let Some(entries) = scenario.get("credentials").and_then(Value::as_object) {
+        let store = xpst_auth::credentials::CredentialStore::new(&dir);
+        for (key, value) in entries {
+            store
+                .store(key, value.as_str().unwrap_or_default())
+                .expect("seed credential");
+        }
+    }
+    // Plain files beside the profile (`credentials/`, `sessions/`).
+    if let Some(files) = scenario.get("files").and_then(Value::as_array) {
+        for name in files {
+            let path = dir.join(name.as_str().unwrap_or_default());
+            std::fs::create_dir_all(path.parent().expect("file parent")).expect("seed dir");
+            std::fs::write(&path, "parity").expect("seed file");
         }
     }
 
@@ -712,6 +731,19 @@ fn the_rust_server_speaks_the_python_wire() {
                 }
                 other => panic!("scenario `{name}`: unknown step method {other}"),
             }
+        }
+
+        // A writer's real effect is the FILE, not the payload: both tools answer
+        // a success document whether or not they wrote anything, so the bytes
+        // are what prove the write happened and matched the shipped engine.
+        if let Some(expected) = scenario["config_yaml_after"].as_str() {
+            let written = std::fs::read_to_string(dir.join("config.yaml"))
+                .expect("the scenario wrote a config");
+            assert_eq!(
+                scrub_profile(&written, &root),
+                expected,
+                "scenario `{name}`: the written config.yaml drifted"
+            );
         }
     }
 }
