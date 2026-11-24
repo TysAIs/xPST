@@ -4,7 +4,7 @@
 
 One row per leaf command of the shipped CLI. `status` is `implemented` when the Rust engine runs the command and `stub` when it answers `not implemented in the Rust engine yet`. The two columns either side are the questions a reader actually has: which crate owns the behaviour, and whether the Python implementation they are comparing against makes an outbound network call.
 
-**39 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
+**43 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
 
 ## Columns
 
@@ -49,11 +49,11 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `health` | stub | xpst-provider | yes |
 | `kb add` | stub | xpst-store | possible |
 | `kb areas` | implemented | xpst-store | none |
-| `kb course` | stub | xpst-store | none |
-| `kb doctor` | stub | xpst-store | none |
+| `kb course` | implemented | xpst-store | none |
+| `kb doctor` | implemented | xpst-store | none |
 | `kb migrate-store` | stub | xpst-store | none |
 | `kb organize` | stub | xpst-store | possible |
-| `kb query` | stub | xpst-store | none |
+| `kb query` | implemented | xpst-store | none |
 | `kb reembed` | stub | xpst-store | possible |
 | `logs` | implemented | xpst-cli | none |
 | `mcp list` | implemented | xpst-mcp | none |
@@ -80,7 +80,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `schedule remove` | implemented | xpst-state | none |
 | `schedule resume` | implemented | xpst-state | none |
 | `schedule run` | stub | xpst-core | yes |
-| `search` | stub | xpst-store | none |
+| `search` | implemented | xpst-store | none |
 | `security-audit` | implemented | xpst-cli | none |
 | `serve` | stub | xpst-core | yes |
 | `setup` | stub | xpst-auth | yes |
@@ -147,6 +147,10 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `app` | xpst-app | Locates the installed desktop shell in the same preference order and prints the same not-found guidance (exit 1); byte-compared with the Python CLI. |
 | `kb areas` | xpst-store | Discovered knowledge areas in course order (`order_index`, label, id) with their nugget counts, read from the workspace's `areas.json`; payload byte-compared with the Python CLI. An invalid `--workspace` reproduces Python's uncaught `ValueError` contract — empty stdout, exit 1 — with the exception line on stderr instead of the traceback frames. |
 | `schedule remove` | xpst-state | Cancels one entry through the same local-store contract (`operation`/`scope`/`found`/`cancelled`/`entry`, `POST_NOT_FOUND` on an unknown id) with `--dry-run`; payload and resulting `schedule.json` byte-compared with the Python CLI. Control characters in a caption are escaped (`\u0001`) in the written file, so both engines can read it back. |
+| `kb course` | xpst-store | The assembled course outline (`assemble_course`): areas in course order, each with its nuggets in beginner->advanced order and a trailing `Unassigned` module for unclaimed nuggets; payload byte-compared with the Python CLI. The store reader is strict like `Nugget.from_dict`/`Area.from_dict`, so an unknown or missing key quarantines the file exactly as Python does. |
+| `kb doctor` | xpst-store | The read-only health report (`doctor.diagnose`): dependency probe, store integrity, embedding widths, orphaned areas/nuggets, queue counts and the manifest source count, with the same severities, messages and exit code; payload byte-compared with the Python CLI. The optional-dependency probe asks an interpreter out-of-process (`XPST_PYTHON`, else `python3`), because a Rust binary has no `sys.path`. |
+| `kb query` | xpst-store | Substring search over the JSON store (`query_nuggets`): `workspace`/`query`/`mode`/`count`/`nuggets` with citation, timestamps, a null score and the area id; payload byte-compared with the Python CLI. The embedding stack is not ported, so the semantic path is not taken — the same answer Python gives without the knowledge extra or on an unembedded store. |
+| `search` | xpst-store | `kb query` on the `default` workspace rendered with `json.dumps(indent=2)` (ASCII-escaped), including Python's text-mode quirk of reading a `hits` key the payload never carries; payload byte-compared with the Python CLI. |
 
 ## Known deviations from the Python engine
 

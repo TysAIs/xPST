@@ -19,6 +19,7 @@ pub mod devices;
 pub mod doctor;
 pub mod failures;
 pub mod kb;
+pub mod kb_store;
 pub mod logs;
 pub mod mcp;
 pub mod media;
