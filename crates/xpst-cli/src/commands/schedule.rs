@@ -15,7 +15,7 @@ use std::io::Write;
 use clap::ArgMatches;
 use serde_json::Value;
 
-use crate::output::{boolean, null, object, string, write_json, write_text};
+use crate::output::{boolean, null, object, string, write_python_json_value, write_text};
 use crate::{exit, flag, leaf_flag, leaf_string, paths, string_value, GlobalOptions};
 
 /// Run `schedule list`.
@@ -32,7 +32,7 @@ pub fn run(
         if json_mode {
             let payload =
                 crate::output::error_payload_with("CONFIG_ERROR", message, serde_json::json!({}));
-            let _ = write_json(out, &payload);
+            let _ = write_python_json_value(out, &payload);
         } else {
             let _ = writeln!(err, "{message}");
         }
@@ -47,7 +47,7 @@ pub fn run(
 
     let payload = xpst_state::schedule::payload(&listing);
     if json_mode {
-        let _ = write_json(out, &payload);
+        let _ = write_python_json_value(out, &payload);
     } else {
         let _ = write_text(out, &render_text(&payload, &listing));
     }
@@ -152,7 +152,7 @@ fn profile_dir(
                     message,
                     serde_json::json!({}),
                 );
-                let _ = write_json(out, &payload);
+                let _ = write_python_json_value(out, &payload);
             } else {
                 let _ = writeln!(err, "{message}");
             }
@@ -277,7 +277,7 @@ pub fn remove(
         if json_mode {
             let payload =
                 crate::output::error_payload_with("CONFIG_ERROR", message, serde_json::json!({}));
-            let _ = write_json(out, &payload);
+            let _ = write_python_json_value(out, &payload);
         } else {
             let _ = writeln!(err, "{message}");
         }

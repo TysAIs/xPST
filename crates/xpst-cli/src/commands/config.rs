@@ -13,7 +13,7 @@ use serde_json::json;
 use xpst_config::{ConfigDocument, ConfigError};
 
 use crate::commands::config_view::python_str;
-use crate::output::{error_payload_with, write_json, write_text};
+use crate::output::{error_payload_with, write_python_json_value, write_text};
 use crate::{exit, flag, paths, string_value, GlobalOptions};
 
 /// Resolve which config file to read: `--file`, then the root `--config`, then
@@ -63,7 +63,7 @@ fn report_error<W: Write, E: Write>(
         let payload = error_payload_with(code, &error.to_string(), extra);
         // Machine-readable errors stay on stdout so a `--json` caller can
         // parse them regardless of exit status, exactly like `_error_payload`.
-        let _ = write_json(out, &payload);
+        let _ = write_python_json_value(out, &payload);
     } else {
         let _ = writeln!(err, "{}", error);
         if let Some(hint) = hint {
@@ -151,7 +151,7 @@ pub fn validate<W: Write, E: Write>(
                         "detail": error.to_string(),
                     }],
                 });
-                let _ = write_json(out, &payload);
+                let _ = write_python_json_value(out, &payload);
             } else {
                 let _ = writeln!(err, "✗ Config file loaded — {error}");
             }
@@ -161,7 +161,7 @@ pub fn validate<W: Write, E: Write>(
 
     let report = document.validate();
     if json_mode {
-        let _ = write_json(out, &report.to_json());
+        let _ = write_python_json_value(out, &report.to_json());
     } else {
         let mut text = String::new();
         for check in &report.checks {

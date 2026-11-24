@@ -16,7 +16,7 @@ use xpst_config::ConfigDocument;
 use xpst_media::MediaTools;
 use xpst_state::{read_schedule, read_state};
 
-use crate::output::{write_json, write_text};
+use crate::output::{write_python_json_value, write_text};
 use crate::{exit, flag, paths, GlobalOptions};
 
 struct Check {
@@ -55,7 +55,7 @@ pub fn run<W: Write, E: Write>(
     let ok = report["ok"].as_bool().unwrap_or(false);
 
     if json_mode {
-        let _ = write_json(out, &report);
+        let _ = write_python_json_value(out, &report);
     } else {
         let mut text = String::new();
         text.push_str("xPST doctor (Rust engine, P0 local checks)\n");

@@ -13,7 +13,7 @@ use clap::ArgMatches;
 use serde_json::{json, Value};
 
 use crate::commands::bootstrap;
-use crate::output::{object, string, write_json, write_python_json, write_text};
+use crate::output::{object, string, write_python_json, write_python_json_value, write_text};
 use crate::{exit, flag, leaf_string, GlobalOptions};
 
 /// Run `failures list`.
@@ -33,7 +33,7 @@ pub fn run(
     let queue = xpst_state::status::dead_letters(&state, jiff::Timestamp::now());
 
     if json_mode {
-        let _ = write_json(out, &json!({ "failures": queue }));
+        let _ = write_python_json_value(out, &json!({ "failures": queue }));
     } else if queue.is_empty() {
         let _ = write_text(out, "No failed uploads.");
     } else {
@@ -52,11 +52,9 @@ pub fn run(
 ///
 /// The document is loaded through [`xpst_state::status::effective_state`] — the
 /// same tolerant loader `status` and `failures list` use, including the in-memory
-/// v1 migration — and written back with Python's `json.dump` separators.
-///
-/// **Divergence, recorded in the ledger note:** the written document's keys are
-/// in sorted order, where Python preserves the order it read. The payload and the
-/// values are identical; only the key order inside the file differs.
+/// v1 migration — and written back with Python's `json.dump` separators and the
+/// key order it was read in (`serde_json` is built with `preserve_order`), so the
+/// written file is byte-identical to the Python engine's.
 pub fn clear(
     global: &GlobalOptions,
     leaf: Option<&ArgMatches>,

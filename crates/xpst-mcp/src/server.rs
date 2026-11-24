@@ -140,9 +140,13 @@ impl ServerHandler for XpstMcp {
 }
 
 fn success_result(value: &Value) -> CallToolResult {
-    // Python serves a pretty-printed JSON document as text content; keeping the
-    // same body means an agent's prompt does not change shape between servers.
-    let text = serde_json::to_string_pretty(value).unwrap_or_else(|_| "null".to_string());
+    // Python serves `json.dumps(payload, indent=2, sort_keys=True)` as text
+    // content; keeping the same body means an agent's prompt does not change
+    // shape between servers. `preserve_order` keeps insertion order, so the
+    // sort is explicit.
+    let mut document = value.clone();
+    xpst_config::sort_keys_recursive(&mut document);
+    let text = serde_json::to_string_pretty(&document).unwrap_or_else(|_| "null".to_string());
     CallToolResult::success(vec![ContentBlock::text(text)])
 }
 

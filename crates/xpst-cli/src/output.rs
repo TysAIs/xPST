@@ -1,9 +1,12 @@
 //! Output helpers shared by the implemented read-only commands.
 //!
-//! The Python engine prints machine-readable output as compact single-line
-//! JSON (`json_output()` in `cli.py`), with secrets masked unless `--raw`
-//! was passed. The Rust read paths keep that shape so a script can diff the
-//! two engines without a formatter in between.
+//! The Python engine prints machine-readable output as single-line JSON
+//! (`json_output()` in `cli.py` calls `json.dumps(data, default=str,
+//! ensure_ascii=False)`), with secrets masked unless `--raw` was passed. That
+//! means Python's default separators (`", "` / `": "`), insertion order and raw
+//! UTF-8 — not serde's compact form. [`write_python_json`] is the renderer that
+//! reproduces it, and every `--json` command in this crate uses it so a script
+//! can `cmp` the two engines' stdout.
 
 use std::io::Write;
 
@@ -31,11 +34,6 @@ pub fn error_payload_with(code: &str, message: &str, extra: Value) -> Value {
         }
     }
     payload
-}
-
-/// Write a JSON document on one line, exactly as `json_output()` does.
-pub fn write_json(out: &mut dyn Write, value: &Value) -> std::io::Result<()> {
-    writeln!(out, "{value}")
 }
 
 /// Write a block of human-readable text, ensuring it ends with a newline.
@@ -79,8 +77,9 @@ pub fn array(items: Vec<xpst_config::Value>) -> xpst_config::Value {
 
 /// `_error_payload()` in Python's key order: `{ok: false, error: {code, message, ...}}`.
 ///
-/// [`error_payload`] builds the same shape through `serde_json`, whose map sorts
-/// its keys; a command that prints the payload byte-for-byte needs this one.
+/// [`error_payload`] builds the same shape through `serde_json`; this one exists
+/// for the call sites that already build an ordered payload and want the error
+/// object to slot into it.
 pub fn error_object(
     code: &str,
     message: &str,
@@ -157,11 +156,25 @@ pub fn write_python_json(out: &mut dyn Write, value: &xpst_config::Value) -> std
     writeln!(out, "{text}")
 }
 
+/// [`write_python_json`] for a `serde_json` document.
+///
+/// `serde_json` is built with `preserve_order` (workspace `Cargo.toml`), so a
+/// document that came from a parsed file keeps the file's key order and a
+/// `json!` literal keeps the order it was written in — which is how the payloads
+/// below are written, in Python's dict-literal order. This is the one renderer
+/// every `--json` command uses.
+pub fn write_python_json_value(
+    out: &mut dyn Write,
+    value: &serde_json::Value,
+) -> std::io::Result<()> {
+    write_python_json(out, &from_json(value))
+}
+
 /// Convert a `serde_json` document into the insertion-ordered value type.
 ///
-/// `serde_json::Map` sorts its keys, so a document that came through it is
-/// already in sorted order; this conversion keeps whatever order it is handed.
-/// It exists so a `serde_json` payload can be rendered with
+/// `serde_json` is built with `preserve_order`, so the document's key order is
+/// already the order Python would print; this conversion keeps it. It exists so
+/// a `serde_json` payload can be rendered with
 /// [`xpst_config::python_style_json`] — Python's `", "` / `": "` separators —
 /// instead of serde's compact form.
 pub fn from_json(value: &serde_json::Value) -> xpst_config::Value {
@@ -207,8 +220,8 @@ pub fn python_pretty_json_utf8(value: &serde_json::Value) -> String {
 /// `json.dumps(value, indent=2)` for the insertion-ordered value type.
 ///
 /// The ordered twin of [`python_pretty_json`]: a payload built with
-/// [`object`]/[`array`] keeps Python's key order, which `serde_json::Map` would
-/// sort away.
+/// [`object`]/[`array`] keeps Python's key order explicitly, independent of how
+/// the `serde_json` map is configured.
 pub fn python_pretty_json_cfg(value: &xpst_config::Value) -> String {
     let mut out = String::new();
     write_pretty_cfg(value, 0, true, &mut out);

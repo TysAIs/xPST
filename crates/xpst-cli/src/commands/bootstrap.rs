@@ -159,7 +159,7 @@ pub fn report(
             &message,
             serde_json::json!({"path": config_path_hint(error)}),
         );
-        let _ = crate::output::write_json(out, &payload);
+        let _ = crate::output::write_python_json_value(out, &payload);
     } else {
         let _ = writeln!(err, "Configuration error: {message}");
     }

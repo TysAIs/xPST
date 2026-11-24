@@ -62,7 +62,12 @@ fn load(dir: &Path) -> Map<String, Value> {
 
 /// `_save`: `json.dumps(data, indent=2, sort_keys=True) + "\n"`, `0600`.
 fn save(dir: &Path, data: &Map<String, Value>) -> Result<(), String> {
-    let text = crate::output::python_pretty_json(&Value::Object(data.clone()));
+    // Python writes `json.dumps(data, indent=2, sort_keys=True)`, so the key
+    // order is alphabetical at every level — not the insertion order the
+    // `preserve_order` map keeps.
+    let mut document = Value::Object(data.clone());
+    xpst_config::sort_keys_recursive(&mut document);
+    let text = crate::output::python_pretty_json(&document);
     let path = devices_path(dir);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;

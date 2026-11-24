@@ -155,7 +155,11 @@ fn not_implemented<W: Write, E: Write>(
                 "phase": "P0",
             }
         });
-        let _ = writeln!(out, "{payload}");
+        // Same renderer as every implemented command: Python's `json.dumps`
+        // separators and insertion order. There is no Python payload to match
+        // here (the shipped engine implements the command), but one renderer
+        // means a stub cannot teach the next command the compact form.
+        let _ = crate::output::write_python_json_value(out, &payload);
     } else {
         let _ = writeln!(err, "xpst {command}: {message}");
         let _ = writeln!(
