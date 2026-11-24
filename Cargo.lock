@@ -4122,6 +4122,7 @@ dependencies = [
  "xpst-auth",
  "xpst-authflow",
  "xpst-config",
+ "xpst-core",
  "xpst-media",
  "xpst-state",
  "xpst-store",

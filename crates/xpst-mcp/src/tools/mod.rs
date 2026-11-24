@@ -16,6 +16,7 @@ pub mod chat;
 pub mod config_show;
 pub mod followers;
 pub mod kb;
+pub mod preflight;
 pub mod providers;
 pub mod rate_limit;
 pub mod readiness;

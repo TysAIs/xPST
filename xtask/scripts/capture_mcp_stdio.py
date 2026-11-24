@@ -122,6 +122,39 @@ READ_ONLY_CALLS = [
     ("xpst_stream", {}),
     ("xpst_stream", {"platform": "youtube"}),
     ("xpst_stream", {"platform": "nope"}),
+    # `xpst_preflight`'s composite: the content verdict, the post plan and the
+    # route plan. Nothing is connected in this profile, so the `all` row is the
+    # NO_DESTINATIONS refusal and the explicit rows are the per-destination plan.
+    ("xpst_preflight", {}),
+    (
+        "xpst_preflight",
+        {
+            "media_path": "/nonexistent/parity.mp4",
+            "platforms": ["youtube"],
+            "caption": "parity fixture",
+        },
+    ),
+    ("xpst_preflight", {"text": "parity text post", "platforms": ["x"]}),
+    (
+        "xpst_preflight",
+        {"media_paths": ["/nonexistent/a.mp4", "/nonexistent/b.mp4"], "all": True},
+    ),
+    (
+        "xpst_preflight",
+        {"platforms": ["x"], "caption": "parity fixture", "overrides": {"x": "short"}},
+    ),
+    # A non-object override entry is the `Invalid overrides payload` document.
+    ("xpst_preflight", {"platforms": ["x"], "overrides": {"x": 5}}),
+    # A real media path INSIDE the profile, so the guard accepts it and the
+    # handler assembles the plan and the route plan with a probed file.
+    (
+        "xpst_preflight",
+        {
+            "media_path": "<PROFILE>/clip.mp4",
+            "platforms": ["youtube"],
+            "caption": "parity fixture",
+        },
+    ),
 ]
 
 # Calls that write the local profile, in the `default` scenario only, after
@@ -168,10 +201,46 @@ MASK_FIELDS = {"xpst_chat": ["checked_at"]}
 # a property of the Python server's startup order.
 SEED_DIRS = ["credentials", "backups"]
 
+# `bin/ffmpeg` answers BOTH questions the fixture asks of it: `readiness` reads the
+# version banner off stdout, and `xpst_preflight`'s loudness pass reads the
+# `loudnorm` JSON block off stderr. A real ffmpeg does both; a stub that only
+# printed the banner would make the loudness verdict a parse failure.
 HELPER_SCRIPTS = {
-    "bin/ffmpeg": "#!/bin/sh\necho \"ffmpeg version 9.9.9-test Copyright (c) the xPST parity fixture\"\n",
+    "bin/ffmpeg": (
+        "#!/bin/sh\n"
+        'echo "ffmpeg version 9.9.9-test Copyright (c) the xPST parity fixture"\n'
+        "cat >&2 <<'JSON'\n"
+        "[Parsed_loudnorm_0 @ 0x1]\n"
+        "{\n"
+        '\t"input_i" : "-13.50",\n'
+        '\t"input_tp" : "-1.20",\n'
+        '\t"input_lra" : "3.10",\n'
+        '\t"input_thresh" : "-24.00",\n'
+        '\t"output_i" : "-14.00"\n'
+        "}\n"
+        "JSON\n"
+        "exit 0\n"
+    ),
     "bin/yt-dlp": "#!/bin/sh\necho \"2026.01.01\"\n",
+    # `xpst_preflight` probes media through ffprobe. A stand-in that prints a
+    # fixed probe document makes every media row a property of the fixture
+    # instead of the host's codecs (h264/yuv420p 1080x1920, 12.5 s, 2 Mbps, AAC).
+    "bin/ffprobe": (
+        "#!/bin/sh\n"
+        "cat <<'JSON'\n"
+        '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p",'
+        '"width":1080,"height":1920,"avg_frame_rate":"30/1","r_frame_rate":"30/1",'
+        '"bit_rate":"2000000","disposition":{"attached_pic":0}},'
+        '{"codec_type":"audio","codec_name":"aac","sample_rate":"44100"}],'
+        '"format":{"duration":"12.5","bit_rate":"2100000",'
+        '"format_name":"mov,mp4,m4a,3gp,3g2,mj2"}}\n'
+        "JSON\n"
+    ),
 }
+
+# Plain files the fixture seeds beside the profile. `clip.mp4` is not a real
+# video: ffprobe is the stub above, so its bytes only have to exist.
+SEED_FILES = {"clip.mp4": "x" * 64}
 
 # The knowledge workspace the KB tools read. `_xpst_home()` is `XPST_HOME`, else
 # `~/.xpst`, and `HOME` is the scratch profile — so the workspace is
@@ -268,7 +337,7 @@ def requests_for(scenario: str) -> list[dict]:
         steps.append(
             {
                 "jsonrpc": "2.0",
-                "id": 40,
+                "id": 100,
                 "method": "tools/call",
                 "params": {"name": "xpst_post", "arguments": POST_ARGUMENTS},
             }
@@ -276,12 +345,12 @@ def requests_for(scenario: str) -> list[dict]:
         steps.append(
             {
                 "jsonrpc": "2.0",
-                "id": 41,
+                "id": 101,
                 "method": "tools/call",
                 "params": {"name": "xpst_not_a_tool", "arguments": {}},
             }
         )
-        for index, (tool, arguments) in enumerate(MUTATING_CALLS, start=42):
+        for index, (tool, arguments) in enumerate(MUTATING_CALLS, start=110):
             steps.append(
                 {
                     "jsonrpc": "2.0",
@@ -294,7 +363,7 @@ def requests_for(scenario: str) -> list[dict]:
         steps.append(
             {
                 "jsonrpc": "2.0",
-                "id": 40,
+                "id": 100,
                 "method": "tools/call",
                 "params": {"name": "xpst_post", "arguments": POST_ARGUMENTS},
             }
@@ -306,7 +375,7 @@ def requests_for(scenario: str) -> list[dict]:
             steps.append(
                 {
                     "jsonrpc": "2.0",
-                    "id": 42,
+                    "id": 110,
                     "method": "tools/call",
                     "params": {
                         "name": "xpst_byo_app",
@@ -334,6 +403,8 @@ def run_scenario(python: str, scenario: dict) -> dict:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
         path.chmod(0o755)
+    for name, body in SEED_FILES.items():
+        (profile / name).write_text(body, encoding="utf-8")
 
     # The knowledge workspace (`~/.xpst/knowledge/default`, since HOME is the
     # profile) and its transcripts.
@@ -369,6 +440,7 @@ def run_scenario(python: str, scenario: dict) -> dict:
             del env[name]
     env.update(scenario["env"])
     env["XPST_FFMPEG_PATH"] = str(profile / "bin" / "ffmpeg")
+    env["XPST_FFPROBE_PATH"] = str(profile / "bin" / "ffprobe")
     env["XPST_YTDLP_PATH"] = str(profile / "bin" / "yt-dlp")
 
     steps = requests_for(scenario["name"])
@@ -383,7 +455,10 @@ def run_scenario(python: str, scenario: dict) -> dict:
     assert process.stdin is not None and process.stdout is not None
     assert process.stderr is not None
     for step in steps:
-        process.stdin.write(json.dumps(step) + "\n")
+        # `<PROFILE>` in a recorded argument is the profile's real path on the
+        # wire, so the fixture stays machine-independent without the server ever
+        # seeing a placeholder.
+        process.stdin.write(json.dumps(step).replace("<PROFILE>", str(profile)) + "\n")
     process.stdin.flush()
 
     expected = {step["id"] for step in steps if "id" in step}
@@ -456,7 +531,9 @@ def run_scenario(python: str, scenario: dict) -> dict:
                     "id": step["id"],
                     "method": "tools/call",
                     "tool": tool,
-                    "arguments": step["params"]["arguments"],
+                    "arguments": json.loads(
+                        json.dumps(step["params"]["arguments"]).replace(str(profile), "<PROFILE>")
+                    ),
                     "is_error": bool(result.get("isError")),
                     "mask_checks": mask_checks,
                     "mask_fields": mask_fields,
@@ -475,6 +552,7 @@ def run_scenario(python: str, scenario: dict) -> dict:
 
     recorded_env = dict(scenario["env"])
     recorded_env["XPST_FFMPEG_PATH"] = "<PROFILE>/bin/ffmpeg"
+    recorded_env["XPST_FFPROBE_PATH"] = "<PROFILE>/bin/ffprobe"
     recorded_env["XPST_YTDLP_PATH"] = "<PROFILE>/bin/yt-dlp"
     return {"name": scenario["name"], "env": recorded_env, "steps": recorded}
 

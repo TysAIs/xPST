@@ -139,6 +139,16 @@ impl ServerHandler for XpstMcp {
             return Ok(error_result(&denied).into());
         }
 
+        // Validate path arguments for EVERY tool (not just mutating ones) before
+        // anything touches the filesystem: an agent — or an LLM reading
+        // untrusted content — chooses these. Python runs this after the consent
+        // guard and before dispatch, and the refusal is a bare sentence.
+        if let Some(message) =
+            crate::guard::argument_shape_block(name, &arguments, self.ctx.paths.config_dir())
+        {
+            return Ok(error_result(&crate::error::ToolError::Reported { message }).into());
+        }
+
         // `CallToolResponse::Complete` is the only shape this server produces:
         // it never asks for client input and never materializes a task, and the
         // wire form of `Complete` is exactly the `CallToolResult` Python serves.

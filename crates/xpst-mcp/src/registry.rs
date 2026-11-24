@@ -334,8 +334,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_preflight",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "resolves destinations against live credentials and the content contract",
+        Implementation::Ported {
+            handler: crate::tools::preflight::run,
+            render: Render::Pretty,
         },
     ),
     (

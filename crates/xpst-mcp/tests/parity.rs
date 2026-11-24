@@ -288,9 +288,12 @@ fn the_ported_surface_is_exactly_the_read_only_network_free_set() {
             "xpst_activity",
             "xpst_best_time",
             "xpst_bio_get",
+            "xpst_byo_app",
             "xpst_capabilities",
+            "xpst_chat",
             "xpst_config_show",
             "xpst_followers",
+            "xpst_preflight",
             "xpst_providers",
             "xpst_rate_limit_status",
             "xpst_readiness",
@@ -298,6 +301,7 @@ fn the_ported_surface_is_exactly_the_read_only_network_free_set() {
             "xpst_search",
             "xpst_security_audit",
             "xpst_status",
+            "xpst_stream",
             "xpst_transcript",
         ]
     );

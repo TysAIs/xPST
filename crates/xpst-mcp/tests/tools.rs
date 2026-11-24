@@ -653,3 +653,150 @@ fn transcript_rejects_an_unsafe_video_id() {
     );
     assert_eq!(error.code(), "reported_error");
 }
+
+// ── the three tools this tranche added ──────────────────────────────────────
+
+/// `xpst_byo_app` reads the registry's `store_id_key`/`store_secret_key`, not a
+/// config field: a store write must flip the status to `encrypted-store`, and a
+/// clear must flip it back. A wrong store key would read as "no app configured"
+/// forever, which is why this round trip exists.
+#[test]
+fn byo_app_round_trips_through_the_encrypted_store() {
+    let dir = profile("byo_app");
+    let context = ctx(&dir);
+
+    let before = call(&context, "xpst_byo_app", json!({"platform": "instagram"}));
+    assert_eq!(before["action"], json!("status"));
+    assert_eq!(before["platform_status"]["configured"], json!(false));
+    assert_eq!(before["platform_status"]["source"], json!(""));
+
+    let stored = call(
+        &context,
+        "xpst_byo_app",
+        json!({
+            "platform": "instagram",
+            "app_id": "1234567890",
+            "app_secret": "parity-secret-1",
+        }),
+    );
+    assert_eq!(stored["action"], json!("stored"));
+    assert_eq!(stored["configured"], json!(true));
+    assert_eq!(stored["source"], json!("encrypted-store"));
+    // Never the identifier in full.
+    assert_eq!(stored["app_id_masked"], json!("…7890"));
+
+    // `instagram` and `threads` share one Meta app, so the second platform sees
+    // the same credential — the registry's shared store keys, not a per-platform
+    // config field.
+    let threads = call(&context, "xpst_byo_app", json!({"platform": "threads"}));
+    assert_eq!(threads["platform_status"]["configured"], json!(true));
+    assert_eq!(
+        threads["platform_status"]["source"],
+        json!("encrypted-store")
+    );
+
+    let cleared = call(
+        &context,
+        "xpst_byo_app",
+        json!({"platform": "instagram", "clear": true}),
+    );
+    assert_eq!(cleared["action"], json!("clear"));
+    assert_eq!(
+        cleared["removed"],
+        json!(["byo_meta_app_id", "byo_meta_app_secret"])
+    );
+
+    let after = call(&context, "xpst_byo_app", json!({"platform": "instagram"}));
+    assert_eq!(after["platform_status"]["configured"], json!(false));
+}
+
+/// A platform that keeps its app credential in its own connect flow refuses a
+/// store call with a bare sentence, and the status read still works.
+#[test]
+fn byo_app_refuses_a_store_on_a_read_only_platform() {
+    let dir = profile("byo_app_readonly");
+    let context = ctx(&dir);
+    let error = registry()
+        .dispatch(
+            &context,
+            "xpst_byo_app",
+            &json!({"platform": "messenger", "app_id": "1234567890"}),
+        )
+        .expect_err("refused");
+    assert_eq!(error.code(), "reported_error");
+    assert!(
+        error
+            .to_string()
+            .starts_with("Messenger keeps its app credential in its own connect flow"),
+        "{error}"
+    );
+}
+
+/// `xpst_chat` reports a configured channel as ready and an unconfigured one as
+/// `no_channel` — the two answers that differ in their next step.
+#[test]
+fn chat_readiness_separates_a_missing_channel_from_a_missing_credential() {
+    let dir = profile("chat");
+    std::fs::write(
+        dir.join("config.yaml"),
+        "version: 4\nchat:\n  twitch_channels:\n    - paritychannel\n",
+    )
+    .expect("write config");
+    let payload = call(&ctx(&dir), "xpst_chat", json!({}));
+    assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["read_only"], json!(true));
+
+    let rows = payload["platforms"].as_array().expect("platforms");
+    let twitch = rows
+        .iter()
+        .find(|row| row["platform"] == json!("twitch"))
+        .expect("twitch row");
+    assert_eq!(twitch["status"], json!("ready"));
+    assert_eq!(twitch["channels"], json!(["paritychannel"]));
+
+    let youtube = rows
+        .iter()
+        .find(|row| row["platform"] == json!("youtube"))
+        .expect("youtube row");
+    assert_eq!(youtube["status"], json!("unavailable"));
+    assert_eq!(youtube["missing"], json!(["oauth_token"]));
+    assert_eq!(youtube["unavailable"]["code"], json!("credentials_missing"));
+
+    // A platform with no read path is a row, not a silent omission.
+    let unknown = call(&ctx(&dir), "xpst_chat", json!({"platforms": ["nope"]}));
+    assert_eq!(unknown["platforms"][0]["status"], json!("unavailable"));
+    assert_eq!(
+        unknown["platforms"][0]["unavailable"]["code"],
+        json!("not_supported")
+    );
+}
+
+/// `xpst_stream` serves the whole registry, and an unknown platform is the
+/// payload with `code: unknown_platform` — an error result whose body is still
+/// the document, exactly as Python answers.
+#[test]
+fn stream_reports_the_registry_and_refuses_an_unknown_platform() {
+    let dir = profile("stream");
+    let context = ctx(&dir);
+
+    let payload = call(&context, "xpst_stream", json!({}));
+    assert_eq!(payload["contract_version"], json!(1));
+    assert_eq!(payload["stream"]["ready_to_relay"], json!(false));
+    let rows = payload["stream"]["platforms"]
+        .as_array()
+        .expect("platforms");
+    assert_eq!(rows.len(), 10, "the captured registry has ten ingest paths");
+    assert_eq!(rows[0]["platform"], json!("youtube"));
+    // A key never appears in the payload.
+    assert!(rows.iter().all(|row| row["key_present"] == json!(false)));
+
+    let error = registry()
+        .dispatch(&context, "xpst_stream", &json!({"platform": "nope"}))
+        .expect_err("refused");
+    assert_eq!(error.code(), "reported_error");
+    let body: Value = serde_json::from_str(&error.to_string()).expect("the body is the payload");
+    assert_eq!(body["ok"], json!(false));
+    assert_eq!(body["code"], json!("unknown_platform"));
+    assert_eq!(body["platform"], Value::Null);
+    assert!(body["known"].as_array().expect("known").len() == 10);
+}

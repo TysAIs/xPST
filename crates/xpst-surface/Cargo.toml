@@ -18,6 +18,7 @@ serde_json.workspace = true
 xpst-auth = { path = "../xpst-auth" }
 xpst-authflow = { path = "../xpst-authflow" }
 xpst-config = { workspace = true }
+xpst-core = { path = "../xpst-core" }
 xpst-media = { path = "../xpst-media" }
 xpst-state = { workspace = true }
 xpst-store = { path = "../xpst-store" }
