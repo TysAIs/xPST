@@ -12,7 +12,7 @@ Usage (from the repository root, with the runtime deps installed):
 Writes:
     crates/xpst-mcp/tests/fixtures/python_tool_registry.json
     crates/xpst-mcp/tests/fixtures/python_providers.json
-    crates/xpst-mcp/tests/fixtures/python_config_show_model.json
+    crates/xpst-config/src/resources/python_config_model.json
 
 The third fixture is the *structured* model behind `xpst_config_show`: the
 Python tool projects `dict(section.__dict__)` for seven account sections plus
@@ -82,7 +82,8 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    # The structured model behind `xpst_config_show`. `plain()` turns a
+    # The structured model behind `xpst_config_show` and the `diagnostics`
+    # config snapshot. `plain()` turns a
     # dataclass into a dict (field order preserved) so the Rust side can merge
     # the operator's config.yaml per field; `repr_classes` names the dataclasses
     # the Python tool renders as `ClassName(field=value, ...)` strings.
@@ -115,16 +116,28 @@ def main() -> int:
             for key, item in value.items():
                 repr_classes(item, f"{path}.{key}", out, defaults)
 
+    # HOME and XPST_CONFIG_DIR both point inside a scratch directory, so the
+    # model's path fields expand to a throwaway prefix instead of the
+    # maintainer's home. The prefix is rewritten to `~/.xpst` before the fixture
+    # is written: the model is the *default* profile, and the Rust side
+    # substitutes the real config directory at runtime.
     with tempfile.TemporaryDirectory() as tmp:
-        previous = os.environ.get("XPST_CONFIG_DIR")
-        os.environ["XPST_CONFIG_DIR"] = tmp
+        config_dir = Path(tmp) / ".xpst"
+        previous_config = os.environ.get("XPST_CONFIG_DIR")
+        previous_home = os.environ.get("HOME")
+        os.environ["XPST_CONFIG_DIR"] = str(config_dir)
+        os.environ["HOME"] = tmp
         try:
             config = XPSTConfig.load()
         finally:
-            if previous is None:
-                os.environ.pop("XPST_CONFIG_DIR", None)
-            else:
-                os.environ["XPST_CONFIG_DIR"] = previous
+            for name, previous in (
+                ("XPST_CONFIG_DIR", previous_config),
+                ("HOME", previous_home),
+            ):
+                if previous is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = previous
 
         accounts = {}
         classes = {}
@@ -136,21 +149,22 @@ def main() -> int:
             accounts[platform] = plain(section)
             repr_classes(section, f"accounts.{platform}", classes, defaults)
         model = {"accounts": accounts}
-        for name in ("video", "monitoring", "schedule"):
+        for name in ("video", "monitoring", "schedule", "reliability", "notifications", "rate_limits"):
             section = getattr(config, name)
             model[name] = plain(section)
             repr_classes(section, name, classes, defaults)
 
-    model_path = FIXTURES / "python_config_show_model.json"
-    model_path.write_text(
-        json.dumps(
-            {"model": model, "repr_classes": classes, "repr_defaults": defaults},
-            indent=2,
-            ensure_ascii=False,
-        )
-        + "\n",
-        encoding="utf-8",
+    model_path = ROOT / "crates" / "xpst-config" / "src" / "resources" / "python_config_model.json"
+    rendered = json.dumps(
+        {"model": model, "repr_classes": classes, "repr_defaults": defaults},
+        indent=2,
+        ensure_ascii=False,
     )
+    # No absolute home path may reach the fixture (D-2). The scratch prefix
+    # becomes the default profile's own path; the Rust side substitutes the
+    # operator's config directory when it projects the model.
+    rendered = rendered.replace(str(config_dir), "~/.xpst")
+    model_path.write_text(rendered + "\n", encoding="utf-8")
 
     print(f"wrote {registry_path.relative_to(ROOT)} ({len(tools)} tools)")
     print(f"wrote {providers_path.relative_to(ROOT)}")

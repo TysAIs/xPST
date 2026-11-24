@@ -27,7 +27,7 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 186;
+const EXPECTED_SCENARIOS: usize = 189;
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -647,6 +647,160 @@ fn assert_files_match(row: &Value, profile: &Profile, scenario: &str) {
     }
 }
 
+fn mask_sections_for(row: &Value) -> Vec<String> {
+    row.get("mask_sections")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Read a ZIP archive's entries as `(name, bytes)`.
+///
+/// The writer in `crate::zipwrite` stores entries uncompressed, so this reads
+/// the central directory (the authoritative index), follows each entry's local
+/// header and verifies the CRC-32 — a corrupted entry fails here instead of
+/// being compared as if it were intact. A deflated entry is a hard error: the
+/// Rust engine never writes one, and silently skipping it would turn the row
+/// into a no-op.
+fn read_zip(path: &Path) -> Vec<(String, Vec<u8>)> {
+    let bytes = std::fs::read(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let find = |signature: &[u8; 4], from: usize| -> Option<usize> {
+        bytes[from..]
+            .windows(4)
+            .position(|window| window == signature)
+            .map(|offset| offset + from)
+    };
+    let eocd = find(b"PK\x05\x06", 0).unwrap_or_else(|| panic!("{}: no EOCD", path.display()));
+    let count = u16::from_le_bytes([bytes[eocd + 10], bytes[eocd + 11]]) as usize;
+    let mut offset = u32::from_le_bytes([
+        bytes[eocd + 16],
+        bytes[eocd + 17],
+        bytes[eocd + 18],
+        bytes[eocd + 19],
+    ]) as usize;
+
+    let mut entries = Vec::with_capacity(count);
+    for _ in 0..count {
+        assert_eq!(
+            &bytes[offset..offset + 4],
+            b"PK\x01\x02",
+            "{}: central directory entry at {offset}",
+            path.display()
+        );
+        let method = u16::from_le_bytes([bytes[offset + 10], bytes[offset + 11]]);
+        let crc = u32::from_le_bytes([
+            bytes[offset + 16],
+            bytes[offset + 17],
+            bytes[offset + 18],
+            bytes[offset + 19],
+        ]);
+        let size = u32::from_le_bytes([
+            bytes[offset + 24],
+            bytes[offset + 25],
+            bytes[offset + 26],
+            bytes[offset + 27],
+        ]) as usize;
+        let name_len = u16::from_le_bytes([bytes[offset + 28], bytes[offset + 29]]) as usize;
+        let extra_len = u16::from_le_bytes([bytes[offset + 30], bytes[offset + 31]]) as usize;
+        let comment_len = u16::from_le_bytes([bytes[offset + 32], bytes[offset + 33]]) as usize;
+        let local = u32::from_le_bytes([
+            bytes[offset + 42],
+            bytes[offset + 43],
+            bytes[offset + 44],
+            bytes[offset + 45],
+        ]) as usize;
+        let name = String::from_utf8(bytes[offset + 46..offset + 46 + name_len].to_vec())
+            .expect("entry name is UTF-8");
+        assert_eq!(method, 0, "{name}: the Rust writer stores entries");
+
+        assert_eq!(
+            &bytes[local..local + 4],
+            b"PK\x03\x04",
+            "{name}: local header"
+        );
+        let local_name = u16::from_le_bytes([bytes[local + 26], bytes[local + 27]]) as usize;
+        let local_extra = u16::from_le_bytes([bytes[local + 28], bytes[local + 29]]) as usize;
+        let start = local + 30 + local_name + local_extra;
+        let data = bytes[start..start + size].to_vec();
+        assert_eq!(
+            xpst_cli::zipwrite::crc32(&data),
+            crc,
+            "{name}: CRC-32 mismatch"
+        );
+        entries.push((name, data));
+        offset += 46 + name_len + extra_len + comment_len;
+    }
+    entries
+}
+
+/// Compare the entries of the archives a scenario wrote.
+///
+/// A JSON entry is compared structurally after the same normalisation the
+/// payload gets (profile path, wall-clock keys, machine-dependent readiness
+/// checks) plus `mask_sections`; a text entry is compared byte for byte. The
+/// container is never compared: Python deflates and the Rust writer stores, so
+/// the bytes are a property of the compressor, not of the engine.
+fn assert_files_zip_match(row: &Value, profile: &Profile, scenario: &str) {
+    let Some(expected) = row.get("files_zip").and_then(Value::as_object) else {
+        return;
+    };
+    assert!(
+        !expected.is_empty(),
+        "scenario `{scenario}` records an empty files_zip map"
+    );
+    for (relative, want) in expected {
+        let path = profile.path().join(relative);
+        let entries = read_zip(&path);
+        let want = want.as_object().expect("files_zip entry map");
+        assert_eq!(
+            entries.len(),
+            want.len(),
+            "scenario `{scenario}`: {relative} has {} entries, the fixture {}",
+            entries.len(),
+            want.len()
+        );
+        for (name, data) in entries {
+            let want = want
+                .get(&name)
+                .unwrap_or_else(|| panic!("scenario `{scenario}`: {relative} has no `{name}`"));
+            let text = String::from_utf8(data).expect("entry is UTF-8");
+            let Ok(mut actual) = serde_json::from_str::<Value>(&text) else {
+                assert_eq!(
+                    text,
+                    want.as_str().unwrap_or_default(),
+                    "scenario `{scenario}`: {relative}/{name} differs"
+                );
+                continue;
+            };
+            normalize(
+                &mut actual,
+                profile,
+                &mask_for(row),
+                &mask_findings_for(row),
+                &mask_checks_for(row),
+                &mask_lines_for(row),
+            );
+            for key in mask_sections_for(row) {
+                if let Some(map) = actual.as_object_mut() {
+                    if map.contains_key(&key) {
+                        map.insert(key, Value::String("<DIVERGENT>".to_string()));
+                    }
+                }
+            }
+            assert_eq!(
+                actual, *want,
+                "scenario `{scenario}`: {relative}/{name} differs from the Python bundle"
+            );
+        }
+    }
+}
+
 #[test]
 fn every_recorded_scenario_matches_the_python_engine() {
     let document = document();
@@ -689,6 +843,7 @@ fn every_recorded_scenario_matches_the_python_engine() {
                 );
                 assert_payload_matches(&row["stdout_json"], &actual, name);
                 assert_files_match(row, &profile, name);
+                assert_files_zip_match(row, &profile, name);
             }
             "stdout" => {
                 assert_eq!(

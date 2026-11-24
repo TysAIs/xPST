@@ -30,6 +30,7 @@ pub mod output;
 pub mod parity;
 pub mod paths;
 pub mod pythonnum;
+pub mod zipwrite;
 
 use std::ffi::OsString;
 use std::io::{IsTerminal, Write};

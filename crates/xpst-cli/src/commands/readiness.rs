@@ -101,7 +101,7 @@ impl Check {
 }
 
 /// The assembled report (`ReadinessReport`).
-struct Report {
+pub(crate) struct Report {
     ready: bool,
     summary: String,
     checks: Vec<Check>,
@@ -109,7 +109,7 @@ struct Report {
 }
 
 impl Report {
-    fn to_value(&self) -> YamlValue {
+    pub(crate) fn to_value(&self) -> YamlValue {
         let blocking: Vec<YamlValue> = self
             .checks
             .iter()
@@ -317,7 +317,7 @@ fn legacy_fixed(path: &str) -> String {
 }
 
 /// `build_readiness_report()`.
-fn build_report(view: &ConfigView, store: &CredentialStore) -> Result<Report, String> {
+pub(crate) fn build_report(view: &ConfigView, store: &CredentialStore) -> Result<Report, String> {
     let canonical = provider_status::canonical_status(view, store)?;
     let mut checks: Vec<Check> = vec![
         python_check(),

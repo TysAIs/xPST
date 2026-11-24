@@ -16,6 +16,9 @@ path = "src/main.rs"
 base64 = "0.22"
 clap.workspace = true
 getrandom = "0.4"
+# `diagnostics` redacts log lines with the same four patterns the shipped
+# `redact_log_line()` uses; `regex` is already in the graph (transitively).
+regex = "1"
 jiff.workspace = true
 serde.workspace = true
 serde_json.workspace = true

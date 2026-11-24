@@ -19,6 +19,13 @@
 //!   `_guardrail_block`.
 //! * `tests/parity.rs` fails on drift against `src/xpst/mcp/server.py`.
 //!
+//! **The advertised set is all 46 tools, not the ported subset.** An agent's
+//! tool discovery has to be identical between the two servers, or a prompt that
+//! works against Python silently loses a capability here; what keeps that honest
+//! is the refusal, not the omission. A stub answers
+//! `<tool> is not implemented yet: <reason>` with `isError: true`, so a caller
+//! learns the tool exists and is not available — never that it succeeded.
+//!
 //! This slice ports the read-only tools that need no network and no platform
 //! credentials: providers, config show (masked), status, rate-limit status and
 //! schedule list. Everything else is an honest stub.

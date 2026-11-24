@@ -24,26 +24,15 @@ use crate::error::ToolError;
 use super::ToolContext;
 
 /// Captured from the shipped model; regenerate, never edit by hand.
-const MODEL: &str = include_str!("../../tests/fixtures/python_config_show_model.json");
+const MODEL: &str = xpst_config::PYTHON_CONFIG_MODEL;
 
-/// Fields the Python model types as `Path`, so `XPSTConfig.load()` expands a
-/// leading `~` before the tool ever sees them. A string field that is not a
-/// path (`proxy`, `username`) is left exactly as written.
-const PATH_FIELDS: &[&str] = &[
-    "credentials_path",
-    "cookies_file",
-    "session_file",
-    "token_file",
-    "client_secrets",
-    "download_dir",
-    "log_file",
-    "path",
-];
+/// The sections `_handle_config_show()` projects, in its order.
+const SECTIONS: &[&str] = &["accounts", "video", "monitoring", "schedule"];
 
 pub fn run(ctx: &ToolContext, _arguments: &Value) -> Result<Value, ToolError> {
     let document: Value = serde_json::from_str(MODEL).map_err(|err| ToolError::Malformed {
         kind: "config projection fixture",
-        path: "tests/fixtures/python_config_show_model.json".to_string(),
+        path: "crates/xpst-config/src/resources/python_config_model.json".to_string(),
         detail: err.to_string(),
     })?;
     let model = document.get("model").cloned().unwrap_or(Value::Null);
@@ -57,14 +46,21 @@ pub fn run(ctx: &ToolContext, _arguments: &Value) -> Result<Value, ToolError> {
         .unwrap_or_else(|| Value::Object(Map::new()));
 
     let file = read_config(ctx)?;
-    let mut projection = project(&model, file.as_ref(), &classes, &defaults);
+    let mut projection =
+        xpst_config::project_config_model(&model, file.as_ref(), &classes, &defaults);
+    // The captured model carries every section (the `diagnostics` snapshot
+    // reads `reliability`, `notifications` and `rate_limits` too); this tool
+    // serves the four `_handle_config_show()` projects.
+    if let Some(map) = projection.as_object_mut() {
+        map.retain(|key, _| SECTIONS.contains(&key.as_str()));
+    }
     // Reprs first, then masking: Python's `_mask_sensitive_values()` walks
     // dicts and lists only, so a nested dataclass is rendered by `repr()` with
     // its values intact (`TikTokAggregatorConfig(api_key_ref='zernio_api_key',
     // ...)`). Masking first would blank a field Python leaves visible.
     render_reprs(&mut projection, &classes);
     mask(&mut projection);
-    expand_paths(&mut projection);
+    xpst_config::expand_config_paths(&mut projection);
     Ok(projection)
 }
 
@@ -89,71 +85,6 @@ fn read_config(ctx: &ToolContext) -> Result<Option<Value>, ToolError> {
     }
 }
 
-/// Merge the file onto the model: objects merge per key, everything else is
-/// replaced by the file's value when the file has one.
-///
-/// Nested dataclasses are the exception, and the reason `repr_defaults` is
-/// captured: Python constructs them as `ClassName(**block)`, so a partial block
-/// in `config.yaml` falls back to the *dataclass* defaults (usually `None`),
-/// not to the shipped preset. `video.encoding_<p>` is the model's flattened
-/// name for the file's `video.encoding.<p>` block.
-fn project(model: &Value, file: Option<&Value>, classes: &Value, defaults: &Value) -> Value {
-    let mut projection = merge(model, file);
-    let Some(classes) = classes.as_object() else {
-        return projection;
-    };
-    for path in classes.keys() {
-        let segments: Vec<&str> = path.split('.').collect();
-        if segments.len() < 2 || (segments.len() == 2 && segments[0] == "accounts") {
-            continue;
-        }
-        let file_segments = file_segments(&segments);
-        let Some(file_block) = lookup(file, &file_segments) else {
-            continue;
-        };
-        // `repr_defaults` is keyed by the dotted path, not nested.
-        let base = defaults.get(path).cloned().unwrap_or(Value::Null);
-        let merged = merge(&base, Some(file_block));
-        if let Some(slot) = navigate_mut(&mut projection, &segments) {
-            *slot = merged;
-        }
-    }
-    projection
-}
-
-/// `video.encoding_youtube` is `video.encoding.youtube` in `config.yaml`.
-fn file_segments<'a>(segments: &[&'a str]) -> Vec<&'a str> {
-    if segments.len() == 2 && segments[0] == "video" {
-        if let Some(platform) = segments[1].strip_prefix("encoding_") {
-            return vec!["video", "encoding", platform];
-        }
-    }
-    segments.to_vec()
-}
-
-fn lookup<'a>(root: Option<&'a Value>, segments: &[&str]) -> Option<&'a Value> {
-    let mut current = root?;
-    for segment in segments {
-        current = current.as_object()?.get(*segment)?;
-    }
-    Some(current)
-}
-
-fn merge(model: &Value, file: Option<&Value>) -> Value {
-    match (model, file) {
-        (Value::Object(model_map), Some(Value::Object(file_map))) => {
-            let mut out = Map::new();
-            for (key, value) in model_map {
-                out.insert(key.clone(), merge(value, file_map.get(key)));
-            }
-            Value::Object(out)
-        }
-        (Value::Object(_), _) => model.clone(),
-        (_, Some(value)) => value.clone(),
-        (_, None) => model.clone(),
-    }
-}
-
 /// `_mask_sensitive_values()`: a key containing a sensitive keyword whose value
 /// is a non-empty string becomes `***`. Empty strings stay empty so "not
 /// configured" remains visible.
@@ -174,30 +105,6 @@ fn mask(value: &mut Value) {
             }
         }
         Value::Array(items) => items.iter_mut().for_each(mask),
-        _ => {}
-    }
-}
-
-/// Expand a leading `~` in the fields the Python model types as `Path`.
-///
-/// `XPSTConfig.load()` runs `Path.expanduser()` on them, so the shipped tool
-/// reports `$HOME/.xpst/downloads` where the file says `~/.xpst/downloads`.
-/// Masked fields are already `***` and are skipped by the `~/` test.
-fn expand_paths(value: &mut Value) {
-    match value {
-        Value::Object(map) => {
-            for (key, child) in map.iter_mut() {
-                if PATH_FIELDS.contains(&key.as_str()) {
-                    if let Value::String(text) = child {
-                        if text.starts_with("~/") {
-                            *text = xpst_config::expand_home(text);
-                        }
-                    }
-                }
-                expand_paths(child);
-            }
-        }
-        Value::Array(items) => items.iter_mut().for_each(expand_paths),
         _ => {}
     }
 }
@@ -319,7 +226,10 @@ mod tests {
                 "accounts".to_string(),
                 "video".to_string(),
                 "monitoring".to_string(),
-                "schedule".to_string()
+                "schedule".to_string(),
+                "reliability".to_string(),
+                "notifications".to_string(),
+                "rate_limits".to_string()
             ])
         );
         let accounts = model["accounts"].as_object().expect("accounts");
@@ -378,7 +288,8 @@ mod tests {
             "video": {"encoding": {"youtube": {"resolution": 1080}}},
             "monitoring": {"log_level": "DEBUG"}
         });
-        let projection = project(&model, Some(&file), &classes, &defaults);
+        let projection =
+            xpst_config::project_config_model(&model, Some(&file), &classes, &defaults);
         assert_eq!(projection["accounts"]["youtube"]["enabled"], true);
         assert_eq!(projection["accounts"]["youtube"]["username"], "alice");
         // A partial encoding block is `EncodingConfig(**block)`: the fields it

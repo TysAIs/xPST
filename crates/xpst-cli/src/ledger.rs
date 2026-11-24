@@ -354,4 +354,29 @@ pub const DEVIATIONS: &[&str] = &[
      skipped. With credentials, Python fetches live numbers and records them. The discovery, \
      the `--platforms` filter, the totals, the document bytes (JSON key order and separators, \
      the CSV BOM and `\\r\\n`) and the payload are the shipped behaviour.",
+    "`diagnostics` answers four of its eleven sections differently, because they describe the \
+     Python installation rather than the engine: `system.python` is `null` (a Rust binary has no \
+     interpreter to version) and `platform`/`machine` are the Rust engine's own; `dependencies` \
+     lists every tracked Python package as `null` (none is installed — the engine is compiled in); \
+     `updates` reports the app row with `update_mode: \"binary\"` and no package rows; and \
+     `providers` carries the manifests plus a reduced canonical row, without the `posting_truth` \
+     and `probe_*` fields `canonical_provider_catalog()` adds. The other seven sections — the \
+     config snapshot with its path/secret redaction, the readiness report, the credential key \
+     list, the state summary, the redacted log tail, the version and the wall clock — are \
+     byte-compared against the Python bundle, entry by entry. The ZIP container is not compared: \
+     Python deflates and the Rust writer stores, so the bytes are a property of the compressor.",
+    "`diagnostics` writes a stored (uncompressed) ZIP with a fixed 1980-01-01 timestamp, so the \
+     same content produces the same bytes. Python deflates and stamps the wall clock. Every \
+     reader accepts both; the parity surface is the entries.",
+    "`mcp start` serves the same 46 tool definitions Python does, and a tool whose behaviour is \
+     not ported answers a typed `not_implemented` refusal instead of disappearing from \
+     `tools/list`. Advertising the full surface keeps an agent's tool discovery identical between \
+     the two servers; the refusal is what keeps it honest. The `tools/list` `inputSchema` key \
+     order differs (the Python SDK re-serializes the schema for the negotiated revision), so the \
+     protocol fixture compares the parsed definitions — count, order and an FNV-1a digest — \
+     rather than the raw bytes.",
+    "`mcp start` does not run the Pydantic validation pass `XPSTConfig.load()` performs, so an \
+     invalid `config.yaml` starts the server here where Python refuses with `Configuration \
+     errors:`. The tools read the same document either way; `xpst config validate` is the \
+     surface that reports the blockers.",
 ];

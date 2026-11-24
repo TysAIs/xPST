@@ -29,8 +29,8 @@
         "enabled": true,
         "credentials_path": null,
         "proxy": null,
-        "client_secrets": "/home/ty/.hermes/profiles/swe/cache/scratch/tmp7gjwerxz/credentials/youtube_client_secrets.json",
-        "token_file": "/home/ty/.hermes/profiles/swe/cache/scratch/tmp7gjwerxz/credentials/youtube_token.json",
+        "client_secrets": "~/.xpst/credentials/youtube_client_secrets.json",
+        "token_file": "~/.xpst/credentials/youtube_token.json",
         "channel_id": "",
         "username": "",
         "video_mode": "auto"
@@ -39,7 +39,7 @@
         "enabled": true,
         "credentials_path": null,
         "proxy": null,
-        "cookies_file": "/home/ty/.hermes/profiles/swe/cache/scratch/tmp7gjwerxz/credentials/x_cookies.json",
+        "cookies_file": "~/.xpst/credentials/x_cookies.json",
         "username": "",
         "password": "",
         "auth_mode": "cookies",
@@ -54,7 +54,7 @@
         "enabled": true,
         "credentials_path": null,
         "proxy": null,
-        "session_file": "/home/ty/.hermes/profiles/swe/cache/scratch/tmp7gjwerxz/credentials/instagram_session.json",
+        "session_file": "~/.xpst/credentials/instagram_session.json",
         "username": "",
         "password": "",
         "auth_mode": "graph_api",
@@ -98,7 +98,7 @@
       }
     },
     "video": {
-      "download_dir": "/home/ty/.xpst/downloads",
+      "download_dir": "~/.xpst/downloads",
       "cleanup_after_post": false,
       "encoding_youtube": {
         "resolution": 1920,
@@ -167,7 +167,7 @@
     },
     "monitoring": {
       "log_level": "INFO",
-      "log_file": "/home/ty/.xpst/logs/xpst.log",
+      "log_file": "~/.xpst/logs/xpst.log",
       "log_rotation": "10 MB",
       "healthcheck_port": 8080,
       "enable_metrics": true,
@@ -182,6 +182,28 @@
       "analytics_snapshot_enabled": false,
       "analytics_snapshot_interval": 3600,
       "posting_paused": false
+    },
+    "reliability": {
+      "max_retries": 3,
+      "retry_backoff": 2,
+      "circuit_breaker_threshold": 5,
+      "circuit_breaker_reset": 3600
+    },
+    "notifications": {
+      "enabled": false,
+      "on_success": true,
+      "on_failure": true,
+      "discord_webhook_url": "",
+      "telegram_bot_token": "",
+      "telegram_chat_id": ""
+    },
+    "rate_limits": {
+      "youtube": 5,
+      "instagram": 5,
+      "x": 5,
+      "tiktok": 5,
+      "threads": 5,
+      "facebook": 5
     }
   },
   "repr_classes": {
@@ -199,7 +221,10 @@
     "video.encoding_x": "EncodingConfig",
     "video.encoding_tiktok": "EncodingConfig",
     "monitoring": "MonitoringConfig",
-    "schedule": "ScheduleConfig"
+    "schedule": "ScheduleConfig",
+    "reliability": "ReliabilityConfig",
+    "notifications": "NotificationConfig",
+    "rate_limits": "RateLimitConfig"
   },
   "repr_defaults": {
     "accounts.tiktok": {
@@ -453,6 +478,28 @@
       "analytics_snapshot_enabled": false,
       "analytics_snapshot_interval": 3600,
       "posting_paused": false
+    },
+    "reliability": {
+      "max_retries": 3,
+      "retry_backoff": 2,
+      "circuit_breaker_threshold": 5,
+      "circuit_breaker_reset": 3600
+    },
+    "notifications": {
+      "enabled": false,
+      "on_success": true,
+      "on_failure": true,
+      "discord_webhook_url": "",
+      "telegram_bot_token": "",
+      "telegram_chat_id": ""
+    },
+    "rate_limits": {
+      "youtube": 5,
+      "instagram": 5,
+      "x": 5,
+      "tiktok": 5,
+      "threads": 5,
+      "facebook": 5
     }
   }
 }

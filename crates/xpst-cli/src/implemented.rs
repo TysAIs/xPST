@@ -220,6 +220,12 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         devices,
     ),
     implemented(
+        "diagnostics",
+        "xpst-cli",
+        "The redacted support bundle: `diagnostics.json` + `README.txt` in a ZIP, with the shipped path/secret redaction, the config snapshot, the readiness report, the credential key list, the state summary and the redacted log tail byte-compared against the Python bundle. `system`, `dependencies`, `updates` and `providers` are named divergences (a compiled engine has no Python runtime, no pip packages and no `posting_truth` projection).",
+        diagnostics,
+    ),
+    implemented(
         "pair",
         "xpst-auth",
         "Issues a one-time pairing code (or the `--code` one) with the same alphabet, hashing, TTL floor and `devices.json` shape; payload byte-compared with the Python CLI on a fixed code. `--ttl 0` is falsy in Python and means the 600 s default (not the 30 s floor), and a non-integer `--ttl` is a usage error (exit 2).",
@@ -667,6 +673,15 @@ fn devices(
     err: &mut dyn Write,
 ) -> i32 {
     commands::devices::list(global, leaf, out, err)
+}
+
+fn diagnostics(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::diagnostics::run(global, leaf, out, err)
 }
 
 fn pair(

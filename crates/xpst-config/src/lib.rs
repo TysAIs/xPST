@@ -384,6 +384,93 @@ pub fn python_style_json(value: &Value) -> Result<String, String> {
     Ok(out)
 }
 
+/// The captured Python config model: every field of every section with its
+/// default, plus the class name and dataclass defaults of each nested
+/// dataclass. Regenerate with `scripts/capture_mcp_tool_registry.py`; never
+/// edit by hand.
+///
+/// Two surfaces read it — the MCP `xpst_config_show` tool and the `diagnostics`
+/// config snapshot — because both report the *model* (defaults included), not
+/// the file. A file-only projection reports a defaulted field as absent.
+pub const PYTHON_CONFIG_MODEL: &str = include_str!("resources/python_config_model.json");
+
+/// Merge an operator's `config.yaml` onto the captured model.
+///
+/// Objects merge per key and everything else is replaced by the file's value
+/// when the file has one. Nested dataclasses are the exception, and the reason
+/// `repr_defaults` is captured: Python constructs them as `ClassName(**block)`,
+/// so a partial block in `config.yaml` falls back to the *dataclass* defaults
+/// (usually `None`), not to the shipped preset. `video.encoding_<p>` is the
+/// model's flattened name for the file's `video.encoding.<p>` block.
+pub fn project_config_model(
+    model: &JsonValue,
+    file: Option<&JsonValue>,
+    classes: &JsonValue,
+    defaults: &JsonValue,
+) -> JsonValue {
+    let mut projection = merge_model(model, file);
+    let Some(classes) = classes.as_object() else {
+        return projection;
+    };
+    for path in classes.keys() {
+        let segments: Vec<&str> = path.split('.').collect();
+        if segments.len() < 2 || (segments.len() == 2 && segments[0] == "accounts") {
+            continue;
+        }
+        let Some(file_block) = lookup_model(file, &file_segments(&segments)) else {
+            continue;
+        };
+        // `repr_defaults` is keyed by the dotted path, not nested.
+        let base = defaults.get(path).cloned().unwrap_or(JsonValue::Null);
+        let merged = merge_model(&base, Some(file_block));
+        if let Some(slot) = navigate_model_mut(&mut projection, &segments) {
+            *slot = merged;
+        }
+    }
+    projection
+}
+
+/// `video.encoding_youtube` is `video.encoding.youtube` in `config.yaml`.
+fn file_segments<'a>(segments: &[&'a str]) -> Vec<&'a str> {
+    if segments.len() == 2 && segments[0] == "video" {
+        if let Some(platform) = segments[1].strip_prefix("encoding_") {
+            return vec!["video", "encoding", platform];
+        }
+    }
+    segments.to_vec()
+}
+
+fn lookup_model<'a>(root: Option<&'a JsonValue>, segments: &[&str]) -> Option<&'a JsonValue> {
+    let mut current = root?;
+    for segment in segments {
+        current = current.as_object()?.get(*segment)?;
+    }
+    Some(current)
+}
+
+fn navigate_model_mut<'a>(root: &'a mut JsonValue, segments: &[&str]) -> Option<&'a mut JsonValue> {
+    let mut current = root;
+    for segment in segments {
+        current = current.as_object_mut()?.get_mut(*segment)?;
+    }
+    Some(current)
+}
+
+fn merge_model(model: &JsonValue, file: Option<&JsonValue>) -> JsonValue {
+    match (model, file) {
+        (JsonValue::Object(model_map), Some(JsonValue::Object(file_map))) => {
+            let mut out = serde_json::Map::new();
+            for (key, value) in model_map {
+                out.insert(key.clone(), merge_model(value, file_map.get(key)));
+            }
+            JsonValue::Object(out)
+        }
+        (JsonValue::Object(_), _) => model.clone(),
+        (_, Some(value)) => value.clone(),
+        (_, None) => model.clone(),
+    }
+}
+
 /// `json.dumps(value, indent=2)` for a `serde_json` document.
 ///
 /// Python's default `ensure_ascii=True` escapes every character outside
@@ -658,6 +745,45 @@ pub fn mask_sensitive(value: &Value) -> Value {
 
 /// Expand a leading `~` using `$HOME`. Small on purpose: P0 does not take a
 /// dependency on `dirs` for one substitution.
+/// Fields the Python model types as `Path`, so `XPSTConfig.load()` expands a
+/// leading `~` before any surface sees them. A string field that is not a path
+/// (`proxy`, `username`) is left exactly as written.
+pub const PATH_FIELDS: &[&str] = &[
+    "credentials_path",
+    "cookies_file",
+    "session_file",
+    "token_file",
+    "client_secrets",
+    "download_dir",
+    "log_file",
+    "path",
+];
+
+/// Expand every [`PATH_FIELDS`] value in a projected config model.
+///
+/// The captured model is the *default* profile, so its path fields read
+/// `~/.xpst/...`; `XPSTConfig.load()` runs `Path.expanduser()` on them, which is
+/// `HOME`-based even when `XPST_CONFIG_DIR` points somewhere else. Expanding
+/// against `HOME` is therefore the shipped behaviour, not an approximation.
+pub fn expand_config_paths(value: &mut JsonValue) {
+    match value {
+        JsonValue::Object(map) => {
+            for (key, child) in map.iter_mut() {
+                if PATH_FIELDS.contains(&key.as_str()) {
+                    if let JsonValue::String(text) = child {
+                        if text.starts_with("~/") {
+                            *text = expand_home(text);
+                        }
+                    }
+                }
+                expand_config_paths(child);
+            }
+        }
+        JsonValue::Array(items) => items.iter_mut().for_each(expand_config_paths),
+        _ => {}
+    }
+}
+
 pub fn expand_home(path: &str) -> String {
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = std::env::var_os("HOME") {
