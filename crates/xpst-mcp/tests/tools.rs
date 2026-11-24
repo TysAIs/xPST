@@ -321,3 +321,153 @@ fn providers_serves_the_captured_catalog_verbatim() {
         .iter()
         .any(|item| item["name"] == json!("youtube")));
 }
+
+#[test]
+fn readiness_serves_the_report_and_mirrors_its_verdict() {
+    let dir = profile("readiness");
+    let payload = call(&ctx(&dir), "xpst_readiness", json!({}));
+
+    assert_eq!(payload["contract_version"], json!(1));
+    // `ok` is the report's own verdict, never a constant: a pristine profile is
+    // not ready, so an agent gating on `ok` must not proceed.
+    assert_eq!(payload["ok"], json!(false));
+    assert_eq!(payload["readiness"]["ready"], json!(false));
+    let checks = payload["readiness"]["checks"]
+        .as_array()
+        .expect("checks array");
+    assert!(
+        checks.len() >= 5,
+        "the report must carry the setup checks, got {}",
+        checks.len()
+    );
+    let ids: Vec<&str> = checks
+        .iter()
+        .map(|check| check["id"].as_str().unwrap_or_default())
+        .collect();
+    for expected in [
+        "python",
+        "directories",
+        "ffmpeg",
+        "yt_dlp",
+        "source",
+        "destinations",
+    ] {
+        assert!(ids.contains(&expected), "missing check {expected}: {ids:?}");
+    }
+    // The first-run config is materialized, exactly as `XPSTConfig.load` does.
+    assert!(dir.join("config.yaml").exists());
+}
+
+#[test]
+fn security_audit_serves_the_tool_document_not_the_cli_one() {
+    let dir = profile("security");
+    let payload = call(&ctx(&dir), "xpst_security_audit", json!({}));
+
+    assert!(payload["overall_status"].is_string());
+    let checks = payload["checks"].as_array().expect("checks array");
+    assert!(checks.len() >= 5, "got {} checks", checks.len());
+    // `cli.py:7906` adds `check_count` on top of `run_security_checks`; the MCP
+    // tool serves the raw document, so the field must NOT be here.
+    assert!(
+        payload.get("check_count").is_none(),
+        "the MCP tool must serve run_security_checks verbatim"
+    );
+    let names: Vec<&str> = checks
+        .iter()
+        .map(|check| check["check"].as_str().unwrap_or_default())
+        .collect();
+    for expected in [
+        "dashboard_localhost",
+        "mcp_readonly",
+        "provider_mode",
+        "ffmpeg_available",
+        "encrypted_storage",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "missing check {expected}: {names:?}"
+        );
+    }
+    // A CLI process never binds the dashboard, so the row is honest about it.
+    let dashboard = checks
+        .iter()
+        .find(|check| check["check"] == json!("dashboard_localhost"))
+        .expect("dashboard row");
+    assert_eq!(dashboard["status"], json!("unobserved"));
+}
+
+#[test]
+fn best_time_is_empty_without_a_ledger_and_shapes_both_forms() {
+    let dir = profile("best_time");
+    let all = call(&ctx(&dir), "xpst_best_time", json!({}));
+    assert_eq!(all, json!({"best_times": {}}));
+
+    let one = call(&ctx(&dir), "xpst_best_time", json!({"platform": "youtube"}));
+    assert_eq!(one, json!({"platform": "youtube", "best_time": null}));
+}
+
+#[test]
+fn kb_query_reports_a_bad_workspace_as_pythons_exception_text() {
+    let dir = profile("kb_query");
+    let error = registry()
+        .dispatch(
+            &ctx(&dir),
+            "kb_query",
+            &json!({"text": "x", "workspace": "../escape"}),
+        )
+        .expect_err("invalid workspace");
+    // Python raises `ValueError`, `handle_call_tool` serves `Error: {str(e)}`.
+    assert_eq!(error.code(), "handler_error");
+    assert!(
+        error
+            .to_string()
+            .starts_with("Error: Invalid workspace name"),
+        "{error}"
+    );
+}
+
+#[test]
+fn kb_query_without_text_reports_the_key_error() {
+    let dir = profile("kb_query_missing");
+    let error = registry()
+        .dispatch(&ctx(&dir), "kb_query", &json!({}))
+        .expect_err("missing text");
+    assert_eq!(error.to_string(), "Error: 'text'");
+}
+
+#[test]
+fn bio_get_lists_enabled_accounts_then_custom_links() {
+    let dir = profile("bio");
+    std::fs::write(
+        dir.join("config.yaml"),
+        r#"version: 4
+accounts:
+  youtube:
+    enabled: true
+    username: '@ty'
+  x:
+    enabled: false
+    username: ty
+bio:
+  handle: Tyler
+  links:
+    - label: Site
+      url: https://example.invalid
+    - label: Bad
+      url: javascript:alert(1)
+"#,
+    )
+    .expect("write config");
+
+    let payload = call(&ctx(&dir), "xpst_bio_get", json!({}));
+    assert_eq!(payload["url"], json!("http://127.0.0.1:8080/bio"));
+    assert_eq!(payload["handle"], json!("Tyler"));
+    assert_eq!(
+        payload["links"],
+        json!([
+            {"label": "YouTube", "url": "https://youtube.com/@ty"},
+            {"label": "Site", "url": "https://example.invalid"},
+        ]),
+        "an enabled account with a handle comes first; a non-http link is dropped"
+    );
+}

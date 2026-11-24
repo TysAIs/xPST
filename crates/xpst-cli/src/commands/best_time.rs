@@ -1,9 +1,10 @@
 //! `xpst best-time` — recommended posting times from the analytics ledger.
 //!
 //! Parity target: `src/xpst/cli.py::best_time` over
-//! `src/xpst/best_time.py::BestTimeAnalyzer`. The analysis itself lives in
-//! `xpst_store::best_time`; this module resolves the profile, picks the ledger
-//! and renders the payload.
+//! `src/xpst/best_time.py::BestTimeAnalyzer`. The analysis lives in
+//! `xpst_store::best_time` and the payload shape in `xpst_surface::best_time`
+//! (the MCP tool `xpst_best_time` serves the same document); this module
+//! resolves the profile, picks the ledger and renders.
 //!
 //! The ledger is `<config dir>/analytics.db` — `config.config_dir` after
 //! `XPSTConfig.load`, which is the same directory `XPST_CONFIG_DIR` names. The
@@ -13,36 +14,15 @@
 //! Rendering is `json.dumps(..., indent=2, default=str)` with Python's default
 //! `ensure_ascii=True`, so a non-ASCII platform name comes out escaped and the
 //! two engines can be diffed with `cmp`.
-//!
-//! **Divergence, recorded in the ledger note:** a `views`/`likes` column that
-//! holds text makes Python raise `TypeError` out of `analyze()` (the `try` only
-//! wraps the query), while this reader skips the row. A ledger the shipped
-//! writer produced is integer-typed, so only a hand-edited database can observe
-//! the difference.
 
 use std::io::Write;
 use std::path::Path;
 
 use clap::ArgMatches;
-use xpst_config::Value;
 
 use crate::commands::bootstrap;
-use crate::output::{
-    array, integer, null, number, object, python_pretty_json_cfg, string, write_text,
-};
+use crate::output::{python_pretty_json_cfg, write_text};
 use crate::{exit, flag, leaf_string, GlobalOptions};
-
-/// One slot as Python's dict, in `analyze()`'s key order.
-fn slot_value(slot: &xpst_store::best_time::Slot) -> Value {
-    object(vec![
-        ("platform", string(slot.platform.clone())),
-        ("day_of_week", integer(i64::from(slot.day_of_week))),
-        ("day_name", string(slot.day_name())),
-        ("hour", integer(i64::from(slot.hour))),
-        ("avg_engagement_rate", number(slot.avg_engagement_rate)),
-        ("post_count", integer(slot.post_count as i64)),
-    ])
-}
 
 /// Run `best-time`.
 pub fn run(
@@ -65,40 +45,15 @@ pub fn run(
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| Path::new(".").to_path_buf());
-    let slots = xpst_store::best_time::analyze(&dir.join("analytics.db"), platform.as_deref());
+    let db = dir.join("analytics.db");
+    let payload = xpst_surface::best_time::payload(&db, platform.as_deref());
 
     if json_mode {
-        let payload = match &platform {
-            Some(name) => object(vec![
-                ("platform", string(name.clone())),
-                ("best_time", slots.first().map_or_else(null, slot_value)),
-            ]),
-            None => {
-                // `best_overall()`: top three per platform, platforms in the
-                // order the ranked results first mention them.
-                let mut order: Vec<String> = Vec::new();
-                for slot in &slots {
-                    if !order.contains(&slot.platform) {
-                        order.push(slot.platform.clone());
-                    }
-                }
-                let mut best_times = xpst_config::Mapping::new();
-                for name in order {
-                    let top: Vec<Value> = slots
-                        .iter()
-                        .filter(|slot| slot.platform == name)
-                        .take(3)
-                        .map(slot_value)
-                        .collect();
-                    best_times.insert(Value::from(name.as_str()), array(top));
-                }
-                object(vec![("best_times", Value::Mapping(best_times))])
-            }
-        };
         let _ = writeln!(out, "{}", python_pretty_json_cfg(&payload));
         return exit::SUCCESS;
     }
 
+    let slots = xpst_store::best_time::analyze(&db, platform.as_deref());
     let mut text = String::new();
     match &platform {
         Some(name) => match slots.first() {

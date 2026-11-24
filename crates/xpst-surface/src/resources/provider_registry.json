@@ -121,12 +121,14 @@
   "accounts": {
    "youtube": {
     "enabled": true,
+    "username": "",
     "token_file": "~/.xpst/credentials/youtube_token.json",
     "client_secrets": "~/.xpst/credentials/youtube_client_secrets.json",
     "video_mode": "auto"
    },
    "x": {
     "enabled": true,
+    "username": "",
     "auth_mode": "cookies",
     "cookies_file": "~/.xpst/credentials/x_cookies.json",
     "bearer_token": "",
@@ -138,6 +140,7 @@
    },
    "instagram": {
     "enabled": true,
+    "username": "",
     "auth_mode": "graph_api",
     "session_file": "~/.xpst/credentials/instagram_session.json",
     "graph_access_token": "",
