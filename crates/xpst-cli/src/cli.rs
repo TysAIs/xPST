@@ -112,7 +112,10 @@ fn build_positional(param: &ParamSpec) -> Arg {
     let mut arg = Arg::new(format!("arg:{}", param.name))
         .value_name(value_name)
         .help(param.help.clone());
-    arg = if param.multiple {
+    // Click's `nargs=-1` is a variadic positional and reports `multiple: false`,
+    // so both spellings have to be honoured or a command that takes several
+    // files (`preflight <a> <b>`) rejects the second one with a usage error.
+    arg = if param.multiple || param.nargs.is_some_and(|nargs| nargs < 0) {
         arg.num_args(1..)
     } else {
         arg.num_args(1)

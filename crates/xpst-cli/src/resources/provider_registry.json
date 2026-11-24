@@ -141,6 +141,7 @@
     "auth_mode": "graph_api",
     "session_file": "~/.xpst/credentials/instagram_session.json",
     "graph_access_token": "",
+    "graph_ig_user_id": "",
     "app_id": "",
     "app_secret": "",
     "account_type": "",
@@ -187,13 +188,19 @@
     "cookies_file": null,
     "provider": "local",
     "client_key": "",
+    "client_secret": "",
     "access_token": "",
     "refresh_token": "",
     "sandbox": false,
+    "draft_mode": "auto",
     "publish_mode": "auto",
+    "browser_headless": true,
     "aggregator": {
      "api_key_ref": "zernio_api_key",
-     "account_id": ""
+     "account_id": "",
+     "profile_id": "",
+     "vendor_schedule": false,
+     "scoped_key": true
     }
    },
    "local": {

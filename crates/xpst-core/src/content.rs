@@ -285,6 +285,18 @@ pub struct DestinationContentProfile {
     /// machine-checkable half of the same claim, and
     /// `tests/capability_truth.rs` fails if the two ever disagree.
     pub implemented: &'static [ContentType],
+    /// Content types the **shipped Python engine** implements.
+    ///
+    /// A different question from `implemented`, and both are honest: this one
+    /// describes the destination's capability as the product ships it, while
+    /// `implemented` describes what this workspace can execute today. `preflight`
+    /// is a *plan*, not an execution — it must answer what the shipped engine
+    /// would do, so it reads this set (a plan that refused TikTok because this
+    /// workspace has no TikTok provider crate would be a plan the product does
+    /// not have). Pinned row by row against
+    /// `tests/fixtures/preflight_tables.json`, captured from
+    /// `xpst.content.DESTINATION_CONTENT_PROFILES`.
+    pub python_implemented: &'static [ContentType],
 }
 
 impl DestinationContentProfile {
@@ -323,6 +335,22 @@ impl DestinationContentProfile {
     }
 }
 
+/// The destinations a post may target, in the order every surface lists them.
+///
+/// Mirrors `xpst.content.PUBLISH_DESTINATIONS`. The order is load-bearing: the
+/// format route, the plan's destination list and the "connected:" sentence all
+/// read it, so a plan reads the same way on every surface.
+pub const PUBLISH_DESTINATIONS: [&str; 8] = [
+    "youtube",
+    "x",
+    "instagram",
+    "tiktok",
+    "threads",
+    "facebook",
+    "rumble",
+    "bluesky",
+];
+
 /// THE capability table, mirroring `DESTINATION_CONTENT_PROFILES`.
 ///
 /// `declared` is what the platform's own manifest claims and matches Python's
@@ -340,6 +368,7 @@ pub static DESTINATION_CONTENT_PROFILES: [DestinationContentProfile; 9] = [
         media_transport: MediaTransport::LocalUpload,
         declared: &[ContentType::Video],
         implemented: &[ContentType::Video],
+        python_implemented: &[ContentType::Video],
     },
     DestinationContentProfile {
         platform: "x",
@@ -353,6 +382,12 @@ pub static DESTINATION_CONTENT_PROFILES: [DestinationContentProfile; 9] = [
             ContentType::Image,
         ],
         implemented: &[
+            ContentType::Video,
+            ContentType::Carousel,
+            ContentType::Text,
+            ContentType::Image,
+        ],
+        python_implemented: &[
             ContentType::Video,
             ContentType::Carousel,
             ContentType::Text,
@@ -374,6 +409,11 @@ pub static DESTINATION_CONTENT_PROFILES: [DestinationContentProfile; 9] = [
             ContentType::Carousel,
             ContentType::Image,
         ],
+        python_implemented: &[
+            ContentType::Video,
+            ContentType::Carousel,
+            ContentType::Image,
+        ],
     },
     DestinationContentProfile {
         platform: "tiktok",
@@ -382,6 +422,7 @@ pub static DESTINATION_CONTENT_PROFILES: [DestinationContentProfile; 9] = [
         media_transport: MediaTransport::LocalUpload,
         declared: &[ContentType::Video],
         implemented: &[],
+        python_implemented: &[ContentType::Video],
     },
     DestinationContentProfile {
         platform: "threads",
@@ -390,6 +431,7 @@ pub static DESTINATION_CONTENT_PROFILES: [DestinationContentProfile; 9] = [
         media_transport: MediaTransport::PublicUrl,
         declared: &[ContentType::Video, ContentType::Text],
         implemented: &[],
+        python_implemented: &[ContentType::Video, ContentType::Text],
     },
     DestinationContentProfile {
         platform: "facebook",
@@ -398,6 +440,7 @@ pub static DESTINATION_CONTENT_PROFILES: [DestinationContentProfile; 9] = [
         media_transport: MediaTransport::LocalUpload,
         declared: &[ContentType::Video],
         implemented: &[],
+        python_implemented: &[ContentType::Video],
     },
     DestinationContentProfile {
         platform: "rumble",
@@ -406,6 +449,7 @@ pub static DESTINATION_CONTENT_PROFILES: [DestinationContentProfile; 9] = [
         media_transport: MediaTransport::LocalUpload,
         declared: &[ContentType::Video],
         implemented: &[],
+        python_implemented: &[ContentType::Video],
     },
     DestinationContentProfile {
         platform: "bluesky",
@@ -414,6 +458,7 @@ pub static DESTINATION_CONTENT_PROFILES: [DestinationContentProfile; 9] = [
         media_transport: MediaTransport::LocalUpload,
         declared: &[ContentType::Text, ContentType::Image, ContentType::Carousel],
         implemented: &[ContentType::Text, ContentType::Image, ContentType::Carousel],
+        python_implemented: &[ContentType::Text, ContentType::Image, ContentType::Carousel],
     },
     DestinationContentProfile {
         platform: "messenger",
@@ -422,6 +467,7 @@ pub static DESTINATION_CONTENT_PROFILES: [DestinationContentProfile; 9] = [
         media_transport: MediaTransport::LocalUpload,
         declared: &[ContentType::Text],
         implemented: &[],
+        python_implemented: &[ContentType::Text],
     },
 ];
 

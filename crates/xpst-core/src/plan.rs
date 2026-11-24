@@ -81,6 +81,12 @@ pub enum DestinationState {
     SkippedUnconnected,
     /// Evaluated and refused the content.
     UnsupportedFormat,
+    /// Evaluated and REFUSED an upload-time visibility the caller asked for:
+    /// nothing was uploaded, and nothing failed. It is its own state rather than
+    /// `unsupported_format` because the format is fine — the request is what
+    /// cannot be honoured, and a caller reading "unsupported_format" would look
+    /// for a media problem that does not exist.
+    RefusedVisibility,
     /// A real failure. No destination reaches this state in the planning slice:
     /// a failure means something was attempted.
     Failed,
@@ -93,6 +99,7 @@ impl DestinationState {
             Self::Posted => "posted",
             Self::SkippedUnconnected => "skipped_unconnected",
             Self::UnsupportedFormat => "unsupported_format",
+            Self::RefusedVisibility => "refused_visibility",
             Self::Failed => "failed",
         }
     }
@@ -111,6 +118,7 @@ pub fn state_for_code(code: &str) -> DestinationState {
     let upper = code.trim().to_ascii_uppercase();
     match upper.as_str() {
         "PLATFORM_DISABLED" | "AUTH_NOT_READY" => DestinationState::SkippedUnconnected,
+        "VISIBILITY_UNAVAILABLE" => DestinationState::RefusedVisibility,
         "CAPTION_TOO_LONG"
         | "MEDIA_MODALITY_UNSUPPORTED"
         | "REMOTE_MEDIA_UNSUPPORTED"

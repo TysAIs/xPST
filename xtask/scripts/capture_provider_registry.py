@@ -61,6 +61,7 @@ ACCOUNT_FIELDS: dict[str, tuple[str, ...]] = {
         "auth_mode",
         "session_file",
         "graph_access_token",
+        "graph_ig_user_id",
         "app_id",
         "app_secret",
         "account_type",
@@ -93,16 +94,21 @@ ACCOUNT_FIELDS: dict[str, tuple[str, ...]] = {
         "cookies_file",
         "provider",
         "client_key",
+        "client_secret",
         "access_token",
         "refresh_token",
         "sandbox",
+        "draft_mode",
         "publish_mode",
+        "browser_headless",
     ),
     "local": ("path",),
 }
 
-#: `accounts.tiktok.aggregator` fields the catalog reads.
-AGGREGATOR_FIELDS = ("api_key_ref", "account_id")
+#: `accounts.tiktok.aggregator` fields the catalog reads. `preflight` resolves the
+#: TikTok publish route from `provider`/`draft_mode`/`publish_mode`, and the
+#: aggregator row is what `_tiktok_auth_readiness` reports on.
+AGGREGATOR_FIELDS = ("api_key_ref", "account_id", "profile_id", "vendor_schedule", "scoped_key")
 
 #: Top-level config sections the local commands read, with the dataclass field
 #: list Python's `_merge_config` filters a file section through. Captured so the

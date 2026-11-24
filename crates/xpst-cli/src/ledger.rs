@@ -288,6 +288,32 @@ pub const DEVIATIONS: &[&str] = &[
     "`readiness` renders a stored ban-risk acknowledgement in the shipped writer's \
      `sort_keys=True` order. A hand-edited `ban_risk_acknowledgements.json` with another key order \
      would render in that order under Python and sorted here; the values are identical.",
+    "`preflight` plans for destinations this workspace has no provider crate for (TikTok, \
+     Threads, Facebook, Rumble) because a plan describes what the shipped engine would do, not \
+     what this engine can execute. `xpst-core`'s `implemented` set is the engine-side gap and \
+     `python_implemented` is the destination's capability; the route plan reads the second, so \
+     the destination list, the format route and the envelope's `content_types.implemented` are \
+     Python's. Nothing is published from here — the uploaders are still stubs.",
+    "`preflight`'s media verdicts come from `verify_media` without its loudness check: measuring \
+     integrated loudness needs an ffmpeg `ebur128` pass that this slice does not port. The route \
+     planner always plans with `check_loudness=False` (`build_route_plan` sets it), so no \
+     `preflight` row is affected; `verify-media` — still a stub — is the command that would \
+     notice, and it is the one place a `loudness` check would be missing.",
+    "A missing `ffprobe` binary reports the Rust `io::Error` text inside `ffprobe failed (…); spec \
+     not verified` where Python reports `[Errno 2] No such file or directory`. The check, its \
+     status, its position and the resulting `MEDIA_PROBE_FAILED` warning are identical; only the \
+     OS sentence differs. The checked-in fixture pins `XPST_FFPROBE_PATH` to a seeded stand-in, so \
+     no row depends on the host's toolchain.",
+    "`preflight --transform` builds the rendition decision the way `VideoProcessor` does — it runs \
+     `ffmpeg -version` before trusting the binary — so a machine with no ffmpeg gets the same \
+     `transcode` row with `ffmpeg unavailable — compliance not verified`. The compliance probe \
+     itself is the shipped one (`is_platform_compliant`), including the `+25%` bitrate tolerance \
+     and the `fps + 0.1` slack.",
+    "A `Choice` option is matched case-sensitively here where Click's `case_sensitive=False` \
+     accepts any case: `preflight --format VIDEO` is a usage error (exit 2) in the Rust engine and \
+     `video` in Python. The parity manifest records the choice list but not Click's case flag, so \
+     this affects every choice option (`--format`, `--visibility`, `verify-media --platform`), not \
+     just `preflight`; the lowercase spelling every script and fixture uses is identical.",
     "Integer options are validated and rendered with Python's arbitrary-precision `int()` \
      (`--port 0900` is `:900`, `--port 10^20` prints in full). The three that are used for \
      arithmetic — `pair --ttl`, `state backup --keep`, `stream relay-config --rtmp-port` — \

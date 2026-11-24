@@ -25,6 +25,8 @@
 use std::path::{Path, PathBuf};
 
 /// The binaries the engine can use, in the order `media status` reports them.
+pub mod specs;
+
 pub const MEDIA_BINARIES: [&str; 2] = ["ffmpeg", "ffprobe"];
 
 /// A media tool that may or may not be installed.
@@ -360,6 +362,22 @@ fn resolve(name: &str, env_var: &str) -> Option<String> {
     }
 
     None
+}
+
+/// `resolve_ffmpeg_path()`: the ffmpeg binary the engine would run.
+#[must_use]
+pub fn resolve_ffmpeg() -> Option<String> {
+    resolve("ffmpeg", "XPST_FFMPEG_PATH")
+}
+
+/// `resolve_ffprobe_path()`: the ffprobe binary the engine would run.
+///
+/// Same resolution order as `media status` reports (env override → `PATH` →
+/// system dirs → the fetched bin directory), so a probe and the status row can
+/// never name different binaries.
+#[must_use]
+pub fn resolve_ffprobe() -> Option<String> {
+    resolve("ffprobe", "XPST_FFPROBE_PATH")
 }
 
 /// `system_media_dirs()`: where a system install lands when `PATH` is minimal.

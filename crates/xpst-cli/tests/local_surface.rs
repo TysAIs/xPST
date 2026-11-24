@@ -27,7 +27,7 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 130;
+const EXPECTED_SCENARIOS: usize = 149;
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -87,6 +87,27 @@ impl Profile {
                 .expect("seed is text")
                 .replace("PROFILE", &root);
             std::fs::write(&path, text).expect("seed file");
+        }
+    }
+
+    /// Seed a file whose bytes are not text (a still image's header).
+    ///
+    /// The fixture carries it as base64 so an image row is a real header read
+    /// rather than a text file wearing a `.png` name.
+    fn seed_binary(&self, files: &Value) {
+        use base64::Engine;
+        let Some(entries) = files.as_object() else {
+            return;
+        };
+        for (relative, encoded) in entries {
+            let path = self.dir.join(relative);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("seed directory");
+            }
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(encoded.as_str().expect("binary seed is base64 text"))
+                .expect("binary seed decodes");
+            std::fs::write(&path, bytes).expect("seed binary file");
         }
     }
 
@@ -543,6 +564,7 @@ fn every_recorded_scenario_matches_the_python_engine() {
         let name = row["name"].as_str().expect("scenario name");
         let profile = Profile::new(name);
         profile.seed(&row["seed"]);
+        profile.seed_binary(&row["binary"]);
         profile.make_executable(&row["executable"]);
         profile.seed_sqlite(&row["sqlite"]);
         profile.seed_credentials(&row["credential"]);

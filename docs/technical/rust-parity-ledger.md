@@ -4,7 +4,7 @@
 
 One row per leaf command of the shipped CLI. `status` is `implemented` when the Rust engine runs the command and `stub` when it answers `not implemented in the Rust engine yet`. The two columns either side are the questions a reader actually has: which crate owns the behaviour, and whether the Python implementation they are comparing against makes an outbound network call.
 
-**49 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
+**50 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
 
 ## Columns
 
@@ -67,7 +67,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `plugins docs` | stub | xpst-cli | none |
 | `plugins list` | stub | xpst-cli | none |
 | `post` | stub | xpst-core | yes |
-| `preflight` | stub | xpst-core | none |
+| `preflight` | implemented | xpst-core | none |
 | `providers` | implemented | xpst-provider | none |
 | `quota` | implemented | xpst-state | none |
 | `readiness` | implemented | xpst-cli | none |
@@ -157,6 +157,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `kb query` | xpst-store | Substring search over the JSON store (`query_nuggets`): `workspace`/`query`/`mode`/`count`/`nuggets` with citation, timestamps, a null score and the area id; payload byte-compared with the Python CLI. The embedding stack is not ported, so the semantic path is not taken — the same answer Python gives without the knowledge extra or on an unembedded store. |
 | `search` | xpst-store | `kb query` on the `default` workspace rendered with `json.dumps(indent=2)` (ASCII-escaped), including Python's text-mode quirk of reading a `hits` key the payload never carries; payload byte-compared with the Python CLI. |
 | `readiness` | xpst-cli | The first-run report (`build_readiness_report`): the canonical provider status shared with `providers`, the ban-risk registry, the local folder set and the yt-dlp/FFmpeg helper probes, with `--fix` creating the same folders; payload byte-compared with the Python CLI (the `python` row reports the Rust engine, and `--fix` does not rewrite `config.yaml`). |
+| `preflight` | xpst-core | The config-aware route plan (`build_route_plan`): target resolution from the config's enabled flags, the per-destination state/reason/envelope/constraints/blockers/warnings/transform/visibility payload, the ban-risk advisory and the read-only quota gate; payload byte-compared with the Python CLI. `verify_media`'s loudness check is not ported (preflight always plans with `check_loudness=False`). |
 
 ## Known deviations from the Python engine
 
@@ -182,4 +183,9 @@ Named on purpose: a difference that is not written down is a bug nobody found.
 * `readiness --fix` creates the same folders and reports the same `actions`, but does not rewrite `config.yaml` from the Pydantic model (the same choice `byo set` makes). The payload is identical; the file is left as written, so a profile that had never been saved keeps the document the loader materialized.
 * `readiness`'s yt-dlp probe cannot reproduce two Python-specific candidates: the macOS framework-user directory (it embeds the interpreter's major.minor) and `sys.executable`'s directory (the Rust engine uses its own binary's directory). The probe order is otherwise the shipped one, and the fixture pins `XPST_YTDLP_PATH` so both engines answer from the same binary.
 * `readiness` renders a stored ban-risk acknowledgement in the shipped writer's `sort_keys=True` order. A hand-edited `ban_risk_acknowledgements.json` with another key order would render in that order under Python and sorted here; the values are identical.
+* `preflight` plans for destinations this workspace has no provider crate for (TikTok, Threads, Facebook, Rumble) because a plan describes what the shipped engine would do, not what this engine can execute. `xpst-core`'s `implemented` set is the engine-side gap and `python_implemented` is the destination's capability; the route plan reads the second, so the destination list, the format route and the envelope's `content_types.implemented` are Python's. Nothing is published from here — the uploaders are still stubs.
+* `preflight`'s media verdicts come from `verify_media` without its loudness check: measuring integrated loudness needs an ffmpeg `ebur128` pass that this slice does not port. The route planner always plans with `check_loudness=False` (`build_route_plan` sets it), so no `preflight` row is affected; `verify-media` — still a stub — is the command that would notice, and it is the one place a `loudness` check would be missing.
+* A missing `ffprobe` binary reports the Rust `io::Error` text inside `ffprobe failed (…); spec not verified` where Python reports `[Errno 2] No such file or directory`. The check, its status, its position and the resulting `MEDIA_PROBE_FAILED` warning are identical; only the OS sentence differs. The checked-in fixture pins `XPST_FFPROBE_PATH` to a seeded stand-in, so no row depends on the host's toolchain.
+* `preflight --transform` builds the rendition decision the way `VideoProcessor` does — it runs `ffmpeg -version` before trusting the binary — so a machine with no ffmpeg gets the same `transcode` row with `ffmpeg unavailable — compliance not verified`. The compliance probe itself is the shipped one (`is_platform_compliant`), including the `+25%` bitrate tolerance and the `fps + 0.1` slack.
+* A `Choice` option is matched case-sensitively here where Click's `case_sensitive=False` accepts any case: `preflight --format VIDEO` is a usage error (exit 2) in the Rust engine and `video` in Python. The parity manifest records the choice list but not Click's case flag, so this affects every choice option (`--format`, `--visibility`, `verify-media --platform`), not just `preflight`; the lowercase spelling every script and fixture uses is identical.
 * Integer options are validated and rendered with Python's arbitrary-precision `int()` (`--port 0900` is `:900`, `--port 10^20` prints in full). The three that are used for arithmetic — `pair --ttl`, `state backup --keep`, `stream relay-config --rtmp-port` — saturate at the `i64` bounds instead of carrying the exact value, which keeps the observable behaviour (`--keep` deletes nothing, `--rtmp-port` is out of range) but not the printed number for a value beyond 2^63.
