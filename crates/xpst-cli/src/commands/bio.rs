@@ -123,7 +123,10 @@ pub fn run(
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
     let host = leaf_string(leaf, "opt:host").unwrap_or_else(|| "127.0.0.1".to_string());
-    let port = leaf_string(leaf, "opt:port").unwrap_or_else(|| "8080".to_string());
+    // Click converts `--port` to an int before the body runs, so `0900`
+    // renders as `900` in the URL.
+    let port =
+        crate::clickargs::leaf_integer_text(leaf, "opt:port").unwrap_or_else(|| "8080".to_string());
     let reveal = leaf_flag(leaf, "opt:reveal");
 
     let url = bio_url(&host, &port);

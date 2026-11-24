@@ -74,6 +74,14 @@ pub struct ParamSpec {
     pub type_name: String,
     #[serde(default)]
     pub choices: Option<Vec<String>>,
+    /// Lower bound of a Click `IntRange`/`FloatRange`, when the parameter has
+    /// one. Captured from the Click type, not hand-written.
+    #[serde(default)]
+    pub min: Option<f64>,
+    /// Upper bound of a Click `IntRange`/`FloatRange`, when the parameter has
+    /// one.
+    #[serde(default)]
+    pub max: Option<f64>,
     #[serde(default)]
     pub default: Option<serde_json::Value>,
     #[serde(default)]

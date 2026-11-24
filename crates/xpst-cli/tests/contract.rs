@@ -162,3 +162,59 @@ fn implemented_commands_are_not_reported_as_unimplemented() {
         );
     }
 }
+
+/// Click converts `IntParamType`/`IntRange` options before the command body
+/// runs, so a value that does not convert is a usage error: exit 2, empty
+/// stdout, and Click's own message on stderr. The Rust engine used to accept
+/// `--port abc` and print `http://127.0.0.1:abc/bio`.
+#[test]
+fn non_integer_options_are_usage_errors_with_clicks_message() {
+    let cases: [(&[&str], &str, &str); 5] = [
+        (
+            &["bio", "--port", "abc", "--json"],
+            "Usage: xpst bio [OPTIONS]",
+            "Error: Invalid value for '--port' / '-p': 'abc' is not a valid integer.",
+        ),
+        (
+            &["pair", "--ttl", "abc", "--json"],
+            "Usage: xpst pair [OPTIONS]",
+            "Error: Invalid value for '--ttl': 'abc' is not a valid integer.",
+        ),
+        (
+            &["state", "backup", "--keep", "abc", "--json"],
+            "Usage: xpst state backup [OPTIONS]",
+            "Error: Invalid value for '--keep': 'abc' is not a valid integer.",
+        ),
+        (
+            &["stream", "relay-config", "--rtmp-port", "abc", "--json"],
+            "Usage: xpst stream relay-config [OPTIONS]",
+            "Error: Invalid value for '--rtmp-port': 'abc' is not a valid integer.",
+        ),
+        (
+            &[
+                "generate", "ideas", "--topic", "x", "--count", "999", "--json",
+            ],
+            "Usage: xpst generate ideas [OPTIONS]",
+            "Error: Invalid value for '--count' / '-n': 999 is not in the range 1<=x<=10.",
+        ),
+    ];
+    for (args, usage, expected) in cases {
+        let (code, out, err) = run(args, false);
+        assert_eq!(code, 2, "`{}` must be a usage error: {err}", args.join(" "));
+        assert!(
+            out.is_empty(),
+            "`{}` must print nothing on stdout, got: {out}",
+            args.join(" ")
+        );
+        assert!(
+            err.starts_with(usage),
+            "`{}` must start with Click's usage line.\n  expected: {usage}\n  got: {err}",
+            args.join(" ")
+        );
+        assert!(
+            err.contains(expected),
+            "`{}` must print Click's message.\n  expected: {expected}\n  got: {err}",
+            args.join(" ")
+        );
+    }
+}

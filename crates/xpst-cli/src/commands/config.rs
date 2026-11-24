@@ -269,54 +269,15 @@ fn parse_cli_value(text: &str) -> YamlValue {
     if matches!(lower.as_str(), "false" | "no" | "0") {
         return YamlValue::Bool(false);
     }
-    if let Some(integer) = python_int(text) {
+    if let Some(integer) = crate::pythonnum::int(text) {
         return YamlValue::Number(integer.into());
     }
-    if let Some(float) = python_float(text) {
+    if let Some(float) = crate::pythonnum::float(text) {
         if let Some(number) = serde_json::Number::from_f64(float) {
             return YamlValue::Number(number);
         }
     }
     YamlValue::String(text.to_string())
-}
-
-fn python_int(text: &str) -> Option<i64> {
-    let trimmed = text.trim();
-    let (sign, digits) = match trimmed.strip_prefix('-') {
-        Some(rest) => (-1i64, rest),
-        None => (1i64, trimmed.strip_prefix('+').unwrap_or(trimmed)),
-    };
-    if digits.is_empty() || digits.starts_with('_') || digits.ends_with('_') {
-        return None;
-    }
-    let mut cleaned = String::new();
-    let mut previous_underscore = false;
-    for ch in digits.chars() {
-        if ch == '_' {
-            if previous_underscore {
-                return None;
-            }
-            previous_underscore = true;
-            continue;
-        }
-        if !ch.is_ascii_digit() {
-            return None;
-        }
-        previous_underscore = false;
-        cleaned.push(ch);
-    }
-    cleaned.parse::<i64>().ok().map(|value| sign * value)
-}
-
-fn python_float(text: &str) -> Option<f64> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() || trimmed.starts_with('_') || trimmed.ends_with('_') {
-        return None;
-    }
-    let cleaned: String = trimmed.chars().filter(|ch| *ch != '_').collect();
-    // `f64::from_str` accepts `inf`/`infinity`/`nan` case-insensitively, which
-    // is what Python's `float()` accepts too.
-    cleaned.parse::<f64>().ok()
 }
 
 /// Python's `==` for two YAML values: numbers compare numerically (`1 == 1.0`)

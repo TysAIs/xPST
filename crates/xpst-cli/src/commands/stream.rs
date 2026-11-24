@@ -37,7 +37,9 @@ use xpst_auth::credentials::CredentialStore;
 use xpst_config::Value;
 
 use crate::commands::config_view::{self, ConfigView};
-use crate::output::{array, boolean, null, object, string, wrap_at, write_python_json, write_text};
+use crate::output::{
+    array, boolean, null, object, python_repr, string, wrap_at, write_python_json, write_text,
+};
 use crate::{exit, flag, leaf_flag, leaf_string, GlobalOptions};
 
 /// Rich's default console width when stdout is not a TTY.
@@ -1160,16 +1162,6 @@ pub fn app_credentials(
     }
 }
 
-/// Python's `repr()` for a short string: single quotes unless the value itself
-/// contains one.
-fn python_repr(text: &str) -> String {
-    if text.contains('\'') && !text.contains('"') {
-        format!("\"{text}\"")
-    } else {
-        format!("'{text}'")
-    }
-}
-
 /// One line from stdin, trimmed (Click's `prompt`).
 fn prompt(label: &str) -> String {
     let mut stdout = std::io::stdout();
@@ -1351,9 +1343,8 @@ pub fn relay_config(
     };
     let path_name =
         leaf_string(leaf, "opt:path-name").unwrap_or_else(|| DEFAULT_PATH_NAME.to_string());
-    let rtmp_port = leaf_string(leaf, "opt:rtmp-port")
-        .and_then(|value| value.parse::<i64>().ok())
-        .unwrap_or(DEFAULT_RTMP_PORT);
+    let rtmp_port =
+        crate::clickargs::leaf_integer(leaf, "opt:rtmp-port").unwrap_or(DEFAULT_RTMP_PORT);
     let output = leaf_string(leaf, "opt:output").filter(|value| !value.is_empty());
 
     let built = load_destinations(&dir, &registry).and_then(|destinations| {

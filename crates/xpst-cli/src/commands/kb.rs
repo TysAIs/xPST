@@ -15,8 +15,11 @@
 //!   never-used workspace leaves an empty one behind. That side effect is
 //!   reproduced: a later `kb add` expects the directory to exist.
 //!
-//! **Divergence, recorded in the ledger note:** text mode renders plain lines
-//! instead of Rich markup (`--json` is the parity surface).
+//! **Divergences, recorded in the ledger note:** text mode renders plain lines
+//! instead of Rich markup (`--json` is the parity surface), and an invalid
+//! `--workspace` reproduces Python's uncaught `ValueError` contract — empty
+//! stdout, exit 1 — with the exception line on stderr instead of the traceback
+//! frames, which name Python files and line numbers.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -112,17 +115,18 @@ pub fn areas(
     let json = global.json || leaf.is_some_and(|m| flag(m, "opt:json"));
     let workspace = leaf_string(leaf, "opt:workspace").unwrap_or_else(|| "default".to_string());
     if !valid_workspace_name(&workspace) {
+        // Python's `Workspace.resolve()` raises an uncaught `ValueError`: the
+        // traceback goes to stderr, stdout stays empty and the process exits 1.
+        // The frames cannot be reproduced (they name Python files and line
+        // numbers), so the last line — the exception itself — is what is
+        // printed here, and the exit/stdout contract is the same.
         let message = format!(
             "Invalid workspace name: must contain only alphanumeric, dash, underscore, \
-             colon, or dot characters (got: {workspace:?})"
+             colon, or dot characters (got: {})",
+            crate::output::python_repr(&workspace)
         );
-        if json {
-            let payload = crate::output::error_object("INVALID_WORKSPACE", &message, Vec::new());
-            let _ = write_python_json(out, &payload);
-        } else {
-            let _ = writeln!(err, "{message}");
-        }
-        return exit::CONFIG_ERROR;
+        let _ = writeln!(err, "ValueError: {message}");
+        return exit::GENERAL;
     }
     let Some(home) = xpst_home() else {
         let message = "cannot determine the xPST home: neither XPST_HOME nor HOME is set";

@@ -19,7 +19,9 @@
 //!   the traceback.
 //! * `state import` without `--yes` prompts with `click.confirm`. The Rust
 //!   engine reads one line from stdin and accepts `y`/`yes` (case-insensitive),
-//!   matching Click's accepted answers; EOF aborts with exit 1, as Click does.
+//!   matching Click's accepted answers. An explicit `n` is a normal answer —
+//!   exit 0, nothing on stderr — and only EOF aborts with `Aborted!` and exit 1,
+//!   exactly as Click's `confirm()`/`Abort` split does.
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -214,14 +216,19 @@ pub fn import(
         return exit::GENERAL;
     };
 
-    if !leaf_flag(leaf, "opt:yes")
-        && !confirm(
+    if !leaf_flag(leaf, "opt:yes") {
+        // Click's `confirm()` returns False on an explicit "n" — the command
+        // then `return`s, so the exit code is 0 and stderr stays empty. Only an
+        // EOF (or a read error) raises `Abort`, which is the "Aborted!" path.
+        match confirm(
             &format!("Replace {} with {}?", dest.display(), source.display()),
             out,
             err,
-        )
-    {
-        return exit::GENERAL;
+        ) {
+            Answer::Yes => {}
+            Answer::No => return exit::SUCCESS,
+            Answer::Abort => return exit::GENERAL,
+        }
     }
 
     if dest.exists() {
@@ -273,27 +280,36 @@ pub fn import(
     exit::SUCCESS
 }
 
+/// The three outcomes of Click's `confirm()`.
+///
+/// `No` is a normal answer (the caller returns success and prints nothing);
+/// `Abort` is Click's `Abort` exception — "Aborted!" on stderr, exit 1.
+enum Answer {
+    Yes,
+    No,
+    Abort,
+}
+
 /// `click.confirm`: one line from stdin, `y`/`yes` (any case) means yes.
 ///
 /// Click echoes the prompt to stdout and reads stdin; with no stdin (EOF) it
 /// aborts. The prompt text goes through the injected writer so a scripted caller
 /// sees the same bytes, and the abort message goes to stderr like Click's.
-fn confirm(prompt: &str, out: &mut dyn Write, err: &mut dyn Write) -> bool {
+fn confirm(prompt: &str, out: &mut dyn Write, err: &mut dyn Write) -> Answer {
     let _ = write!(out, "{prompt} [y/N]: ");
     let _ = out.flush();
     let mut line = String::new();
     match std::io::stdin().lock().read_line(&mut line) {
         Ok(0) | Err(_) => {
             let _ = writeln!(err, "Aborted!");
-            false
+            Answer::Abort
         }
         Ok(_) => {
             let answer = line.trim().to_lowercase();
             if answer == "y" || answer == "yes" {
-                true
+                Answer::Yes
             } else {
-                let _ = writeln!(err, "Aborted!");
-                false
+                Answer::No
             }
         }
     }
@@ -347,9 +363,7 @@ pub fn backup(
         return exit::GENERAL;
     }
 
-    let keep = leaf_string(leaf, "opt:keep")
-        .and_then(|value| value.parse::<i64>().ok())
-        .unwrap_or(10);
+    let keep = crate::clickargs::leaf_integer(leaf, "opt:keep").unwrap_or(10);
     let mut existing: Vec<PathBuf> = std::fs::read_dir(&backups)
         .map(|entries| {
             entries

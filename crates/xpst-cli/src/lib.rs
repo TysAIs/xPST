@@ -20,6 +20,7 @@
 //! `docs/DIRECTION.md` D-3/D-4 for why the rebuild exists.
 
 pub mod cli;
+pub mod clickargs;
 pub mod commands;
 pub mod exit;
 pub mod fsutil;
@@ -28,6 +29,7 @@ pub mod ledger;
 pub mod output;
 pub mod parity;
 pub mod paths;
+pub mod pythonnum;
 
 use std::ffi::OsString;
 use std::io::{IsTerminal, Write};
@@ -107,6 +109,12 @@ pub fn run_with_io<W: Write, E: Write>(
 
     let global = GlobalOptions::from_matches(&matches, stdout_is_tty);
     let leaf = leaf_matches(&matches, &path);
+    // Click converts `IntParamType`/`FloatParamType`/`IntRange` options before
+    // the command body runs, so a value that does not convert is a usage error
+    // (exit 2, empty stdout) — not a silent fallback to the default.
+    if let Some(code) = clickargs::validate_numeric_options(&path, leaf, err) {
+        return code;
+    }
     dispatch(&path, &global, leaf, out, err)
 }
 

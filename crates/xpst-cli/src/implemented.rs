@@ -168,13 +168,13 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "state import",
         "xpst-state",
-        "Validates `posted_videos`, backs the current file up as `state.json.pre-import-<stamp>` and copies the source in; payload and resulting `state.json` byte-compared with the Python CLI.",
+        "Validates `posted_videos`, backs the current file up as `state.json.pre-import-<stamp>` and copies the source in; payload and resulting `state.json` byte-compared with the Python CLI. An explicit `n` at the prompt exits 0 with empty stderr (Click's `confirm()` returns False); only EOF aborts with `Aborted!` and exit 1.",
         state_import,
     ),
     implemented(
         "state backup",
         "xpst-state",
-        "Snapshots `state.json` into `backups/state-<stamp>.json` with `--keep` rotation and the same `retained` count; payload byte-compared with the Python CLI.",
+        "Snapshots `state.json` into `backups/state-<stamp>.json` with `--keep` rotation and the same `retained` count; payload byte-compared with the Python CLI. `--keep` is Click's int conversion, so a non-integer is a usage error (exit 2, empty stdout) rather than a silent default.",
         state_backup,
     ),
     implemented(
@@ -198,7 +198,7 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "pair",
         "xpst-auth",
-        "Issues a one-time pairing code (or the `--code` one) with the same alphabet, hashing, TTL floor and `devices.json` shape; payload byte-compared with the Python CLI on a fixed code.",
+        "Issues a one-time pairing code (or the `--code` one) with the same alphabet, hashing, TTL floor and `devices.json` shape; payload byte-compared with the Python CLI on a fixed code. `--ttl 0` is falsy in Python and means the 600 s default (not the 30 s floor), and a non-integer `--ttl` is a usage error (exit 2).",
         pair,
     ),
     implemented(
@@ -228,13 +228,13 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "stream relay-config",
         "xpst-provider",
-        "Renders the MediaMTX relay YAML from the stored destinations (keys included on stdout, key-free summary with `--output`); payload and written file byte-compared with the Python CLI.",
+        "Renders the MediaMTX relay YAML from the stored destinations (keys included on stdout, key-free summary with `--output`); payload and written file byte-compared with the Python CLI. `--rtmp-port` is Click's int conversion, so a non-integer is a usage error (exit 2) instead of a fallback to 1935.",
         stream_relay_config,
     ),
     implemented(
         "bio",
         "xpst-cli",
-        "Public and editor URLs with the dashboard API token read from the credential store and masked unless `--reveal`; payload byte-compared with the Python CLI on a seeded token.",
+        "Public and editor URLs with the dashboard API token read from the credential store and masked unless `--reveal`; payload byte-compared with the Python CLI on a seeded token. `--port` is Click's int conversion, so `0900` renders as `900` and a non-integer is a usage error (exit 2).",
         bio,
     ),
     implemented(
@@ -258,13 +258,13 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "kb areas",
         "xpst-store",
-        "Discovered knowledge areas in course order (`order_index`, label, id) with their nugget counts, read from the workspace's `areas.json`; payload byte-compared with the Python CLI.",
+        "Discovered knowledge areas in course order (`order_index`, label, id) with their nugget counts, read from the workspace's `areas.json`; payload byte-compared with the Python CLI. An invalid `--workspace` reproduces Python's uncaught `ValueError` contract — empty stdout, exit 1 — with the exception line on stderr instead of the traceback frames.",
         kb_areas,
     ),
     implemented(
         "schedule remove",
         "xpst-state",
-        "Cancels one entry through the same local-store contract (`operation`/`scope`/`found`/`cancelled`/`entry`, `POST_NOT_FOUND` on an unknown id) with `--dry-run`; payload and resulting `schedule.json` byte-compared with the Python CLI.",
+        "Cancels one entry through the same local-store contract (`operation`/`scope`/`found`/`cancelled`/`entry`, `POST_NOT_FOUND` on an unknown id) with `--dry-run`; payload and resulting `schedule.json` byte-compared with the Python CLI. Control characters in a caption are escaped (`\\u0001`) in the written file, so both engines can read it back.",
         schedule_remove,
     ),
 ];

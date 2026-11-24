@@ -199,7 +199,14 @@ fn create_pairing_code(
     ttl_s: i64,
     code: Option<&str>,
 ) -> Result<Vec<(&'static str, xpst_config::Value)>, (String, String)> {
-    let ttl = ttl_s.max(30);
+    // Python: `max(30, int(ttl_s or DEFAULT_PAIR_TTL_S))` — `0` is falsy, so
+    // `--ttl 0` means the 600 s default, not the 30 s floor.
+    let ttl = if ttl_s == 0 {
+        DEFAULT_PAIR_TTL_S
+    } else {
+        ttl_s
+    }
+    .max(30);
     let issued = now_seconds();
     let raw = match code {
         Some(code) => normalize_code(code),
@@ -372,12 +379,11 @@ pub fn pair(
         Err(error) => return bootstrap::report(err, json_mode, out, &error),
     };
     let label = leaf_string(leaf, "opt:label").unwrap_or_else(|| "phone".to_string());
-    let ttl = leaf_string(leaf, "opt:ttl")
-        .and_then(|value| value.parse::<i64>().ok())
-        .unwrap_or(DEFAULT_PAIR_TTL_S);
+    let ttl = crate::clickargs::leaf_integer(leaf, "opt:ttl").unwrap_or(DEFAULT_PAIR_TTL_S);
     let code = leaf_string(leaf, "opt:code");
     let host = leaf_string(leaf, "opt:host").unwrap_or_else(|| "127.0.0.1".to_string());
-    let port = leaf_string(leaf, "opt:port").unwrap_or_else(|| "8080".to_string());
+    let port =
+        crate::clickargs::leaf_integer_text(leaf, "opt:port").unwrap_or_else(|| "8080".to_string());
 
     let issued = match create_pairing_code(&dir, &label, ttl, code.as_deref()) {
         Ok(issued) => issued,

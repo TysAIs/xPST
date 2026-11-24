@@ -212,4 +212,27 @@ pub const DEVIATIONS: &[&str] = &[
      what the parity fixture compares.",
     "A JSON error path prints the engine's `{ok:false,error:{...}}` payload under \
      `--json`; Python prints a Rich panel that is not machine-readable even in JSON mode.",
+    "Python's Rich logger writes INFO lines to stderr (credential-store and dashboard-token \
+     notices) for every command that touches the store; the Rust engine is silent there. \
+     stdout, exit code and written files are identical, and the two-engine harness compares \
+     stderr only where Python's is empty or a pure usage error.",
+    "`kb areas --workspace <invalid>` reproduces Python's uncaught `ValueError` contract — \
+     empty stdout, exit 1 — but prints the exception line (`ValueError: Invalid workspace \
+     name: …`) instead of the traceback frames, which name Python files and line numbers.",
+    "Usage errors print `xpst` as the program name where Click prints `python -m xpst` (the \
+     harness invokes the Python engine as a module). The message body — `Usage:`, `Try '… \
+     --help'`, `Error: Invalid value for '--port' / '-p': 'abc' is not a valid integer.` — is \
+     byte-identical.",
+    "Commands implemented before the local-state tranche (`status`, `version`, `failures list`, \
+     `schedule list`/`pause`/`resume`, `config show`, `doctor`) render `--json` with serde's \
+     compact separators and sorted keys, where Python prints `json.dumps` separators (`\", \"`, \
+     `\": \"`) and insertion order. The payloads are field-for-field identical and the \
+     local-surface fixture compares them structurally; byte parity for those commands is a \
+     separate card.",
+    "Integer options are validated and rendered with Python's arbitrary-precision `int()` \
+     (`--port 0900` is `:900`, `--port 10^20` prints in full). The three that are used for \
+     arithmetic — `pair --ttl`, `state backup --keep`, `stream relay-config --rtmp-port` — \
+     saturate at the `i64` bounds instead of carrying the exact value, which keeps the \
+     observable behaviour (`--keep` deletes nothing, `--rtmp-port` is out of range) but not \
+     the printed number for a value beyond 2^63.",
 ];

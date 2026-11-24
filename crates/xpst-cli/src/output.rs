@@ -364,6 +364,11 @@ fn write_pretty_string(text: &str, ascii_only: bool, out: &mut String) {
             '\u{08}' => out.push_str("\\b"),
             '\u{0c}' => out.push_str("\\f"),
             c if (' '..='~').contains(&c) => out.push(c),
+            // Python's `py_encode_basestring` escapes `[\x00-\x1f]` whether or
+            // not `ensure_ascii` is set — only the *non-ASCII* range depends on
+            // the flag. Emitting a raw control byte here produced a
+            // `schedule.json` that neither engine could read back.
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
             c if !ascii_only => out.push(c),
             c => {
                 let mut units = [0u16; 2];
@@ -374,6 +379,19 @@ fn write_pretty_string(text: &str, ascii_only: bool, out: &mut String) {
         }
     }
     out.push('"');
+}
+
+/// Python's `repr()` for a short string: single quotes unless the value itself
+/// contains one (and no double quote).
+///
+/// Used where the Python engine interpolates `{value!r}` into a message — the
+/// quoting is part of the message, so it has to match.
+pub fn python_repr(text: &str) -> String {
+    if text.contains('\'') && !text.contains('"') {
+        format!("\"{text}\"")
+    } else {
+        format!("'{text}'")
+    }
 }
 
 #[cfg(test)]
@@ -412,5 +430,41 @@ mod tests {
             "1767225600.0"
         );
         assert_eq!(python_pretty_json(&serde_json::json!(1.5)), "1.5");
+    }
+
+    #[test]
+    fn control_characters_are_escaped_with_ensure_ascii_false() {
+        // Python's `py_encode_basestring` escapes `[\x00-\x1f]` in both modes;
+        // only the non-ASCII range depends on `ensure_ascii`. A raw 0x01 here
+        // made `schedule remove` write a `schedule.json` that neither engine
+        // could read back.
+        assert_eq!(
+            python_pretty_json_utf8(&serde_json::json!("a\u{1}b")),
+            "\"a\\u0001b\""
+        );
+        assert_eq!(
+            python_pretty_json_utf8(&serde_json::json!("\u{0}\u{1f}")),
+            "\"\\u0000\\u001f\""
+        );
+        // The named escapes keep their short forms, and 0x7f stays raw in the
+        // `ensure_ascii=False` path (Python's ESCAPE regex stops at 0x1f).
+        assert_eq!(
+            python_pretty_json_utf8(&serde_json::json!("\n\r\t\u{8}\u{c}")),
+            "\"\\n\\r\\t\\b\\f\""
+        );
+        assert_eq!(
+            python_pretty_json_utf8(&serde_json::json!("\u{7f}")),
+            "\"\u{7f}\""
+        );
+        // Non-ASCII is still raw in this mode.
+        assert_eq!(
+            python_pretty_json_utf8(&serde_json::json!("a—b")),
+            "\"a—b\""
+        );
+        // The ASCII-escaped mode is unchanged.
+        assert_eq!(
+            python_pretty_json(&serde_json::json!("a\u{1}b")),
+            "\"a\\u0001b\""
+        );
     }
 }
