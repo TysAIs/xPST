@@ -10,7 +10,7 @@ configured" forever).
 
     /path/to/venv/bin/python xtask/scripts/capture_byo_platforms.py
 
-`crates/xpst-cli/src/resources/byo_platforms.json` is the result;
+`crates/xpst-surface/src/resources/byo_platforms.json` is the result;
 `crates/xpst-cli/tests/local_surface.rs` diffs the whole `byo status` payload
 against a live `python -m xpst byo status --json`, so a Python-side change fails
 the build until this resource is refreshed.
@@ -23,7 +23,7 @@ import json
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-RESOURCE = REPO / "crates/xpst-cli/src/resources/byo_platforms.json"
+RESOURCE = REPO / "crates/xpst-surface/src/resources/byo_platforms.json"
 
 
 def main() -> None:

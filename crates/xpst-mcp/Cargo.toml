@@ -37,5 +37,10 @@ xpst-config = { workspace = true }
 xpst-state = { workspace = true }
 xpst-surface = { path = "../xpst-surface" }
 
+[dev-dependencies]
+# The follower tests seed the ledger through the shipped store, so the schema is
+# the engine's rather than a hand-written CREATE TABLE.
+xpst-store = { path = "../xpst-store" }
+
 [lints]
 workspace = true

@@ -646,6 +646,30 @@ impl Store {
         Ok(latest)
     }
 
+    /// Follower history for one platform, oldest first.
+    ///
+    /// `AnalyticsStore.follower_history` selects the newest `limit` rows and
+    /// reverses them, so the payload reads oldest → newest.
+    pub fn follower_history(
+        &self,
+        platform: &str,
+        limit: u32,
+    ) -> Result<Vec<(i64, String)>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "
+            SELECT count, captured_at FROM follower_snapshots
+            WHERE platform = ? ORDER BY captured_at DESC LIMIT ?
+            ",
+        )?;
+        let mut query = stmt.query(params![platform, limit])?;
+        let mut rows = Vec::new();
+        while let Some(row) = query.next()? {
+            rows.push((row.get("count")?, row.get("captured_at")?));
+        }
+        rows.reverse();
+        Ok(rows)
+    }
+
     // ── cross-post groups ──────────────────────────────────────────────
 
     pub fn record_cross_post_group(&self, group: &CrossPostGroup) -> Result<(), StoreError> {

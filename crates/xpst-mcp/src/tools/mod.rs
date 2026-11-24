@@ -7,9 +7,12 @@
 //! The payload builders live in `xpst-surface` because the CLI serves the same
 //! documents and `xpst-cli` depends on this crate, not the other way round.
 
+pub mod activity;
 pub mod best_time;
 pub mod bio;
+pub mod capabilities;
 pub mod config_show;
+pub mod followers;
 pub mod kb;
 pub mod providers;
 pub mod rate_limit;
@@ -18,6 +21,7 @@ pub mod schedule;
 pub mod security;
 mod stamp;
 pub mod status;
+pub mod transcript;
 
 use std::sync::OnceLock;
 

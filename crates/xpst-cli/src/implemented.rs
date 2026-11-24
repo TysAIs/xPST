@@ -282,7 +282,7 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "mcp start",
         "xpst-mcp",
-        "Serves the 46-tool surface over stdio in-process (`xpst_mcp::serve_stdio`, the same loop the `xpst-mcp` binary runs); a bare `xpst mcp` starts it too, as the shipped Click group does. 11 of the 46 tools are ported (`xpst_status`, `xpst_config_show`, `xpst_providers`, `xpst_schedule_list`, `xpst_rate_limit_status`, `xpst_readiness`, `xpst_security_audit`, `xpst_best_time`, `kb_query`, `xpst_search`, `xpst_bio_get`); the rest answer a typed `not_implemented`. Pinned by a protocol capture from the Python server (`tests/mcp_stdio.rs`) instead of a local-surface row, because the process never exits: initialize, tools/list, eleven byte-compared `tools/call` bodies and the consent/unknown-tool refusals.",
+        "Serves the 46-tool surface over stdio in-process (`xpst_mcp::serve_stdio`, the same loop the `xpst-mcp` binary runs); a bare `xpst mcp` starts it too, as the shipped Click group does. 16 of the 46 tools are ported (`xpst_status`, `xpst_config_show`, `xpst_providers`, `xpst_capabilities`, `xpst_schedule_list`, `xpst_rate_limit_status`, `xpst_readiness`, `xpst_security_audit`, `xpst_best_time`, `xpst_followers`, `xpst_activity`, `kb_query`, `xpst_search`, `kb_areas`, `xpst_transcript`, `xpst_bio_get`); the rest answer a typed `not_implemented`. Pinned by a protocol capture from the Python server (`tests/mcp_stdio.rs`) instead of a local-surface row, because the process never exits: initialize, tools/list, sixteen byte-compared `tools/call` bodies and the consent/unknown-tool refusals.",
         mcp_start,
     ),
     implemented(

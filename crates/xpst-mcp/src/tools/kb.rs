@@ -43,3 +43,20 @@ pub fn search(_ctx: &ToolContext, arguments: &Value) -> Result<Value, ToolError>
             message: error.message(),
         })
 }
+
+/// `kb_areas`: `kb_tools.kb_areas(workspace)` — the discovered areas in course
+/// order, with their nugget counts.
+///
+/// `Workspace.resolve(workspace)` defaults to `create=True`, so a workspace that
+/// does not exist yet is materialized and answers `{count: 0, areas: []}`. An
+/// invalid name raises `ValueError`, which the server serves as
+/// `Error: <str(e)>`.
+pub fn areas(_ctx: &ToolContext, arguments: &Value) -> Result<Value, ToolError> {
+    let workspace = arguments
+        .get("workspace")
+        .and_then(Value::as_str)
+        .unwrap_or("default");
+    xpst_surface::kb::areas_payload(workspace)
+        .map(|payload| xpst_config::output::to_json(&payload))
+        .map_err(|message| ToolError::Handler { message })
+}

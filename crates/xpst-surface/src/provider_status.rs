@@ -208,7 +208,29 @@ fn apply_account_ceiling(manifest: YamlValue, name: &str, view: &ConfigView) -> 
 /// The section is explicit: `_manifest_for()` (used for the catalog's
 /// capabilities) searches destinations first, but the `sources` and
 /// `destinations` arrays each list their own registry.
+///
+/// `xpst providers` sorts (`sorted(sources, key=lambda item: item.name)`);
+/// `xpst diagnostics` does not (`_provider_catalog()` keeps
+/// `list_manifests()` order). Both are reproduced — see [`manifests_in_order`].
 pub fn manifests_in(registry: &Registry, section: &str, view: &ConfigView) -> Vec<YamlValue> {
+    let mut rows = manifests_in_order(registry, section, view);
+    rows.sort_by(|left, right| {
+        let key = |value: &YamlValue| {
+            value
+                .get("name")
+                .and_then(YamlValue::as_str)
+                .unwrap_or("")
+                .to_string()
+        };
+        key(left).cmp(&key(right))
+    });
+    rows
+}
+
+/// [`manifests_in`] in registry order — `SourceRegistry.list_manifests()` /
+/// `PlatformRegistry.list_manifests()` order, which is the order the capture
+/// recorded.
+pub fn manifests_in_order(registry: &Registry, section: &str, view: &ConfigView) -> Vec<YamlValue> {
     let Some(table) = registry
         .manifests
         .get(section)
@@ -237,16 +259,6 @@ pub fn manifests_in(registry: &Registry, section: &str, view: &ConfigView) -> Ve
             rows.push(manifest);
         }
     }
-    rows.sort_by(|left, right| {
-        let key = |value: &YamlValue| {
-            value
-                .get("name")
-                .and_then(YamlValue::as_str)
-                .unwrap_or("")
-                .to_string()
-        };
-        key(left).cmp(&key(right))
-    });
     rows
 }
 

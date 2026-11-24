@@ -12,10 +12,15 @@
 pub mod best_time;
 pub mod bio;
 pub mod bootstrap;
+pub mod byo;
+pub mod capabilities;
+pub mod catalog;
 pub mod config_view;
+pub mod followers;
 pub mod kb;
 pub mod kb_store;
 pub mod paths;
 pub mod provider_status;
 pub mod readiness;
 pub mod security;
+pub mod transcript;

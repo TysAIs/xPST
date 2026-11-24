@@ -713,6 +713,19 @@ SCENARIOS = [
         "compare": "json",
     },
     {
+        # The encrypted store is the FIRST credential source, so this row pins
+        # `store_id_key`/`store_secret_key` in the captured registry: a wrong key
+        # reads as "no app configured" forever and nothing else would notice.
+        "name": "byo_status_stored_app",
+        "argv": ["byo", "status", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "credential": {
+            "byo_meta_app_id": "1234567890123456",
+            "byo_meta_app_secret": "synthetic-secret-0123456789",
+        },
+        "compare": "json",
+    },
+    {
         "name": "byo_clear_unknown_platform",
         "argv": ["byo", "clear", "nope", "--json"],
         "seed": {"config.yaml": "version: 4\n"},
@@ -2577,7 +2590,7 @@ SCENARIOS = [
         },
         "config_dir": ".xpst",
         "mask": ["generated_at"],
-        "mask_sections": ["system", "dependencies", "updates", "providers"],
+        "mask_sections": ["system", "dependencies", "updates"],
         "mask_checks": ["python"],
         "files_zip": ["bundle.zip"],
         "compare": "json",
@@ -2597,7 +2610,7 @@ SCENARIOS = [
         },
         "config_dir": ".xpst",
         "mask": ["generated_at"],
-        "mask_sections": ["system", "dependencies", "updates", "providers"],
+        "mask_sections": ["system", "dependencies", "updates"],
         "mask_checks": ["python"],
         "files_zip": ["bundle.zip"],
         "compare": "json",

@@ -16,6 +16,9 @@
 //! Python-side change fails the build until the resource is refreshed. The
 //! ledger note says the same thing.
 //!
+//! The resource lives in `xpst-surface` because the `xpst_capabilities` MCP tool
+//! nests the same document in its own payload; this module is the CLI renderer.
+//!
 //! Text mode renders a plain table rather than Rich's box drawing, which is the
 //! same choice every other implemented command makes; `--json` is the parity
 //! surface.
@@ -29,7 +32,7 @@ use crate::output::write_text;
 use crate::{exit, flag, GlobalOptions};
 
 /// The captured document, byte-identical to `json_output(capability_document())`.
-const DOCUMENT: &str = include_str!("../resources/capabilities.json");
+const DOCUMENT: &str = xpst_surface::capabilities::DOCUMENT;
 
 /// Run `capabilities`.
 pub fn run(

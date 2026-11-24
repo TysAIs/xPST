@@ -50,12 +50,37 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "crates" / "xpst-cli" / "tests" / "fixtures" / "mcp_stdio.json"
 
-# The state file every scenario starts from: an empty ledger, so `xpst_status`
-# is a property of the engine rather than of a profile.
+# The state file every scenario starts from. It carries two recorded failures
+# so `xpst_activity` answers a populated document rather than an empty one — a
+# row whose expected payload is empty but whose name says "activity" is a
+# fixture that passes for the wrong reason. `instagram`'s entry is a bare string
+# on purpose: the handler skips a non-dict result, and `x`'s empty `error` is the
+# `or "Unknown error"` fallback.
 STATE = {
     "version": 2,
-    "posted_videos": {},
-    "health": {"total_processed": 0, "platforms": {}},
+    "posted_videos": {
+        "vid-parity": {
+            "source_url": "https://example.invalid/vid-parity",
+            "last_attempt": "2026-11-20T10:00:00+00:00",
+            "errors": {
+                "youtube": {
+                    "error": "quota exceeded",
+                    "retryable": True,
+                    "timestamp": "2026-11-20T10:00:00+00:00",
+                },
+                "x": {
+                    "error": "rate limited",
+                    "retryable": False,
+                    "timestamp": "2026-11-19T09:00:00+00:00",
+                },
+            },
+        },
+        "vid-other": {
+            "source_url": "https://example.invalid/vid-other",
+            "errors": {"youtube": {"error": "", "retryable": None}},
+        },
+    },
+    "health": {"total_processed": 2, "platforms": {}},
 }
 
 # Read-only calls whose payload is byte-compared. Every one of these is ported.
@@ -72,11 +97,16 @@ READ_ONLY_CALLS = [
     ("xpst_status", {}),
     ("xpst_config_show", {}),
     ("xpst_providers", {}),
+    ("xpst_capabilities", {}),
     ("xpst_schedule_list", {}),
     ("xpst_rate_limit_status", {}),
     ("xpst_best_time", {}),
+    ("xpst_followers", {}),
+    ("xpst_activity", {}),
     ("kb_query", {"text": "parity"}),
     ("xpst_search", {"query": "parity"}),
+    ("kb_areas", {}),
+    ("xpst_transcript", {"video_id": "vid-parity"}),
     ("xpst_bio_get", {}),
 ]
 
@@ -98,6 +128,49 @@ HELPER_SCRIPTS = {
     "bin/ffmpeg": "#!/bin/sh\necho \"ffmpeg version 9.9.9-test Copyright (c) the xPST parity fixture\"\n",
     "bin/yt-dlp": "#!/bin/sh\necho \"2026.01.01\"\n",
 }
+
+# The knowledge workspace the KB tools read. `_xpst_home()` is `XPST_HOME`, else
+# `~/.xpst`, and `HOME` is the scratch profile — so the workspace is
+# `<profile>/.xpst/knowledge/default`. Seeding it here is what makes `kb_areas`
+# and `xpst_transcript` answer a populated document instead of an empty one.
+KNOWLEDGE_AREAS = {
+    "area-basics": {
+        "id": "area-basics",
+        "label": "Basics",
+        "centroid": [],
+        "nugget_ids": ["nug-1", "nug-2"],
+        "order_index": 0,
+    },
+    "area-advanced": {
+        "id": "area-advanced",
+        "label": "Advanced",
+        "centroid": [],
+        "nugget_ids": ["nug-3"],
+        "order_index": 1,
+    },
+}
+
+TRANSCRIPTS = {
+    "vid-parity": {
+        "content_hash": "vid-parity",
+        "text": "parity transcript body",
+        "segments": [
+            {"start": 0.0, "end": 1.5, "text": "parity"},
+            {"start": 1.5, "end": 3.0, "text": "fixture"},
+        ],
+    }
+}
+
+# Follower snapshots, written through the shipped `AnalyticsStore` so the schema
+# and the timestamp normalisation are the engine's, not this script's.
+FOLLOWER_SNAPSHOTS = [
+    ("youtube", 1200, "2026-11-01T00:00:00+00:00"),
+    ("youtube", 1240, "2026-11-08T00:00:00+00:00"),
+    ("youtube", 1310, "2026-11-15T00:00:00+00:00"),
+    ("x", 480, "2026-11-15T00:00:00+00:00"),
+    ("instagram", 900, "2026-11-01T00:00:00+00:00"),
+    ("instagram", 875, "2026-11-15T00:00:00+00:00"),
+]
 
 POST_ARGUMENTS = {
     "media_path": "/nonexistent/parity.mp4",
@@ -186,6 +259,31 @@ def run_scenario(python: str, scenario: dict) -> dict:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
         path.chmod(0o755)
+
+    # The knowledge workspace (`~/.xpst/knowledge/default`, since HOME is the
+    # profile) and its transcripts.
+    workspace = profile / ".xpst" / "knowledge" / "default"
+    (workspace / "transcripts").mkdir(parents=True, exist_ok=True)
+    (workspace / "areas.json").write_text(json.dumps(KNOWLEDGE_AREAS), encoding="utf-8")
+    for name, body in TRANSCRIPTS.items():
+        (workspace / "transcripts" / f"{name}.json").write_text(
+            json.dumps(body), encoding="utf-8"
+        )
+
+    # Follower snapshots, through the shipped store so the schema is the
+    # engine's. `record_followers()` stamps `now`, so the rows are written with
+    # explicit timestamps instead — a fixture whose `captured_at` moved on every
+    # capture would pin the clock, not the engine.
+    from xpst.analytics_store import AnalyticsStore
+
+    store = AnalyticsStore(profile / "analytics.db")
+    with store._connect() as connection:
+        for platform, count, captured_at in FOLLOWER_SNAPSHOTS:
+            connection.execute(
+                "INSERT OR REPLACE INTO follower_snapshots "
+                "(platform, count, captured_at) VALUES (?, ?, ?)",
+                (platform, count, captured_at),
+            )
 
     env = dict(os.environ)
     env["PYTHONPATH"] = str(ROOT / "src")

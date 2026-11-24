@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use xpst_config::output::{array, integer, null, object, python_repr, string};
+use xpst_config::output::{array, integer, null, number, object, python_repr, string};
 use xpst_config::Value;
 
 use crate::config_view::truthy;
@@ -26,6 +26,35 @@ pub fn valid_workspace_name(name: &str) -> bool {
         && name.chars().all(|character| {
             character.is_alphanumeric() || matches!(character, '-' | '_' | ':' | '.')
         })
+}
+
+/// `_validate_name(name, field)` — the three refusals, with Python's messages.
+///
+/// The regex is ASCII-only (`^[a-zA-Z0-9:_\-.]+$`), which is stricter than
+/// [`valid_workspace_name`]'s `is_alphanumeric()`: a name with a non-ASCII
+/// letter passes the workspace check and fails this one. Both are reproduced
+/// rather than unified, because each is what its own Python caller does.
+pub fn validate_name(name: &str, field: &str) -> Result<(), String> {
+    let ascii_safe = !name.is_empty()
+        && name.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, ':' | '_' | '-' | '.')
+        });
+    if !ascii_safe {
+        return Err(format!(
+            "Invalid {field}: must contain only alphanumeric, dash, underscore, colon, or dot \
+             characters (got: {})",
+            python_repr(name)
+        ));
+    }
+    if name.contains("..") {
+        return Err(format!(
+            "Invalid {field}: parent traversal (..) is not allowed"
+        ));
+    }
+    if name.starts_with('~') {
+        return Err(format!("Invalid {field}: leading tilde is not allowed"));
+    }
+    Ok(())
 }
 
 /// `_xpst_home()`: `XPST_HOME`, else `~/.xpst`.
@@ -102,6 +131,62 @@ pub fn open_store(root: &Path) -> Result<Store, String> {
     let nuggets = kb_store::load_nuggets(&root.join("nuggets.json"))?;
     let areas = kb_store::load_areas(&root.join("areas.json"))?;
     Ok(Store { nuggets, areas })
+}
+
+/// `kb_areas()` — the discovered areas in course order.
+///
+/// Ports `xpst.knowledge.mcp.tools.kb_areas`: `Workspace.resolve(workspace)`
+/// (create=True, so a fresh workspace is materialized), the JSON store's areas,
+/// `order_areas`, and `{workspace, count, areas: [{order, label, nugget_count}]}`.
+/// `order` is `order_index + 1`, so the payload is 1-based.
+pub fn areas_payload(workspace: &str) -> Result<Value, String> {
+    let home = xpst_home().ok_or_else(|| {
+        "cannot determine the xPST home: neither XPST_HOME nor HOME is set".to_string()
+    })?;
+    areas_payload_in(&home, workspace)
+}
+
+/// [`areas_payload`] against an explicit home directory.
+pub fn areas_payload_in(home: &Path, workspace: &str) -> Result<Value, String> {
+    let root = resolve_workspace_in(home, workspace, true).map_err(|error| match error {
+        WorkspaceError::Invalid(message) => message,
+        WorkspaceError::NoHome => {
+            "cannot determine the xPST home: neither XPST_HOME nor HOME is set".to_string()
+        }
+    })?;
+    let store = open_store(&root)?;
+    let mut areas = store.areas;
+    kb_store::order_areas(&mut areas);
+
+    let rows: Vec<Value> = areas
+        .iter()
+        .map(|area| {
+            object(vec![
+                ("order", order_plus_one(&area.order_index)),
+                ("label", area.label.clone()),
+                ("nugget_count", integer(area.nugget_ids.len() as i64)),
+            ])
+        })
+        .collect();
+    Ok(object(vec![
+        ("workspace", string(workspace)),
+        ("count", integer(rows.len() as i64)),
+        ("areas", array(rows)),
+    ]))
+}
+
+/// `area.order_index + 1`, keeping the numeric type Python keeps.
+fn order_plus_one(value: &Value) -> Value {
+    match value {
+        Value::Number(value) => match value.as_i64() {
+            Some(whole) => integer(whole + 1),
+            None => number(value.as_f64().unwrap_or_default() + 1.0),
+        },
+        // `None + 1` raises `TypeError` in Python; the store's `order_index`
+        // defaults to 0 when the key is absent, so this is the same value.
+        Value::Null => integer(1),
+        other => other.clone(),
+    }
 }
 
 /// `nugget.source_url or nugget.source_video_id`.
@@ -287,6 +372,79 @@ mod tests {
         let zero = query_payload_in(&home, "default", "ing", 0).expect("query");
         assert_eq!(zero.get("count").and_then(Value::as_i64), Some(1));
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// `kb_areas()`: areas in course order, `order` 1-based, with nugget counts.
+    #[test]
+    fn areas_are_ordered_and_one_based() {
+        let home = seeded_home("areas");
+        let workspace = home.join("knowledge").join("default");
+        std::fs::write(
+            workspace.join("areas.json"),
+            r#"{
+              "a2": {"id": "a2", "label": "Advanced", "centroid": [], "nugget_ids": ["n2"], "order_index": 1},
+              "a1": {"id": "a1", "label": "Basics", "centroid": [], "nugget_ids": ["n1", "n3"], "order_index": 0}
+            }"#,
+        )
+        .expect("areas");
+
+        let payload = areas_payload_in(&home, "default").expect("areas payload");
+        assert_eq!(
+            payload.get("workspace").and_then(Value::as_str),
+            Some("default")
+        );
+        assert_eq!(payload.get("count").and_then(Value::as_i64), Some(2));
+        let rows = payload
+            .get("areas")
+            .and_then(Value::as_sequence)
+            .expect("areas");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].get("order").and_then(Value::as_i64), Some(1));
+        assert_eq!(rows[0].get("label").and_then(Value::as_str), Some("Basics"));
+        assert_eq!(rows[0].get("nugget_count").and_then(Value::as_i64), Some(2));
+        assert_eq!(rows[1].get("order").and_then(Value::as_i64), Some(2));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// `Workspace.resolve(workspace)` defaults to `create=True`, so a workspace
+    /// that does not exist yet is materialized and answers an empty list.
+    #[test]
+    fn areas_materialize_a_missing_workspace() {
+        let home = std::env::temp_dir().join(format!("xpst-kb-areas-new-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("home");
+
+        let payload = areas_payload_in(&home, "fresh").expect("areas payload");
+        assert_eq!(payload.get("count").and_then(Value::as_i64), Some(0));
+        assert!(home.join("knowledge").join("fresh").is_dir());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// `_validate_name`'s three refusals, with Python's sentences.
+    #[test]
+    fn validate_name_reproduces_pythons_refusals() {
+        assert_eq!(
+            validate_name("../escape", "video_id").expect_err("traversal"),
+            "Invalid video_id: must contain only alphanumeric, dash, underscore, colon, or dot \
+             characters (got: '../escape')"
+        );
+        assert_eq!(
+            validate_name("a..b", "video_id").expect_err("parent traversal"),
+            "Invalid video_id: parent traversal (..) is not allowed"
+        );
+        // `~` is not in the safe regex, so a leading tilde fails the FIRST
+        // check — Python's `startswith("~")` branch is unreachable for the same
+        // reason. Reproduced rather than tidied.
+        assert_eq!(
+            validate_name("~home", "video_id").expect_err("tilde"),
+            "Invalid video_id: must contain only alphanumeric, dash, underscore, colon, or dot \
+             characters (got: '~home')"
+        );
+        assert!(validate_name("content:abc-1.2", "video_id").is_ok());
+        // The regex is ASCII-only, so a non-ASCII letter is refused here even
+        // though `valid_workspace_name` accepts it.
+        assert!(validate_name("ünïcode", "video_id").is_err());
+        assert!(valid_workspace_name("ünïcode"));
     }
 
     #[test]
