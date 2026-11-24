@@ -66,7 +66,7 @@ fn save(dir: &Path, data: &Map<String, Value>) -> Result<(), String> {
     // order is alphabetical at every level — not the insertion order the
     // `preserve_order` map keeps.
     let mut document = Value::Object(data.clone());
-    xpst_config::sort_keys_recursive(&mut document);
+    xpst_core::json::sort_keys_recursive(&mut document);
     let text = crate::output::python_pretty_json(&document);
     let path = devices_path(dir);
     if let Some(parent) = path.parent() {

@@ -1028,7 +1028,7 @@ pub struct LoadResult {
 /// `json.dumps(value, sort_keys=True, indent=2)` — the on-disk bytes.
 fn render_sorted(value: &Value) -> String {
     let mut sorted = value.clone();
-    xpst_config::sort_keys_recursive(&mut sorted);
+    xpst_core::json::sort_keys_recursive(&mut sorted);
     xpst_config::python_style_json_pretty(&sorted).unwrap_or_else(|_| "null".to_string())
 }
 

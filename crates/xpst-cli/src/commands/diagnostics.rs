@@ -112,7 +112,7 @@ pub fn run(
         }
     }
     let mut rendered = document;
-    xpst_config::sort_keys_recursive(&mut rendered);
+    xpst_core::json::sort_keys_recursive(&mut rendered);
     let text = match xpst_config::python_style_json_pretty(&rendered) {
         Ok(text) => text + "\n",
         Err(error) => return report_failure(err, json_mode, out, &error),

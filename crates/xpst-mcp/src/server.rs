@@ -174,7 +174,7 @@ fn success_result(value: &Value, render: Render) -> CallToolResult {
         Render::Pretty => xpst_config::python_style_json_pretty(value),
         Render::PrettySorted => {
             let mut sorted = value.clone();
-            xpst_config::sort_keys_recursive(&mut sorted);
+            xpst_core::json::sort_keys_recursive(&mut sorted);
             xpst_config::python_style_json_pretty(&sorted)
         }
         Render::Compact => xpst_config::python_style_json_compact(value),

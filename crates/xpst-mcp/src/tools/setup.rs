@@ -28,7 +28,7 @@ use super::ToolContext;
 /// `json.dumps(payload, indent=2, sort_keys=True)` — the setup tools' renderer.
 fn render(payload: &Value) -> Result<String, ToolError> {
     let mut sorted = payload.clone();
-    xpst_config::sort_keys_recursive(&mut sorted);
+    xpst_core::json::sort_keys_recursive(&mut sorted);
     xpst_config::python_style_json_pretty(&sorted)
         .map_err(|detail| ToolError::Handler { message: detail })
 }

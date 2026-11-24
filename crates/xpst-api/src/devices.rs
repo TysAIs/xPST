@@ -105,7 +105,7 @@ fn save(config_dir: &Path, data: &Map<String, Value>) -> std::io::Result<()> {
     let temporary = path.with_extension("json.tmp");
     // `dashboard/devices.py` writes `json.dumps(data, indent=2, sort_keys=True)`.
     let mut document = Value::Object(data.clone());
-    xpst_config::sort_keys_recursive(&mut document);
+    xpst_core::json::sort_keys_recursive(&mut document);
     let text = format!(
         "{}\n",
         serde_json::to_string_pretty(&document)

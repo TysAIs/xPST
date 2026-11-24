@@ -34,6 +34,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 jiff.workspace = true
 xpst-auth = { path = "../xpst-auth" }
 xpst-config = { workspace = true }
+xpst-core = { path = "../xpst-core" }
 xpst-state = { workspace = true }
 xpst-surface = { path = "../xpst-surface" }
 
