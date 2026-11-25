@@ -84,7 +84,7 @@ pub const UNOFFICIAL_AUTH_PATHS: &[UnofficialAuthPath] = &[
         switch_command: "xpst connect instagram",
         docs_url: "docs/setup-instagram.md",
         consequence: "Instagram's terms forbid automated access outside the official API, and \
-                      enforcement is account action-blocks, challenges and suspension - not a \
+                      enforcement is account action-blocks, challenges and suspension — not a \
                       polite error.",
     },
     UnofficialAuthPath {

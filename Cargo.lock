@@ -3939,6 +3939,7 @@ dependencies = [
  "xpst-auth",
  "xpst-authflow",
  "xpst-config",
+ "xpst-core",
  "xpst-media",
  "xpst-state",
  "xpst-store",
@@ -3990,6 +3991,10 @@ dependencies = [
 [[package]]
 name = "xpst-media"
 version = "1.3.0"
+dependencies = [
+ "serde_json",
+ "xpst-core",
+]
 
 [[package]]
 name = "xpst-pipeline"

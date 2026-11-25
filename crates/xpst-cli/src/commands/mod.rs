@@ -26,6 +26,7 @@ pub mod logs;
 pub mod mcp;
 pub mod media;
 pub mod messenger;
+pub mod preflight;
 pub mod provider_status;
 pub mod providers;
 pub mod quota;

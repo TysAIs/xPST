@@ -62,6 +62,7 @@ a no-op.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -99,6 +100,42 @@ FFMPEG_STUB = (
     'echo "ffmpeg version 9.9.9-test Copyright (c) the xPST parity fixture"\n'
 )
 YTDLP_STUB = "#!/bin/sh\necho \"2026.01.01\"\n"
+
+# `preflight` probes media through ffprobe. A stand-in that prints a fixed probe
+# document makes every media row a property of the fixture instead of of the
+# host's codecs; the numbers are chosen so the file is compliant everywhere
+# (h264/yuv420p 1080x1920, 12.5 s, 2 Mbps, AAC 44.1 kHz).
+FFPROBE_STUB = (
+    "#!/bin/sh\n"
+    "cat <<'JSON'\n"
+    '{"streams":[{"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p",'
+    '"width":1080,"height":1920,"avg_frame_rate":"30/1","r_frame_rate":"30/1",'
+    '"bit_rate":"2000000","disposition":{"attached_pic":0}},'
+    '{"codec_type":"audio","codec_name":"aac","sample_rate":"44100"}],'
+    '"format":{"duration":"12.5","bit_rate":"2100000",'
+    '"format_name":"mov,mp4,m4a,3gp,3g2,mj2"}}\n'
+    "JSON\n"
+)
+
+# A file the destinations would re-encode: HEVC/yuv444p 4K at 120 fps in Matroska.
+FFPROBE_NONCOMPLIANT_STUB = (
+    "#!/bin/sh\n"
+    "cat <<'JSON'\n"
+    '{"streams":[{"codec_type":"video","codec_name":"hevc","pix_fmt":"yuv444p",'
+    '"width":3840,"height":2160,"avg_frame_rate":"120/1","r_frame_rate":"120/1",'
+    '"bit_rate":"90000000","disposition":{"attached_pic":0}},'
+    '{"codec_type":"audio","codec_name":"opus","sample_rate":"48000"}],'
+    '"format":{"duration":"900.0","bit_rate":"90000000",'
+    '"format_name":"matroska,webm"}}\n'
+    "JSON\n"
+)
+
+# A 1080x1920 PNG header: the still-image path reads the size from the file
+# itself, so this row exercises the header reader rather than ffprobe.
+PNG_HEADER_B64 = "iVBORw0KGgoAAAANSUhEUgAABDgAAAeA"
+
+#: 300 characters: past X's 280 ceiling, inside Instagram's 2200.
+LONG_CAPTION = "a" * 300
 
 RICH_STATE = {
     "version": 2,
@@ -1733,6 +1770,298 @@ SCENARIOS = [
         "mask_checks": ["python"],
         "compare": "json",
     },
+    # ── preflight (t_189d591d) ────────────────────────────────────────────
+    #
+    # `preflight` is the config-aware route plan. Every row is a `stdout` byte
+    # case: Python prints `json.dumps` defaults, so a key-order or separator
+    # regression is visible to `cmp` and not only to a structural diff.
+    #
+    # Media rows pin `XPST_FFPROBE_PATH` to a seeded stand-in that prints a fixed
+    # probe document — without it every media verdict would be a property of the
+    # host's codecs. `--transform` rows also pin `XPST_FFMPEG_PATH`, because the
+    # rendition decision builds a `VideoProcessor`, which verifies the binary by
+    # running `ffmpeg -version`.
+    {
+        # A pristine profile: the default config enables YouTube, X, Instagram
+        # and TikTok, and no media means a text post routed to X.
+        "name": "preflight_pristine",
+        "argv": ["preflight", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        "name": "preflight_text_body",
+        "argv": ["preflight", "--json", "--text", "hello"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        # `--format video` with no media: every destination is a `failed` row
+        # carrying MEDIA_REQUIRED, and nothing would publish (exit 1).
+        "name": "preflight_format_video_without_media",
+        "argv": ["preflight", "--json", "--format", "video"],
+        "seed": {},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # An explicit destination that cannot take the format: the refusal
+        # carries the envelope, and the state is `unsupported_format`.
+        "name": "preflight_platform_youtube_text",
+        "argv": ["preflight", "--json", "--platforms", "youtube"],
+        "seed": {},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # A destination xPST has no capability profile for: `envelope: null`,
+        # `constraints: {}`, and the UNKNOWN_PLATFORM blocker.
+        "name": "preflight_platform_unknown",
+        "argv": ["preflight", "--json", "--platforms", "bogus"],
+        "seed": {},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # `--platforms ","` is a malformed request, not "nothing is connected":
+        # NO_DESTINATIONS and exit 2.
+        "name": "preflight_platform_empty",
+        "argv": ["preflight", "--json", "--platforms", ","],
+        "seed": {},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # Nothing enabled: one actionable NO_CONNECTED_ACCOUNTS error, exit 2.
+        "name": "preflight_nothing_connected",
+        "argv": ["preflight", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\n"
+                "accounts:\n"
+                "  youtube:\n"
+                "    enabled: false\n"
+                "  x:\n"
+                "    enabled: false\n"
+                "  instagram:\n"
+                "    enabled: false\n"
+                "  tiktok:\n"
+                "    enabled: false\n"
+            )
+        },
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # X has no per-post private mode on any route: the request is honoured
+        # as an ADVISORY (the post is public there), never a refusal.
+        "name": "preflight_visibility_private_x",
+        "argv": ["preflight", "--json", "--visibility", "private"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        # TikTok's browser route cannot set the audience, so a private request is
+        # REFUSED (VISIBILITY_UNAVAILABLE) rather than published publicly.
+        "name": "preflight_visibility_private_tiktok_browser",
+        "argv": ["preflight", "--json", "--visibility", "private", "--platforms", "tiktok"],
+        "seed": {
+            "config.yaml": "version: 4\naccounts:\n  tiktok:\n    publish_mode: browser\n"
+        },
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # A caption past X's 280-character ceiling: the refusal names both
+        # numbers and the envelope, and the state is `unsupported_format`.
+        "name": "preflight_caption_too_long",
+        "argv": ["preflight", "--json", "--text", LONG_CAPTION],
+        "seed": {},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # Every destination enabled with credentials present: the auth rows flip
+        # to ready and the ban-risk advisory still rides along on Instagram.
+        "name": "preflight_configured_all",
+        "argv": ["preflight", "--json", "--all"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\n"
+                "accounts:\n"
+                "  youtube:\n"
+                "    enabled: true\n"
+                "    token_file: PROFILE/credentials/youtube_token.json\n"
+                "  x:\n"
+                "    enabled: true\n"
+                "    auth_mode: cookies\n"
+                "    cookies_file: PROFILE/credentials/x_cookies.json\n"
+                "  instagram:\n"
+                "    enabled: true\n"
+                "    auth_mode: session\n"
+                "    session_file: PROFILE/credentials/instagram_session.json\n"
+                "  tiktok:\n"
+                "    enabled: true\n"
+                "    publish_mode: browser\n"
+                "  threads:\n"
+                "    enabled: true\n"
+                "    graph_access_token: tok\n"
+                "    threads_user_id: 42\n"
+                "  facebook:\n"
+                "    enabled: true\n"
+                "    page_id: '1000'\n"
+                "    page_access_token: tok\n"
+                "  bluesky:\n"
+                "    enabled: true\n"
+                "    identifier: someone.bsky.social\n"
+                "  rumble:\n"
+                "    enabled: true\n"
+            ),
+            "credentials/youtube_token.json": "{}",
+            "credentials/x_cookies.json": "{}",
+            "credentials/instagram_session.json": "{}",
+            "credentials/tiktok_cookies.txt": "# Netscape HTTP Cookie File\n",
+        },
+        "compare": "stdout",
+    },
+    {
+        # An acknowledged unofficial path is still reported, with the operator's
+        # choice named in the advisory instead of "nothing has recorded".
+        "name": "preflight_ban_risk_acknowledged",
+        "argv": ["preflight", "--json", "--platforms", "instagram"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\n"
+                "accounts:\n"
+                "  instagram:\n"
+                "    enabled: true\n"
+                "    auth_mode: session\n"
+                "    session_file: PROFILE/credentials/instagram_session.json\n"
+            ),
+            "credentials/instagram_session.json": "{}",
+            "ban_risk_acknowledgements.json": json.dumps(
+                {
+                    "version": 1,
+                    "acknowledgements": {
+                        "instagram": {
+                            "platform": "instagram",
+                            "auth_mode": "session",
+                            "ban_risk": "unofficial_private_api",
+                            "acknowledged_at": "2026-01-01T00:00:00+0000",
+                            "surface": "xpst connect instagram",
+                            "operator_choice": True,
+                        }
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+        },
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # A probed, compliant file: the constraints carry the measured duration,
+        # aspect and size, and every destination would publish (exit 0).
+        "name": "preflight_media_probed",
+        "argv": ["preflight", "--json", "PROFILE/clip.mp4"],
+        "seed": {"bin/ffprobe": FFPROBE_STUB, "clip.mp4": "x" * 64},
+        "executable": ["bin/ffprobe"],
+        "env": {"XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe"},
+        "compare": "stdout",
+    },
+    {
+        # `--transform` on a compliant file: passthrough, with the reasons the
+        # shipped decision tree writes.
+        "name": "preflight_media_transform_passthrough",
+        "argv": ["preflight", "--json", "--transform", "PROFILE/clip.mp4"],
+        "seed": {
+            "bin/ffprobe": FFPROBE_STUB,
+            "bin/ffmpeg": FFMPEG_STUB,
+            "clip.mp4": "x" * 64,
+        },
+        "executable": ["bin/ffprobe", "bin/ffmpeg"],
+        "env": {
+            "XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe",
+            "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+        },
+        "compare": "stdout",
+    },
+    {
+        # `--transform` on a file the destinations would re-encode: transcode,
+        # with the profile summary the shipped planner builds.
+        "name": "preflight_media_transform_transcode",
+        "argv": ["preflight", "--json", "--transform", "PROFILE/clip.mp4"],
+        "seed": {
+            "bin/ffprobe": FFPROBE_NONCOMPLIANT_STUB,
+            "bin/ffmpeg": FFMPEG_STUB,
+            "clip.mp4": "x" * 64,
+        },
+        "executable": ["bin/ffprobe", "bin/ffmpeg"],
+        "env": {
+            "XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe",
+            "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+        },
+        "compare": "stdout",
+    },
+    {
+        # A file that does not exist: MEDIA_NOT_FOUND on every destination and
+        # exit 1 — a plan failure, not a crash.
+        "name": "preflight_media_missing",
+        "argv": ["preflight", "--json", "PROFILE/nope.mp4"],
+        "seed": {"bin/ffprobe": FFPROBE_STUB},
+        "executable": ["bin/ffprobe"],
+        "env": {"XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe"},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # A still image sized from its own header (no ffprobe): the image
+        # envelope and the aspect rule are the ones that apply.
+        "name": "preflight_media_image_header",
+        "argv": ["preflight", "--json", "PROFILE/photo.png"],
+        "seed": {"bin/ffprobe": FFPROBE_STUB},
+        "binary": {"photo.png": PNG_HEADER_B64},
+        "executable": ["bin/ffprobe"],
+        "env": {"XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe"},
+        "compare": "stdout",
+    },
+    {
+        # Two files: a carousel, with the per-item rendition decision carried in
+        # `transforms` rather than `transform`.
+        "name": "preflight_media_carousel",
+        "argv": ["preflight", "--json", "PROFILE/clip.mp4", "PROFILE/clip2.mp4"],
+        "seed": {
+            "bin/ffprobe": FFPROBE_STUB,
+            "clip.mp4": "x" * 64,
+            "clip2.mp4": "y" * 64,
+        },
+        "executable": ["bin/ffprobe"],
+        "env": {"XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe"},
+        "compare": "stdout",
+    },
+    {
+        # A spent daily quota is an execution-time gate: it rides as a warning,
+        # never as a skip, so the destination still plans to publish.
+        "name": "preflight_quota_exhausted",
+        "argv": ["preflight", "--json", "--platforms", "x"],
+        "seed": {
+            "quotas.json": json.dumps(
+                {
+                    "x": {
+                        "platform": "x",
+                        "daily_limit": 5,
+                        "used_today": 5,
+                        "last_reset": "",
+                        "hourly_limit": None,
+                        "used_this_hour": 0,
+                        "last_hour_reset": "",
+                    }
+                }
+            )
+        },
+        "compare": "stdout",
+    },
 ]
 
 
@@ -1743,6 +2072,13 @@ def seed_profile(scenario: dict, profile: Path) -> None:
         # `PROFILE` is the scratch profile itself, so a seeded config can name a
         # path inside it (a local source folder, a download directory).
         target.write_text(text.replace("PROFILE", str(profile)), encoding="utf-8")
+    # A file whose bytes are not text (a still image's header) is recorded as
+    # base64 and written verbatim, so an image row is a real header read rather
+    # than a text file wearing a `.png` name.
+    for relative, encoded in (scenario.get("binary") or {}).items():
+        target = profile / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(base64.b64decode(encoded))
     # A seeded stand-in binary has to be executable: `readiness` runs
     # `ffmpeg -version` and `yt-dlp --version`, and a non-executable file is
     # skipped by the resolver, which would make the row machine-dependent.
@@ -2067,6 +2403,8 @@ def run_scenario(scenario: dict, python: str) -> dict:
         record["mask_checks"] = scenario["mask_checks"]
     if scenario.get("executable"):
         record["executable"] = scenario["executable"]
+    if scenario.get("binary"):
+        record["binary"] = scenario["binary"]
     if scenario.get("allow_nonzero"):
         record["allow_nonzero"] = True
     if scenario.get("credential"):

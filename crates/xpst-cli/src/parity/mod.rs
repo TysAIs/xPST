@@ -66,6 +66,11 @@ pub struct ParamSpec {
     pub is_flag: bool,
     #[serde(default)]
     pub multiple: bool,
+    /// Click's `nargs`. `-1` means "one or more values" (`nargs=-1`), which is
+    /// how a variadic positional is declared — and Click reports
+    /// `multiple: false` for it, so `multiple` alone is not enough.
+    #[serde(default)]
+    pub nargs: Option<i64>,
     #[serde(default)]
     pub required: bool,
     #[serde(default)]

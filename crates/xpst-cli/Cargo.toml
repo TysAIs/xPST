@@ -25,6 +25,10 @@ xpst-auth = { version = "1.3.0", path = "../xpst-auth" }
 # The ban-risk registry `readiness` reports (the same one `doctor` uses).
 xpst-authflow = { version = "1.3.0", path = "../xpst-authflow" }
 xpst-config.workspace = true
+# The route-plan assembly (`preflight`) is engine behaviour, not CLI behaviour:
+# it lives in `xpst-core` so the HTTP planner and the scheduler can read the same
+# one, and this crate only supplies the machine-dependent half.
+xpst-core = { version = "1.3.0", path = "../xpst-core" }
 xpst-media.workspace = true
 xpst-state.workspace = true
 xpst-store = { version = "1.3.0", path = "../xpst-store" }

@@ -327,6 +327,12 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         "The first-run report (`build_readiness_report`): the canonical provider status shared with `providers`, the ban-risk registry, the local folder set and the yt-dlp/FFmpeg helper probes, with `--fix` creating the same folders; payload byte-compared with the Python CLI (the `python` row reports the Rust engine, and `--fix` does not rewrite `config.yaml`).",
         readiness,
     ),
+    implemented(
+        "preflight",
+        "xpst-core",
+        "The config-aware route plan (`build_route_plan`): target resolution from the config's enabled flags, the per-destination state/reason/envelope/constraints/blockers/warnings/transform/visibility payload, the ban-risk advisory and the read-only quota gate; payload byte-compared with the Python CLI. `verify_media`'s loudness check is not ported (preflight always plans with `check_loudness=False`).",
+        preflight,
+    ),
 ];
 
 const fn implemented(
@@ -763,6 +769,15 @@ fn best_time(
     err: &mut dyn Write,
 ) -> i32 {
     commands::best_time::run(global, leaf, out, err)
+}
+
+fn preflight(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::preflight::run(global, leaf, out, err)
 }
 
 fn byo_set(
