@@ -95,13 +95,13 @@ fn root_level_json_flag_is_honoured_on_a_tty() {
 
 #[test]
 fn nested_unimplemented_commands_report_their_full_path() {
-    // `schedule install` is still a stub; `schedule add` used to be the example
-    // here until it was ported, so the row moved to the next unimplemented
-    // nested command rather than being deleted.
-    let (code, out, err) = run(&["schedule", "install", "--json"], false);
+    // `schedule run` is still a stub; `schedule add` and then `schedule install`
+    // were the examples here until they were ported, so the row moves to the
+    // next unimplemented nested command rather than being deleted.
+    let (code, out, err) = run(&["schedule", "run", "--json"], false);
     assert_eq!(code, 1, "stderr: {err}");
     let payload: serde_json::Value = serde_json::from_str(out.trim()).expect("valid JSON");
-    assert_eq!(payload["error"]["command"], "schedule install");
+    assert_eq!(payload["error"]["command"], "schedule run");
 }
 
 #[test]

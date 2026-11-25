@@ -367,4 +367,26 @@ pub const DEVIATIONS: &[&str] = &[
      saturate at the `i64` bounds instead of carrying the exact value, which keeps the \
      observable behaviour (`--keep` deletes nothing, `--rtmp-port` is out of range) but not \
      the printed number for a value beyond 2^63.",
+    "`schedule install` ports the Linux branch only. macOS writes a LaunchAgent plist and \
+     Windows registers a scheduled task; neither can be exercised on this host, so both answer \
+     `Unsupported OS: <system>` (exit 1) instead of installing something unverified. The Linux \
+     path is byte-compared against a stand-in `crontab` on PATH, including the written table. \
+     A missing `crontab` reproduces Python's `RuntimeError` message and exit 1, but prints one \
+     line where Python prints a traceback.",
+    "`plugins list` and `plugins docs` ask an interpreter for the inventory (`XPST_PYTHON`, else \
+     `python3`, else `python`) because a plugin is Python code that `PluginManager.discover()` \
+     imports and calls `register()` on — a Rust binary cannot execute it, and a static parse of \
+     the `register()` literal would misreport any plugin that computes its dict. With no \
+     interpreter that can import `xpst.plugins` the inventory is empty where Python would list \
+     the plugins. The checked-in fixture replays a recorded inventory through a stand-in \
+     interpreter (so the row pins the rendering and the directory resolution), and \
+     `crates/xpst-cli/tests/plugin_probe.rs` drives the real delegation whenever an interpreter \
+     is available.",
+    "`analytics export` does not fetch platform metrics: the YouTube/twikit/instagrapg/TikTok/\
+     Threads collectors are not ported, so the export carries the payload a credential-less \
+     profile gets from the shipped engine — empty metric maps with `collection_status.status: \
+     \"ok\"` — and the `analytics.db` ledger writes (metric snapshots, per-run outcomes) are \
+     skipped. With credentials, Python fetches live numbers and records them. The discovery, \
+     the `--platforms` filter, the totals, the document bytes (JSON key order and separators, \
+     the CSV BOM and `\\r\\n`) and the payload are the shipped behaviour.",
 ];

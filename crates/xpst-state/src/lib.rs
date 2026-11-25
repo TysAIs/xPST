@@ -50,6 +50,7 @@ pub mod journal;
 pub mod manager;
 pub mod model;
 pub mod schedule;
+pub mod scheduler;
 pub mod status;
 pub mod store;
 pub mod summary;

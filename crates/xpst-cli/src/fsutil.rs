@@ -30,6 +30,40 @@ pub fn restrict_to_owner(path: &Path) {
     let _ = path;
 }
 
+/// `shutil.which`: scan `PATH` for an executable file.
+///
+/// An empty `PATH` entry means the current directory, as it does for
+/// `shutil.which`. `schedule install` uses this to decide whether cron exists
+/// before it shells out, which is the difference between Python's
+/// `RuntimeError` and a `FileNotFoundError` traceback.
+pub fn which(name: &str) -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for entry in std::env::split_paths(&path) {
+        let candidate = if entry.as_os_str().is_empty() {
+            std::path::PathBuf::from(name)
+        } else {
+            entry.join(name)
+        };
+        if is_executable_file(&candidate) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

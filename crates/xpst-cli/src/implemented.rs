@@ -345,6 +345,30 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         "The config-aware route plan (`build_route_plan`): target resolution from the config's enabled flags, the per-destination state/reason/envelope/constraints/blockers/warnings/transform/visibility payload, the ban-risk advisory and the read-only quota gate; payload byte-compared with the Python CLI. `verify_media`'s loudness check is ported but the route plan pins `check_loudness=False`, so `preflight` never spawns the extra ffmpeg pass.",
         preflight,
     ),
+    implemented(
+        "analytics export",
+        "xpst-store",
+        "The local export: post-id discovery from `state.json` (canonical `id`, legacy `post_id`, unknown platforms appended in state order), the `--platforms` filter, the totals and per-platform totals, the `collection_status` block, the `json.dump(indent=2, ensure_ascii=False)` document and the CSV BOM + `\\r\\n` header; payload and written file byte-compared with the Python CLI (`exported_at` masked). The per-platform metric collectors are not ported, so the export carries the answer a credential-less profile gets (empty metrics, `collection_status.status: ok`).",
+        analytics_export,
+    ),
+    implemented(
+        "plugins list",
+        "xpst-cli",
+        "The installed-plugin inventory: `~/.xpst/plugins` resolved from HOME (not `XPST_CONFIG_DIR`, as `DEFAULT_PLUGIN_DIR` does), the directory created on a fresh profile, and the `{plugins, count}` payload with `list_plugins()`'s five keys in order; payload byte-compared with the Python CLI. A plugin is Python code, so the inventory is asked of an interpreter (`XPST_PYTHON`, else `python3`, else `python`) running the shipped `PluginManager` — the same out-of-process shape `kb doctor` uses.",
+        plugins_list,
+    ),
+    implemented(
+        "plugins docs",
+        "xpst-cli",
+        "The generated markdown: the header, the `Auto-generated on` stamp, the plugin count, and per plugin its name, version, description, capabilities and `config_options` rows, written to `--output` or carried in the payload; payload and written file byte-compared with the Python CLI (the stamp masked). Same interpreter delegation as `plugins list`.",
+        plugins_docs,
+    ),
+    implemented(
+        "schedule install",
+        "xpst-state",
+        "The Linux scheduler entry: `crontab -l` read, the prior xPST marker/command pair filtered out (including Python's `skip_next` quirk), the `*/N * * * * <bin> serve >> <log> 2>&1` line appended and written back with `crontab -`, plus `--remove`'s `crontab -`/`crontab -r` split and the `No crontab entries found` answer; payload and the resulting crontab byte-compared with the Python CLI against a stand-in `crontab` on PATH. The macOS LaunchAgent and Windows scheduled-task branches are not ported (named divergence).",
+        schedule_install,
+    ),
 ];
 
 const fn implemented(
@@ -844,6 +868,42 @@ fn kb_migrate_store(
     err: &mut dyn Write,
 ) -> i32 {
     commands::kb::migrate_store(global, leaf, out, err)
+}
+
+fn analytics_export(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::analytics::export(global, leaf, out, err)
+}
+
+fn plugins_list(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::plugins::list(global, leaf, out, err)
+}
+
+fn plugins_docs(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::plugins::docs(global, leaf, out, err)
+}
+
+fn schedule_install(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::schedule::install(global, leaf, out, err)
 }
 
 #[cfg(test)]

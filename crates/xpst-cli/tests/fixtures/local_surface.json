@@ -11,7 +11,7 @@
     "PYTHONHASHSEED": "0"
   },
   "note": "Captured by running the shipped Python CLI against scratch profiles. `environment` is the block both engines are run under (a scenario's `env` overrides it); scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent, and an entry without one renders in the pinned TZ; snapshot modified_at is stripped and its epoch recorded instead.",
-  "scenario_count": 181,
+  "scenario_count": 198,
   "scenarios": [
     {
       "name": "status_empty_profile",
@@ -3957,7 +3957,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616764.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616797.\n",
       "stderr": null,
       "normalize_clock": true,
       "backups": [
@@ -3984,7 +3984,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616764.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616798.\n",
       "stderr": null,
       "normalize_clock": true,
       "backups": [
@@ -4012,7 +4012,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616764.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616798.\n",
       "stderr": null,
       "normalize_clock": true,
       "backups": [
@@ -4039,7 +4039,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616764.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616798.\n",
       "stderr": null,
       "normalize_clock": true,
       "backups": [
@@ -4067,7 +4067,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616764.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616798.\n",
       "stderr": null,
       "normalize_clock": true,
       "backups": [
@@ -4095,7 +4095,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616764.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616798.\n",
       "stderr": null,
       "normalize_clock": true,
       "backups": [
@@ -11987,6 +11987,480 @@
       "exit_code": 2,
       "allow_nonzero": true,
       "stdout": "Invalid platforms: no usable platform names in ','\n"
+    },
+    {
+      "name": "schedule_install_basic",
+      "argv": [
+        "schedule",
+        "install",
+        "--json"
+      ],
+      "seed": {
+        "bin/crontab": "#!/bin/sh\nstore=\"${XPST_CRONTAB_STORE:-/nonexistent}\"\ncase \"$1\" in\n  -l) [ -f \"$store\" ] || { echo \"no crontab for the fixture\" >&2; exit 1; }; cat \"$store\" ;;\n  -) sed -E 's#^(\\*/[0-9]+ \\* \\* \\* \\* )[^ ]+( serve >> )#\\1<ENGINE>\\2#' > \"$store\" ;;\n  -r) rm -f \"$store\" ;;\n  *) echo \"unsupported: $*\" >&2; exit 2 ;;\nesac\n",
+        "crontab.txt": "# existing\n0 3 * * * /usr/bin/backup\n# xPST serve supervisor\n*/15 * * * * /old/xpst serve >> /old/cron.log 2>&1\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "XPST_CRONTAB_STORE": "PROFILE/crontab.txt",
+        "PATH": "PROFILE/bin:/usr/bin:/bin"
+      },
+      "executable": [
+        "bin/crontab"
+      ],
+      "files": {
+        "crontab.txt": "# existing\n0 3 * * * /usr/bin/backup\n# xPST serve supervisor\n*/15 * * * * <ENGINE> serve >> <PROFILE>/logs/cron.log 2>&1\n"
+      },
+      "stdout_json": {
+        "ok": true,
+        "os": "linux",
+        "interval_min": 15,
+        "command": "serve"
+      }
+    },
+    {
+      "name": "schedule_install_interval",
+      "argv": [
+        "schedule",
+        "install",
+        "--interval",
+        "5",
+        "--json"
+      ],
+      "seed": {
+        "bin/crontab": "#!/bin/sh\nstore=\"${XPST_CRONTAB_STORE:-/nonexistent}\"\ncase \"$1\" in\n  -l) [ -f \"$store\" ] || { echo \"no crontab for the fixture\" >&2; exit 1; }; cat \"$store\" ;;\n  -) sed -E 's#^(\\*/[0-9]+ \\* \\* \\* \\* )[^ ]+( serve >> )#\\1<ENGINE>\\2#' > \"$store\" ;;\n  -r) rm -f \"$store\" ;;\n  *) echo \"unsupported: $*\" >&2; exit 2 ;;\nesac\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "XPST_CRONTAB_STORE": "PROFILE/crontab.txt",
+        "PATH": "PROFILE/bin:/usr/bin:/bin"
+      },
+      "executable": [
+        "bin/crontab"
+      ],
+      "files": {
+        "crontab.txt": "# xPST serve supervisor\n*/5 * * * * <ENGINE> serve >> <PROFILE>/logs/cron.log 2>&1\n"
+      },
+      "stdout_json": {
+        "ok": true,
+        "os": "linux",
+        "interval_min": 5,
+        "command": "serve"
+      }
+    },
+    {
+      "name": "schedule_install_remove",
+      "argv": [
+        "schedule",
+        "install",
+        "--remove",
+        "--json"
+      ],
+      "seed": {
+        "bin/crontab": "#!/bin/sh\nstore=\"${XPST_CRONTAB_STORE:-/nonexistent}\"\ncase \"$1\" in\n  -l) [ -f \"$store\" ] || { echo \"no crontab for the fixture\" >&2; exit 1; }; cat \"$store\" ;;\n  -) sed -E 's#^(\\*/[0-9]+ \\* \\* \\* \\* )[^ ]+( serve >> )#\\1<ENGINE>\\2#' > \"$store\" ;;\n  -r) rm -f \"$store\" ;;\n  *) echo \"unsupported: $*\" >&2; exit 2 ;;\nesac\n",
+        "crontab.txt": "# existing\n0 3 * * * /usr/bin/backup\n# xPST serve supervisor\n*/15 * * * * /old/xpst serve >> /old/cron.log 2>&1\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "XPST_CRONTAB_STORE": "PROFILE/crontab.txt",
+        "PATH": "PROFILE/bin:/usr/bin:/bin"
+      },
+      "executable": [
+        "bin/crontab"
+      ],
+      "files": {
+        "crontab.txt": "# existing\n0 3 * * * /usr/bin/backup\n"
+      },
+      "stdout_json": {
+        "ok": true,
+        "removed": "crontab entry"
+      }
+    },
+    {
+      "name": "schedule_install_remove_empty",
+      "argv": [
+        "schedule",
+        "install",
+        "--remove",
+        "--json"
+      ],
+      "seed": {
+        "bin/crontab": "#!/bin/sh\nstore=\"${XPST_CRONTAB_STORE:-/nonexistent}\"\ncase \"$1\" in\n  -l) [ -f \"$store\" ] || { echo \"no crontab for the fixture\" >&2; exit 1; }; cat \"$store\" ;;\n  -) sed -E 's#^(\\*/[0-9]+ \\* \\* \\* \\* )[^ ]+( serve >> )#\\1<ENGINE>\\2#' > \"$store\" ;;\n  -r) rm -f \"$store\" ;;\n  *) echo \"unsupported: $*\" >&2; exit 2 ;;\nesac\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "XPST_CRONTAB_STORE": "PROFILE/crontab.txt",
+        "PATH": "PROFILE/bin:/usr/bin:/bin"
+      },
+      "executable": [
+        "bin/crontab"
+      ],
+      "stdout_json": {
+        "ok": true,
+        "message": "No crontab entries found"
+      }
+    },
+    {
+      "name": "schedule_install_no_crontab",
+      "argv": [
+        "schedule",
+        "install",
+        "--json"
+      ],
+      "seed": {
+        "bin/.keep": ""
+      },
+      "compare": "exit",
+      "exit_code": 1,
+      "env": {
+        "PATH": "PROFILE/bin"
+      },
+      "allow_nonzero": true
+    },
+    {
+      "name": "schedule_install_text",
+      "argv": [
+        "schedule",
+        "install"
+      ],
+      "seed": {
+        "bin/crontab": "#!/bin/sh\nstore=\"${XPST_CRONTAB_STORE:-/nonexistent}\"\ncase \"$1\" in\n  -l) [ -f \"$store\" ] || { echo \"no crontab for the fixture\" >&2; exit 1; }; cat \"$store\" ;;\n  -) sed -E 's#^(\\*/[0-9]+ \\* \\* \\* \\* )[^ ]+( serve >> )#\\1<ENGINE>\\2#' > \"$store\" ;;\n  -r) rm -f \"$store\" ;;\n  *) echo \"unsupported: $*\" >&2; exit 2 ;;\nesac\n"
+      },
+      "compare": "exit",
+      "exit_code": 0,
+      "env": {
+        "XPST_CRONTAB_STORE": "PROFILE/crontab.txt",
+        "PATH": "PROFILE/bin:/usr/bin:/bin"
+      },
+      "executable": [
+        "bin/crontab"
+      ]
+    },
+    {
+      "name": "plugins_list_empty",
+      "argv": [
+        "plugins",
+        "list",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "stdout_json": {
+        "plugins": [],
+        "count": 0
+      }
+    },
+    {
+      "name": "plugins_list_seeded",
+      "argv": [
+        "plugins",
+        "list",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/plugins/alpha.py": "class AlphaUploader:\n    pass\n\n\ndef register():\n    return {\n        \"name\": \"alpha\",\n        \"version\": \"1.2.0\",\n        \"description\": \"Uploads to Alpha\",\n        \"uploader\": AlphaUploader,\n        \"config_options\": [\n            {\"name\": \"api_key\", \"description\": \"the key\", \"default\": \"none\"},\n            \"legacy_option\",\n        ],\n    }\n",
+        ".xpst/plugins/beta.py": "class BetaSource:\n    pass\n\n\ndef register():\n    return {\"name\": \"beta\", \"source\": BetaSource}\n",
+        ".xpst/plugins/broken.py": "raise RuntimeError(\"this plugin does not import\")\n",
+        "bin/pyprobe": "#!/bin/sh\ncase \"$3\" in\n  */.xpst/plugins) cat \"$(dirname \"$0\")/plugins.json\" ;;\n  *) echo \"unexpected plugin dir: $3\" >&2; exit 1 ;;\nesac\n",
+        "bin/plugins.json": "[{\"name\": \"alpha\", \"version\": \"1.2.0\", \"description\": \"Uploads to Alpha\", \"has_uploader\": true, \"has_source\": false, \"config_options\": [{\"name\": \"api_key\", \"description\": \"the key\", \"default\": \"none\"}, \"legacy_option\"]}, {\"name\": \"beta\", \"version\": \"unknown\", \"description\": \"\", \"has_uploader\": false, \"has_source\": true, \"config_options\": []}]"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "XPST_PYTHON": "PROFILE/bin/pyprobe"
+      },
+      "config_dir": ".xpst",
+      "executable": [
+        "bin/pyprobe"
+      ],
+      "stdout_json": {
+        "plugins": [
+          {
+            "name": "alpha",
+            "version": "1.2.0",
+            "description": "Uploads to Alpha",
+            "has_uploader": true,
+            "has_source": false
+          },
+          {
+            "name": "beta",
+            "version": "unknown",
+            "description": "",
+            "has_uploader": false,
+            "has_source": true
+          }
+        ],
+        "count": 2
+      }
+    },
+    {
+      "name": "plugins_docs_seeded",
+      "argv": [
+        "plugins",
+        "docs",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/plugins/alpha.py": "class AlphaUploader:\n    pass\n\n\ndef register():\n    return {\n        \"name\": \"alpha\",\n        \"version\": \"1.2.0\",\n        \"description\": \"Uploads to Alpha\",\n        \"uploader\": AlphaUploader,\n        \"config_options\": [\n            {\"name\": \"api_key\", \"description\": \"the key\", \"default\": \"none\"},\n            \"legacy_option\",\n        ],\n    }\n",
+        ".xpst/plugins/beta.py": "class BetaSource:\n    pass\n\n\ndef register():\n    return {\"name\": \"beta\", \"source\": BetaSource}\n",
+        ".xpst/plugins/broken.py": "raise RuntimeError(\"this plugin does not import\")\n",
+        "bin/pyprobe": "#!/bin/sh\ncase \"$3\" in\n  */.xpst/plugins) cat \"$(dirname \"$0\")/plugins.json\" ;;\n  *) echo \"unexpected plugin dir: $3\" >&2; exit 1 ;;\nesac\n",
+        "bin/plugins.json": "[{\"name\": \"alpha\", \"version\": \"1.2.0\", \"description\": \"Uploads to Alpha\", \"has_uploader\": true, \"has_source\": false, \"config_options\": [{\"name\": \"api_key\", \"description\": \"the key\", \"default\": \"none\"}, \"legacy_option\"]}, {\"name\": \"beta\", \"version\": \"unknown\", \"description\": \"\", \"has_uploader\": false, \"has_source\": true, \"config_options\": []}]"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "XPST_PYTHON": "PROFILE/bin/pyprobe"
+      },
+      "config_dir": ".xpst",
+      "mask_lines": [
+        "Auto-generated on "
+      ],
+      "executable": [
+        "bin/pyprobe"
+      ],
+      "stdout_json": {
+        "ok": true,
+        "content": "# xPST Plugin Documentation\n\nAuto-generated on <MASK>\n\n**2 plugin(s) installed**\n\n---\n\n## alpha\n\n- **Version:** 1.2.0\n- **Description:** Uploads to Alpha\n- **Capabilities:** Uploader\n- **Config Options:**\n  - `api_key`: the key (default: `none`)\n  - `legacy_option`\n\n## beta\n\n- **Version:** unknown\n- **Description:** \n- **Capabilities:** Source\n",
+        "plugins": 2
+      }
+    },
+    {
+      "name": "plugins_docs_output",
+      "argv": [
+        "plugins",
+        "docs",
+        "--output",
+        "PROFILE/plugins.md",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/plugins/alpha.py": "class AlphaUploader:\n    pass\n\n\ndef register():\n    return {\n        \"name\": \"alpha\",\n        \"version\": \"1.2.0\",\n        \"description\": \"Uploads to Alpha\",\n        \"uploader\": AlphaUploader,\n        \"config_options\": [\n            {\"name\": \"api_key\", \"description\": \"the key\", \"default\": \"none\"},\n            \"legacy_option\",\n        ],\n    }\n",
+        ".xpst/plugins/beta.py": "class BetaSource:\n    pass\n\n\ndef register():\n    return {\"name\": \"beta\", \"source\": BetaSource}\n",
+        "bin/pyprobe": "#!/bin/sh\ncase \"$3\" in\n  */.xpst/plugins) cat \"$(dirname \"$0\")/plugins.json\" ;;\n  *) echo \"unexpected plugin dir: $3\" >&2; exit 1 ;;\nesac\n",
+        "bin/plugins.json": "[{\"name\": \"alpha\", \"version\": \"1.2.0\", \"description\": \"Uploads to Alpha\", \"has_uploader\": true, \"has_source\": false, \"config_options\": [{\"name\": \"api_key\", \"description\": \"the key\", \"default\": \"none\"}, \"legacy_option\"]}, {\"name\": \"beta\", \"version\": \"unknown\", \"description\": \"\", \"has_uploader\": false, \"has_source\": true, \"config_options\": []}]"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "XPST_PYTHON": "PROFILE/bin/pyprobe"
+      },
+      "config_dir": ".xpst",
+      "mask_lines": [
+        "Auto-generated on "
+      ],
+      "executable": [
+        "bin/pyprobe"
+      ],
+      "files": {
+        "plugins.md": "# xPST Plugin Documentation\n\nAuto-generated on <MASK>\n\n**2 plugin(s) installed**\n\n---\n\n## alpha\n\n- **Version:** 1.2.0\n- **Description:** Uploads to Alpha\n- **Capabilities:** Uploader\n- **Config Options:**\n  - `api_key`: the key (default: `none`)\n  - `legacy_option`\n\n## beta\n\n- **Version:** unknown\n- **Description:** \n- **Capabilities:** Source\n"
+      },
+      "stdout_json": {
+        "ok": true,
+        "output": "<PROFILE>/plugins.md",
+        "plugins": 2
+      }
+    },
+    {
+      "name": "plugins_docs_empty",
+      "argv": [
+        "plugins",
+        "docs",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "stdout_json": {
+        "ok": true,
+        "plugins": 0,
+        "message": "No plugins installed"
+      }
+    },
+    {
+      "name": "analytics_export_json",
+      "argv": [
+        "analytics",
+        "export",
+        "--output",
+        "PROFILE/out.json",
+        "--json"
+      ],
+      "seed": {
+        "state.json": "{\"posted_videos\": {\"vid-1\": {\"posted_to\": {\"tiktok\": {\"id\": \"tt-1\"}, \"threads\": {\"id\": \"th-1\"}}}}}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "HOME": "PROFILE"
+      },
+      "mask_lines": [
+        "  \"exported_at\": "
+      ],
+      "files": {
+        "out.json": "{\n  \"platforms\": {\n    \"tiktok\": {},\n    \"threads\": {}\n  },\n  \"totals\": {\n    \"views\": 0,\n    \"likes\": 0,\n    \"comments\": 0,\n    \"shares\": 0\n  },\n  \"platform_totals\": {\n    \"tiktok\": {\n      \"posts\": 0,\n      \"views\": 0,\n      \"likes\": 0,\n      \"comments\": 0,\n      \"shares\": 0\n    },\n    \"threads\": {\n      \"posts\": 0,\n      \"views\": 0,\n      \"likes\": 0,\n      \"comments\": 0,\n      \"shares\": 0\n    }\n  },\n  \"collection_status\": {\n    \"tiktok\": {\n      \"attempted\": 1,\n      \"failures\": 0,\n      \"not_found\": 0,\n      \"status\": \"ok\",\n      \"reason\": null,\n      \"error\": null,\n      \"source\": \"live\"\n    },\n    \"threads\": {\n      \"attempted\": 1,\n      \"failures\": 0,\n      \"not_found\": 0,\n      \"status\": \"ok\",\n      \"reason\": null,\n      \"error\": null,\n      \"source\": \"live\"\n    }\n  },\n  \"exported_at\": <MASK>\n}",
+        "config.yaml": "version: 4\naccounts:\n  tiktok:\n    username: ''\n    cookies_from_browser: false\n    cookies_file: null\n    client_key: ''\n    client_secret: ''\n    access_token: ''\n    refresh_token: ''\n    sandbox: false\n    draft_mode: auto\n    publish_mode: auto\n    browser_headless: true\n    provider: local\n    aggregator:\n      api_key_ref: zernio_api_key\n      account_id: ''\n      profile_id: ''\n      vendor_schedule: false\n      scoped_key: true\n  youtube:\n    enabled: true\n    client_secrets: ~/.xpst/credentials/youtube_client_secrets.json\n    token_file: ~/.xpst/credentials/youtube_token.json\n  x:\n    enabled: true\n    cookies_file: ~/.xpst/credentials/x_cookies.json\n    auth_mode: cookies\n  instagram:\n    enabled: true\n    session_file: ~/.xpst/credentials/instagram_session.json\n    username: ''\n    auth_mode: graph_api\n    app_id: ''\n  threads:\n    enabled: false\n    graph_access_token: ''\n    threads_user_id: ''\n    app_id: ''\n  bluesky:\n    enabled: false\n    identifier: ''\n    service: https://bsky.social\n  messenger:\n    enabled: false\n    page_id: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    verify_token: ''\n    webhook_path: /webhook/messenger\n    auto_reply: false\n    reply_rules: {}\n    comment_reply_enabled: false\n    comment_platforms:\n    - instagram\n    - facebook\n  facebook:\n    enabled: false\n    page_id: ''\n    page_name: ''\n    page_access_token: ''\n    app_id: ''\n    app_secret: ''\n    graph_user_token: ''\n    login_config_id: ''\n  rumble:\n    enabled: false\n    api_key: ''\n    api_url: https://rumble.com/-/api/v1/media\n    manual_handoff_dir: ~/.xpst/rumble-handoff\n    upload_page_url: https://rumble.com/upload.php\n  local:\n    path: ''\nvideo:\n  download_dir: ~/.xpst/downloads\n  cleanup_after_post: false\n  encoding:\n    youtube:\n      passthrough: false\n      resolution: 1920\n      bitrate: 8M\n      maxrate: 10M\n      bufsize: 12M\n      profile: high\n      gop: 15\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    instagram:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      profile: high\n      level: '4.0'\n      gop: 72\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    x:\n      resolution: 1920\n      bitrate: 10M\n      maxrate: 12M\n      profile: high\n      level: '4.0'\n      gop: 90\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\n    tiktok:\n      resolution: 1920\n      crf: 20\n      maxrate: 10M\n      bufsize: 20M\n      profile: high\n      level: '4.0'\n      fps: 60\n      color: bt709\n      pix_fmt: yuv420p\nreliability:\n  max_retries: 3\n  retry_backoff: 2\n  circuit_breaker_threshold: 5\n  circuit_breaker_reset: 3600\nmonitoring:\n  log_level: INFO\n  log_file: ~/.xpst/logs/xpst.log\n  log_rotation: 10 MB\n  healthcheck_port: 8080\n  enable_metrics: true\n  dashboard_username: ''\n  dashboard_password_hash: ''\n  health_check_interval: 300\nnotifications:\n  enabled: false\n  on_success: true\n  on_failure: true\n  discord:\n    webhook_url: ''\n  telegram:\n    bot_token: ''\n    chat_id: ''\nrate_limits:\n  youtube: 5\n  instagram: 5\n  x: 5\n  tiktok: 5\n  threads: 5\n  facebook: 5\nbio:\n  handle: ''\n  links: []\nchat:\n  twitch_channels: []\n  kick_channels: []\n  youtube_video_id: ''\n  max_messages: 500\n  youtube_poll_interval_s: 2.0\nanti_bot:\n  caption_variation: false\nschedule:\n  check_interval: 900\n  catchup_window: 172800\n  catchup_times_per_day: 3\n  analytics_snapshot_enabled: false\n  analytics_snapshot_interval: 3600\n  posting_paused: false\nshortcuts:\n  dashboard: Ctrl+1\n  content: Ctrl+2\n  analytics: Ctrl+3\n  connect: Ctrl+4\n  schedule: Ctrl+5\n  refresh: Ctrl+R\n  quit: Ctrl+Q\n"
+      },
+      "stdout_json": {
+        "ok": true,
+        "format": "json",
+        "output": "<PROFILE>/out.json",
+        "totals": {
+          "views": 0,
+          "likes": 0,
+          "comments": 0,
+          "shares": 0
+        }
+      }
+    },
+    {
+      "name": "analytics_export_csv",
+      "argv": [
+        "analytics",
+        "export",
+        "--format",
+        "csv",
+        "--output",
+        "PROFILE/out.csv",
+        "--json"
+      ],
+      "seed": {
+        "state.json": "{\"posted_videos\": {\"vid-1\": {\"posted_to\": {\"tiktok\": {\"id\": \"tt-1\"}}}}}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "HOME": "PROFILE"
+      },
+      "files": {
+        "out.csv": "\ufeffplatform,post_id,caption,views,likes,comments,shares,saves,timestamp\r\n"
+      },
+      "stdout_json": {
+        "ok": true,
+        "format": "csv",
+        "output": "<PROFILE>/out.csv",
+        "totals": {
+          "views": 0,
+          "likes": 0,
+          "comments": 0,
+          "shares": 0
+        }
+      }
+    },
+    {
+      "name": "analytics_export_platforms",
+      "argv": [
+        "analytics",
+        "export",
+        "--platforms",
+        "tiktok",
+        "--output",
+        "PROFILE/out.json",
+        "--json"
+      ],
+      "seed": {
+        "state.json": "{\"posted_videos\": {\"vid-1\": {\"posted_to\": {\"tiktok\": {\"id\": \"tt-1\"}, \"threads\": {\"id\": \"th-1\"}}}}}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "HOME": "PROFILE"
+      },
+      "mask_lines": [
+        "  \"exported_at\": "
+      ],
+      "files": {
+        "out.json": "{\n  \"platforms\": {\n    \"tiktok\": {}\n  },\n  \"totals\": {\n    \"views\": 0,\n    \"likes\": 0,\n    \"comments\": 0,\n    \"shares\": 0\n  },\n  \"platform_totals\": {\n    \"tiktok\": {\n      \"posts\": 0,\n      \"views\": 0,\n      \"likes\": 0,\n      \"comments\": 0,\n      \"shares\": 0\n    }\n  },\n  \"collection_status\": {\n    \"tiktok\": {\n      \"attempted\": 1,\n      \"failures\": 0,\n      \"not_found\": 0,\n      \"status\": \"ok\",\n      \"reason\": null,\n      \"error\": null,\n      \"source\": \"live\"\n    }\n  },\n  \"exported_at\": <MASK>\n}"
+      },
+      "stdout_json": {
+        "ok": true,
+        "format": "json",
+        "output": "<PROFILE>/out.json",
+        "totals": {
+          "views": 0,
+          "likes": 0,
+          "comments": 0,
+          "shares": 0
+        }
+      }
+    },
+    {
+      "name": "analytics_export_legacy_ids",
+      "argv": [
+        "analytics",
+        "export",
+        "--output",
+        "PROFILE/out.json",
+        "--json"
+      ],
+      "seed": {
+        "state.json": "{\"posted_videos\": {\"vid-1\": {\"posted_to\": {\"x\": {\"post_id\": \"legacy-1\"}, \"messenger\": {\"id\": \"m-1\"}, \"youtube\": {\"id\": \"\"}}}}}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "HOME": "PROFILE"
+      },
+      "mask_lines": [
+        "  \"exported_at\": "
+      ],
+      "files": {
+        "out.json": "{\n  \"platforms\": {\n    \"x\": {},\n    \"messenger\": {}\n  },\n  \"totals\": {\n    \"views\": 0,\n    \"likes\": 0,\n    \"comments\": 0,\n    \"shares\": 0\n  },\n  \"platform_totals\": {\n    \"x\": {\n      \"posts\": 0,\n      \"views\": 0,\n      \"likes\": 0,\n      \"comments\": 0,\n      \"shares\": 0\n    },\n    \"messenger\": {\n      \"posts\": 0,\n      \"views\": 0,\n      \"likes\": 0,\n      \"comments\": 0,\n      \"shares\": 0\n    }\n  },\n  \"collection_status\": {\n    \"x\": {\n      \"attempted\": 1,\n      \"failures\": 0,\n      \"not_found\": 0,\n      \"status\": \"ok\",\n      \"reason\": null,\n      \"error\": null,\n      \"source\": \"live\"\n    },\n    \"messenger\": {\n      \"attempted\": 1,\n      \"failures\": 0,\n      \"not_found\": 0,\n      \"status\": \"ok\",\n      \"reason\": null,\n      \"error\": null,\n      \"source\": \"live\"\n    }\n  },\n  \"exported_at\": <MASK>\n}"
+      },
+      "stdout_json": {
+        "ok": true,
+        "format": "json",
+        "output": "<PROFILE>/out.json",
+        "totals": {
+          "views": 0,
+          "likes": 0,
+          "comments": 0,
+          "shares": 0
+        }
+      }
+    },
+    {
+      "name": "analytics_export_no_posts",
+      "argv": [
+        "analytics",
+        "export",
+        "--output",
+        "PROFILE/out.json",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "json",
+      "exit_code": 0,
+      "env": {
+        "HOME": "PROFILE"
+      },
+      "stdout_json": {
+        "ok": false,
+        "error": "No posts found in state"
+      }
+    },
+    {
+      "name": "analytics_export_text",
+      "argv": [
+        "analytics",
+        "export",
+        "--output",
+        "PROFILE/out.json"
+      ],
+      "seed": {
+        "state.json": "{\"posted_videos\": {\"vid-1\": {\"posted_to\": {\"tiktok\": {\"id\": \"tt-1\"}}}}}"
+      },
+      "compare": "exit",
+      "exit_code": 0,
+      "env": {
+        "HOME": "PROFILE"
+      }
     }
   ]
 }
