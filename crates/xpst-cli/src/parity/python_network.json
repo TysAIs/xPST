@@ -140,8 +140,8 @@
     },
     {
       "path": "disconnect",
-      "network": "yes",
-      "evidence": "revokes credentials with the platform where supported"
+      "network": "none",
+      "evidence": "connect.py:2227 disconnect_platform() deletes the stored credentials and flips accounts.<platform>.enabled; no network call exists (there is no platform revoke)"
     },
     {
       "path": "doctor",
@@ -480,8 +480,8 @@
     },
     {
       "path": "transcript",
-      "network": "possible",
-      "evidence": "serves a stored transcript; fetches one when it is missing"
+      "network": "none",
+      "evidence": "cli.py:7929 does three local lookups through Workspace.get_transcript() (workspace.py:108, create=False) and exits 1 on a miss; no network call exists"
     },
     {
       "path": "ui",

@@ -205,9 +205,17 @@ fn network_classifications_are_complete_and_evidenced() {
             entry.path
         );
     }
-    // The three commands this slice implements are all local and must be
-    // classified as such: a network claim there would be wrong.
-    for path in ["status", "schedule list", "failures list"] {
+    // Commands whose Python path is purely local must be classified as such: a
+    // network claim there would be wrong. `disconnect` only deletes stored
+    // credentials (`connect.py:2227`) and `transcript` only reads the cache
+    // (`cli.py:7929`), so both were corrected from `yes`/`possible` to `none`.
+    for path in [
+        "status",
+        "schedule list",
+        "failures list",
+        "disconnect",
+        "transcript",
+    ] {
         assert_eq!(
             parity::network_for(path).map(|entry| entry.network.as_str()),
             Some("none"),
