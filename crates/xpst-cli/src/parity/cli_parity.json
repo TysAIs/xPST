@@ -2,7 +2,7 @@
  "schema_version": 1,
  "captured_from": {
   "repo": "TysAIs/xPST",
-  "git_ref": "9dc0561",
+  "git_ref": "e6c0057",
   "source": "src/xpst/cli.py",
   "framework": "click",
   "captured_by": "xtask/scripts/capture_python_cli.py"
@@ -2257,6 +2257,8 @@
      "metavar": null,
      "type": "integer range",
      "choices": null,
+     "min": 1,
+     "max": 10,
      "default": 5,
      "help": "Number of ideas (1-10)"
     },
@@ -3902,6 +3904,8 @@
      "metavar": null,
      "type": "integer range",
      "choices": null,
+     "min": 1,
+     "max": 10,
      "default": 3,
      "help": "Bounded retry attempts per platform"
     },

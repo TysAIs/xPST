@@ -159,19 +159,24 @@ fn the_binary_serves_the_registry_over_stdio() {
     let text = blocked["result"]["content"][0]["text"]
         .as_str()
         .expect("text content");
-    assert!(text.contains("consent_denied"), "{text}");
+    // The body is the Python sentence, not a JSON envelope: an agent that
+    // already handles the shipped server's refusal handles this one unchanged.
+    assert!(
+        text.contains("xpst_post posts to or mutates REAL accounts."),
+        "{text}"
+    );
     assert!(text.contains("XPST_MCP_ALLOW_MUTATIONS=1"), "{text}");
 
     let stubbed = server.request(
         5,
         "tools/call",
-        json!({"name": "xpst_analytics", "arguments": {}}),
+        json!({"name": "xpst_health", "arguments": {}}),
     );
     assert_eq!(stubbed["result"]["isError"], json!(true));
     let text = stubbed["result"]["content"][0]["text"]
         .as_str()
         .expect("text content");
-    assert!(text.contains("not_implemented"), "{text}");
+    assert!(text.contains("is not implemented yet"), "{text}");
 }
 
 #[test]

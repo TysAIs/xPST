@@ -17,7 +17,6 @@
 //! when the microsecond field is non-zero.
 
 use jiff::civil::DateTime as CivilDateTime;
-use jiff::tz::{Offset, TimeZone};
 use jiff::Timestamp;
 
 /// `YYYY-MM-DDTHH:MM:SS` — the fixed-width part every stored stamp shares.
@@ -86,15 +85,6 @@ pub(super) fn parse_instant(text: &str) -> Option<Timestamp> {
     text.parse::<Timestamp>().ok()
 }
 
-/// The instant's offset from the stamp itself, for rendering in the offset the
-/// caller stored rather than the machine's.
-pub(super) fn original_offset(text: &str) -> Option<Offset> {
-    let pieces = jiff::fmt::temporal::DateTimeParser::new()
-        .parse_pieces(text)
-        .ok()?;
-    Some(pieces.to_numeric_offset().unwrap_or(Offset::UTC))
-}
-
 /// A zoned value as `YYYY-MM-DDTHH:MM:SS[.ffffff]±HH:MM`.
 pub(super) fn render(value: &jiff::ZonedDateTime) -> String {
     // A nanosecond-only instant is 0 µs, and `isoformat()` drops the fraction
@@ -104,14 +94,6 @@ pub(super) fn render(value: &jiff::ZonedDateTime) -> String {
     } else {
         value.strftime("%Y-%m-%dT%H:%M:%S%.6f%:z").to_string()
     }
-}
-
-/// Render an aware stamp in its *own* offset as `YYYY-MM-DD HH:MM:SS`.
-pub(super) fn render_in_original_offset(text: &str) -> Option<String> {
-    let instant = text.parse::<Timestamp>().ok()?;
-    let offset = original_offset(text)?;
-    let zoned = instant.to_zoned_datetime(TimeZone::fixed(offset));
-    Some(zoned.strftime("%Y-%m-%d %H:%M:%S").to_string())
 }
 
 #[cfg(test)]
@@ -148,21 +130,5 @@ mod tests {
         assert!(parse_instant("2026-11-20T09:00Z").is_none());
         assert!(parse_instant("2026-11-20T09:00:00Zx").is_none());
         assert!(parse_instant("2026-11-20").is_none());
-    }
-
-    #[test]
-    fn rendering_keeps_the_offset_the_instant_arrived_with() {
-        assert_eq!(
-            render_in_original_offset("2026-11-20T04:00:00-05:00").as_deref(),
-            Some("2026-11-20 04:00:00")
-        );
-        assert_eq!(
-            render_in_original_offset("2026-11-20T09:00:00Z").as_deref(),
-            Some("2026-11-20 09:00:00")
-        );
-        assert_eq!(
-            render_in_original_offset("2026-11-20T09:00:00.123456+00:00").as_deref(),
-            Some("2026-11-20 09:00:00")
-        );
     }
 }

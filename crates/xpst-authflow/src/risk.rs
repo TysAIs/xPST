@@ -84,7 +84,7 @@ pub const UNOFFICIAL_AUTH_PATHS: &[UnofficialAuthPath] = &[
         switch_command: "xpst connect instagram",
         docs_url: "docs/setup-instagram.md",
         consequence: "Instagram's terms forbid automated access outside the official API, and \
-                      enforcement is account action-blocks, challenges and suspension - not a \
+                      enforcement is account action-blocks, challenges and suspension — not a \
                       polite error.",
     },
     UnofficialAuthPath {
@@ -440,9 +440,17 @@ pub fn record_acknowledgement(
         version: ACK_FILE_VERSION,
         acknowledgements: stored,
     };
-    let bytes =
-        serde_json::to_vec_pretty(&file).map_err(|error| RiskError::Encode(error.to_string()))?;
-    let mut bytes = bytes;
+    // Python writes this file with `json.dumps(payload, indent=2, sort_keys=True)`,
+    // so every object is alphabetical at every level. Serialising the structs
+    // directly renders declaration order instead — the same document with a
+    // different key order, which a structural comparison cannot see and `cmp`
+    // reports as a byte difference. Sort through `Value` so the two engines
+    // write the same bytes.
+    let mut document =
+        serde_json::to_value(&file).map_err(|error| RiskError::Encode(error.to_string()))?;
+    xpst_core::json::sort_keys_recursive(&mut document);
+    let mut bytes = serde_json::to_vec_pretty(&document)
+        .map_err(|error| RiskError::Encode(error.to_string()))?;
     bytes.push(b'\n');
     write_private_atomic(&dir.join(ACK_FILE_NAME), &bytes).map_err(|source| RiskError::Io {
         path: dir.join(ACK_FILE_NAME),

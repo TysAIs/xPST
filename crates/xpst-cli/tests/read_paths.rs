@@ -206,52 +206,105 @@ fn config_validate_flags_an_unrecognised_document() {
 }
 
 #[test]
-fn doctor_reads_live_state_and_reports_an_absent_schedule_as_healthy() {
+fn doctor_reports_the_live_shape_and_surfaces_a_failing_source() {
     let fixture = Fixture::new("doctor-ok");
     fixture.write("config.yaml", CONFIG_YAML);
+    // A source whose every fetch fails used to be invisible here while the
+    // daemon reported "cycle complete"; it must surface as a warning.
     fixture.write(
         "state.json",
-        r#"{"version": 2, "posted_videos": {"a": {"posted_to": {"x": {"id": "1", "deleted": false}}}}, "content_hashes": {"h": "a"}}"#,
+        r#"{"version": 2, "posted_videos": {}, "health": {"sources": {"tiktok": {"last_error": "boom", "consecutive_failures": 3, "last_error_at": "2026-01-01T00:00:00"}}}}"#,
     );
-    // No schedule.json: the paused install looks exactly like this.
 
     let (code, out, err) = run(&["doctor"], false);
     assert_eq!(code, 0, "stderr: {err}\nstdout: {out}");
     let payload: serde_json::Value = serde_json::from_str(out.trim()).expect("valid JSON");
-    assert_eq!(payload["ok"], true);
-    assert_eq!(payload["engine"]["name"], "rust");
-    assert_eq!(payload["engine"]["live_checks"], false);
-    assert_eq!(payload["state"]["version"], 2);
-    assert_eq!(payload["state"]["videos"], 1);
-    assert_eq!(payload["schedule"]["present"], false);
-    assert_eq!(payload["schedule"]["entries"], 0);
+    assert_eq!(payload["doctor"], true);
+    // Nine providers are reported (every one except the local file source);
+    // the canonical mapping carries all ten.
+    assert_eq!(
+        payload["platforms"].as_object().expect("platforms").len(),
+        9
+    );
+    assert_eq!(
+        payload["canonical"]["providers"]
+            .as_object()
+            .expect("providers")
+            .len(),
+        10
+    );
+    assert_eq!(
+        payload["canonical"]["roles"],
+        serde_json::json!(["source", "video_destination", "messaging", "analytics"])
+    );
+    assert_eq!(
+        payload["environment"]
+            .as_array()
+            .expect("environment")
+            .len(),
+        5
+    );
+    assert_eq!(payload["rate_limit_cooldowns"]["state"], "idle");
+    // A fresh profile has no credentials, so the report is not clear.
+    assert_eq!(payload["all_clear"], false);
+    let issues = payload["issues"].as_array().expect("issues");
+    let source = issues
+        .iter()
+        .find(|issue| issue["platform"] == "tiktok" && issue["severity"] == "warning")
+        .expect("the failing source is reported as a warning");
+    assert!(source["problem"]
+        .as_str()
+        .unwrap_or("")
+        .contains("Source pipeline 'tiktok' is failing: boom"));
 }
 
 #[test]
-fn doctor_fails_on_an_unreadable_config() {
-    let _fixture = Fixture::new("doctor-missing");
-
-    let (code, out, _err) = run(&["doctor"], false);
-    assert_eq!(code, 2);
+fn doctor_materializes_a_missing_config_and_reports() {
+    // Python's `load_config` writes the first-run default rather than failing,
+    // so a fresh profile is a report, not an error.
+    let fixture = Fixture::new("doctor-missing");
+    let (code, out, err) = run(&["doctor"], false);
+    assert_eq!(code, 0, "stderr: {err}\nstdout: {out}");
     let payload: serde_json::Value = serde_json::from_str(out.trim()).expect("valid JSON");
-    assert_eq!(payload["ok"], false);
-    assert_eq!(payload["config"]["readable"], false);
+    assert_eq!(payload["doctor"], true);
+    assert!(
+        fixture.profile.join("config.yaml").exists(),
+        "doctor must materialize the first-run config"
+    );
 }
 
 #[test]
-fn doctor_refuses_a_future_state_schema() {
+fn doctor_exits_2_on_an_unparseable_config() {
+    let fixture = Fixture::new("doctor-bad-config");
+    fixture.write("config.yaml", "{not yaml: [");
+
+    let (code, _out, _err) = run(&["doctor"], false);
+    assert_eq!(code, 2);
+}
+
+#[test]
+fn doctor_tolerates_a_future_state_schema() {
+    // Python's `StateManager` raises on a future schema and doctor catches it,
+    // so the report still answers (with no source-health rows).
     let fixture = Fixture::new("doctor-future-state");
     fixture.write("config.yaml", CONFIG_YAML);
     fixture.write("state.json", r#"{"version": 99, "posted_videos": {}}"#);
 
-    let (code, out, _err) = run(&["doctor"], false);
-    assert_eq!(code, 2);
+    let (code, out, err) = run(&["doctor"], false);
+    assert_eq!(code, 0, "stderr: {err}\nstdout: {out}");
     let payload: serde_json::Value = serde_json::from_str(out.trim()).expect("valid JSON");
-    assert_eq!(payload["ok"], false);
-    assert!(payload["state"]["error"]
-        .as_str()
-        .unwrap_or("")
-        .contains("Unsupported state schema version 99"));
+    assert_eq!(payload["doctor"], true);
+    assert!(
+        payload["issues"]
+            .as_array()
+            .expect("issues")
+            .iter()
+            .all(|issue| !issue["problem"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Source pipeline")),
+        "a state document doctor cannot read must not invent source failures"
+    );
 }
 
 #[test]
@@ -436,37 +489,81 @@ fn config_validate_honours_file() {
 }
 
 #[test]
-fn config_leaves_that_document_file_either_honour_it_or_refuse() {
+fn config_write_leaves_honour_file_instead_of_the_profile() {
     // Every `config` leaf whose Click definition has `--file`. `show` and
-    // `validate` read it (tests above); the rest are still P0 stubs, and the
-    // one thing they must not do is accept the flag and act on another file —
-    // they refuse with the documented NOT_IMPLEMENTED payload.
+    // `validate` read it (tests above); `set`, `export` and `fix` now write
+    // through it, and the one thing they must never do is accept the flag and
+    // act on the profile instead — that is how `config show --file other.yaml`
+    // once printed somebody else's config with exit 0.
     let fixture = Fixture::new("config-file-leaves");
-    let other = fixture.write_external("other.yaml", "version: 4\nzzz_only_here: hello\n");
+    // `config fix` creates `$HOME/.xpst/credentials`; point HOME at the fixture
+    // so the test cannot touch the developer's real profile.
+    let saved_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", &fixture.dir);
 
-    let leaves: [&[&str]; 3] = [
-        &["config", "set", "a.b", "1"],
-        &["config", "export", "out.yaml"],
-        &["config", "fix"],
-    ];
-    for leaf in leaves {
-        let mut args: Vec<&str> = leaf.to_vec();
-        args.push("--file");
-        args.push(&other);
-        let (code, out, err) = run(&args, false);
-        assert_eq!(
-            code,
-            1,
-            "`{}` must exit 1 (not implemented), not act on a file: {out} {err}",
-            leaf.join(" ")
-        );
-        let payload: serde_json::Value = serde_json::from_str(out.trim()).expect("valid JSON");
-        assert_eq!(
-            payload["error"]["code"],
-            "NOT_IMPLEMENTED",
-            "`{}` must say it is unimplemented: {out}",
-            leaf.join(" ")
-        );
+    let other = fixture.write_external("other.yaml", "version: 4\nzzz_only_here: hello\n");
+    fixture.write("config.yaml", "version: 4\nprofile_only: yes\n");
+
+    // `config set --file` writes the named file and leaves the profile alone.
+    // `1` parses as a bool in both engines (`_parse_value`), so use a value
+    // that stays an integer.
+    let (code, out, err) = run(&["config", "set", "a.b", "2", "--file", &other], false);
+    assert_eq!(code, 0, "config set --file failed: {out} {err}");
+    let written = std::fs::read_to_string(&other).expect("named file is readable");
+    assert!(
+        written.contains("zzz_only_here: hello"),
+        "config set --file must edit the named file, got:\n{written}"
+    );
+    assert!(
+        written.contains("a:\n  b: 2"),
+        "config set --file must write the dotted key, got:\n{written}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.profile.join("config.yaml")).unwrap(),
+        "version: 4\nprofile_only: yes\n",
+        "config set --file must not touch the profile"
+    );
+
+    // `config export --file` exports the named file's content.
+    let exported = fixture.dir.join("exported.yaml");
+    let (code, out, err) = run(
+        &[
+            "config",
+            "export",
+            exported.to_str().unwrap(),
+            "--file",
+            &other,
+        ],
+        false,
+    );
+    assert_eq!(code, 0, "config export --file failed: {out} {err}");
+    let text = std::fs::read_to_string(&exported).expect("export wrote a file");
+    assert!(
+        text.contains("zzz_only_here: hello"),
+        "config export --file must export the named file, got:\n{text}"
+    );
+
+    // `config fix --file` repairs the named file, not the profile.
+    let stale = fixture.write_external(
+        "stale.yaml",
+        "version: 4\nvideo:\n  download_dir: ~/.crosspstr/downloads\n",
+    );
+    let (code, out, err) = run(&["config", "fix", "--file", &stale], false);
+    assert_eq!(code, 0, "config fix --file failed: {out} {err}");
+    let fixed = std::fs::read_to_string(&stale).expect("named file is readable");
+    assert!(
+        fixed.contains("~/.xpst/downloads") && !fixed.contains(".crosspstr"),
+        "config fix --file must repair the named file, got:\n{fixed}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.profile.join("config.yaml")).unwrap(),
+        "version: 4\nprofile_only: yes\n",
+        "config fix --file must not touch the profile"
+    );
+
+    match saved_home {
+        Some(home) => std::env::set_var("HOME", home),
+        None => std::env::remove_var("HOME"),
     }
 
     // The manifest is the authority for "documents --file": if a fourth leaf
@@ -513,4 +610,45 @@ fn config_validate_file_missing_path_fails_the_load_check() {
         loaded["detail"].as_str().unwrap_or("").contains(&missing),
         "the failed check must name the missing file: {loaded}"
     );
+}
+
+/// `schedule remove` must write a `schedule.json` that both engines can read.
+///
+/// A caption may legally contain a control character (escaped in the JSON
+/// source). Python's `py_encode_basestring` escapes `[\x00-\x1f]` even with
+/// `ensure_ascii=False`; emitting the byte raw produced a file the Rust reader
+/// refused and the Python reader quarantined, so one `schedule remove` made the
+/// pending queue disappear from both engines.
+#[test]
+fn schedule_remove_escapes_control_characters_in_the_written_file() {
+    let fixture = Fixture::new("schedule-control-char");
+    fixture.write("config.yaml", "version: 4\n");
+    fixture.write(
+        "schedule.json",
+        r#"[{"id": "id-1", "caption": "a\u0001b", "scheduled_time": "2026-01-01T00:00:00+00:00", "status": "pending"}, {"id": "id-2", "caption": "b", "scheduled_time": "2026-02-01T00:00:00+00:00", "status": "pending"}]"#,
+    );
+
+    let (code, out, err) = run(&["schedule", "remove", "id-2", "--json"], false);
+    assert_eq!(code, 0, "stdout: {out} stderr: {err}");
+
+    let written = std::fs::read_to_string(fixture.profile.join("schedule.json"))
+        .expect("schedule.json must still exist");
+    assert!(
+        written.contains(r#""caption": "a\u0001b""#),
+        "the control character must be escaped, got: {written}"
+    );
+    let parsed: serde_json::Value =
+        serde_json::from_str(&written).expect("the written file must be valid JSON");
+    assert_eq!(parsed[0]["caption"], "a\u{1}b");
+
+    // The engine must be able to read back what it wrote: a raw 0x01 made the
+    // reader report "starting with an empty schedule".
+    let (code, out, err) = run(&["schedule", "list", "--json"], false);
+    assert_eq!(code, 0, "stderr: {err}");
+    assert!(
+        !err.contains("could not be read"),
+        "the engine refused its own file: {err}"
+    );
+    let listed: serde_json::Value = serde_json::from_str(out.trim()).expect("valid JSON");
+    assert_eq!(listed[0]["id"], "id-1");
 }

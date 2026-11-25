@@ -10,7 +10,7 @@ use std::io::Write;
 use clap::ArgMatches;
 use serde_json::json;
 
-use crate::output::{write_json, write_text};
+use crate::output::{write_python_json_value, write_text};
 use crate::{exit, flag, GlobalOptions};
 
 /// Version of this build. `XPST_GIT_COMMIT` is injected by CI/release; "unknown"
@@ -37,7 +37,7 @@ pub fn run<W: Write, E: Write>(
             "python_required": false,
             "live_checks": false,
         });
-        let _ = write_json(out, &payload);
+        let _ = write_python_json_value(out, &payload);
     } else {
         let text = format!(
             "xPST, version {}\n\

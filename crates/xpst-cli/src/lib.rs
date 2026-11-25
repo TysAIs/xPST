@@ -20,13 +20,18 @@
 //! `docs/DIRECTION.md` D-3/D-4 for why the rebuild exists.
 
 pub mod cli;
+pub mod clickargs;
 pub mod commands;
 pub mod exit;
+pub mod fsutil;
 pub mod implemented;
 pub mod ledger;
 pub mod output;
 pub mod parity;
 pub mod paths;
+pub mod pythonnum;
+pub mod rich;
+pub mod zipwrite;
 
 use std::ffi::OsString;
 use std::io::{IsTerminal, Write};
@@ -106,6 +111,12 @@ pub fn run_with_io<W: Write, E: Write>(
 
     let global = GlobalOptions::from_matches(&matches, stdout_is_tty);
     let leaf = leaf_matches(&matches, &path);
+    // Click converts `IntParamType`/`FloatParamType`/`IntRange` options before
+    // the command body runs, so a value that does not convert is a usage error
+    // (exit 2, empty stdout) — not a silent fallback to the default.
+    if let Some(code) = clickargs::validate_numeric_options(&path, leaf, err) {
+        return code;
+    }
     dispatch(&path, &global, leaf, out, err)
 }
 
@@ -117,21 +128,43 @@ fn dispatch<W: Write, E: Write>(
     err: &mut E,
 ) -> i32 {
     let key = path.join(" ");
+    // A bare `xpst mcp` starts the server: the shipped Click group is
+    // `invoke_without_command=True`, so `python -m xpst mcp` is the documented
+    // stdio entry point and the Rust engine has to answer the same way.
+    if key == "mcp" {
+        if let Some(command) = implemented::lookup("mcp start") {
+            return (command.handler)(global, leaf, out, err);
+        }
+    }
     if let Some(command) = implemented::lookup(&key) {
         let mut out_ref: &mut dyn Write = out;
         let mut err_ref: &mut dyn Write = err;
         return (command.handler)(global, leaf, &mut out_ref, &mut err_ref);
     }
+    // `auth` is one leaf command whose default invocation is the network probe,
+    // so its ledger row stays `stub` while two of its branches are local
+    // (`api-token`, an unknown platform). The partial handler answers those and
+    // returns `None` for the rest, which then falls through to the ordinary
+    // `NOT_IMPLEMENTED` document.
+    if key == "auth" {
+        let mut out_ref: &mut dyn Write = out;
+        let mut err_ref: &mut dyn Write = err;
+        if let Some(code) =
+            commands::auth::dispatch_partial(global, leaf, &mut out_ref, &mut err_ref)
+        {
+            return code;
+        }
+    }
     not_implemented(&key, global, leaf, out, err)
 }
 
 /// The documented P0 answer for a command whose behavior has not moved yet.
-fn not_implemented<W: Write, E: Write>(
+pub(crate) fn not_implemented(
     command: &str,
     global: &GlobalOptions,
     leaf: Option<&ArgMatches>,
-    out: &mut W,
-    err: &mut E,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
 ) -> i32 {
     let json = global.json || leaf.is_some_and(|m| flag(m, "opt:json"));
     let message = "not implemented in the Rust engine yet";
@@ -146,7 +179,11 @@ fn not_implemented<W: Write, E: Write>(
                 "phase": "P0",
             }
         });
-        let _ = writeln!(out, "{payload}");
+        // Same renderer as every implemented command: Python's `json.dumps`
+        // separators and insertion order. There is no Python payload to match
+        // here (the shipped engine implements the command), but one renderer
+        // means a stub cannot teach the next command the compact form.
+        let _ = crate::output::write_python_json_value(out, &payload);
     } else {
         let _ = writeln!(err, "xpst {command}: {message}");
         let _ = writeln!(
@@ -246,4 +283,14 @@ pub fn string_value(matches: &ArgMatches, id: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// [`string_value`] for a handler that receives the leaf as an `Option`.
+pub fn leaf_string(leaf: Option<&ArgMatches>, id: &str) -> Option<String> {
+    leaf.and_then(|matches| string_value(matches, id))
+}
+
+/// [`flag`] for a handler that receives the leaf as an `Option`.
+pub fn leaf_flag(leaf: Option<&ArgMatches>, id: &str) -> bool {
+    leaf.is_some_and(|matches| flag(matches, id))
 }

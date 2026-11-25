@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "captured_from": "src/xpst/byo.py::BYO_PLATFORMS",
+  "meta_redirect_uri": "http://localhost:8888/callback",
+  "order": [
+    "instagram",
+    "threads",
+    "messenger",
+    "facebook",
+    "tiktok"
+  ],
+  "platforms": {
+    "instagram": {
+      "platform": "instagram",
+      "display_name": "Instagram Reels",
+      "id_label": "Meta App ID",
+      "secret_label": "Meta App Secret",
+      "store_id_key": "byo_meta_app_id",
+      "store_secret_key": "byo_meta_app_secret",
+      "redirect_uri": "http://localhost:8888/callback",
+      "scopes": [
+        "instagram_basic",
+        "instagram_content_publish",
+        "pages_show_list",
+        "pages_read_engagement"
+      ],
+      "create_url": "https://developers.facebook.com/apps",
+      "docs_url": "https://developers.facebook.com/docs/graph-api/get-started/getting-access-tokens/about-user-access-tokens#standard-access",
+      "enables": "Publishing Reels to your own account through the official Instagram Platform API. As the app owner you stay in Meta's Standard Access: no App Review and no Business Verification.",
+      "config_id_field": "app_id",
+      "config_secret_field": "app_secret",
+      "shared_meta": true,
+      "configurable": true,
+      "env_id_var": "XPST_INSTAGRAM_APP_ID",
+      "env_secret_var": "XPST_INSTAGRAM_APP_SECRET",
+      "env_fields": {}
+    },
+    "threads": {
+      "platform": "threads",
+      "display_name": "Threads",
+      "id_label": "Meta App ID",
+      "secret_label": "Meta App Secret",
+      "store_id_key": "byo_meta_app_id",
+      "store_secret_key": "byo_meta_app_secret",
+      "redirect_uri": "http://localhost:8888/callback",
+      "scopes": [
+        "threads_basic",
+        "threads_content_publish"
+      ],
+      "create_url": "https://developers.facebook.com/apps",
+      "docs_url": "https://developers.facebook.com/docs/threads/get-started/getting-started#auth",
+      "enables": "Publishing posts to your own Threads account through the official Threads API. Same Meta app as Instagram; owner use is Standard Access: no App Review, no Business Verification.",
+      "config_id_field": "app_id",
+      "config_secret_field": "app_secret",
+      "shared_meta": true,
+      "configurable": true,
+      "env_id_var": "XPST_THREADS_APP_ID",
+      "env_secret_var": "XPST_THREADS_APP_SECRET",
+      "env_fields": {}
+    },
+    "messenger": {
+      "platform": "messenger",
+      "display_name": "Messenger",
+      "id_label": "Meta App ID",
+      "secret_label": "Meta App Secret",
+      "store_id_key": "messenger_app_id",
+      "store_secret_key": "messenger_app_secret",
+      "redirect_uri": "",
+      "scopes": [],
+      "create_url": "https://developers.facebook.com/apps",
+      "docs_url": "https://developers.facebook.com/docs/messenger-platform/get-started",
+      "enables": "Messenger auto-reply and DM features on your Page. Messenger keeps its own connect flow; this status line shows the same Meta app.",
+      "config_id_field": "",
+      "config_secret_field": "",
+      "shared_meta": false,
+      "configurable": false,
+      "env_id_var": "XPST_MESSENGER_APP_ID",
+      "env_secret_var": "XPST_MESSENGER_APP_SECRET",
+      "env_fields": {}
+    },
+    "facebook": {
+      "platform": "facebook",
+      "display_name": "Facebook Page",
+      "id_label": "Meta App ID",
+      "secret_label": "Meta App Secret",
+      "store_id_key": "facebook_app_id",
+      "store_secret_key": "facebook_app_secret",
+      "redirect_uri": "https://localhost/",
+      "scopes": [
+        "pages_show_list",
+        "pages_read_engagement",
+        "pages_manage_posts"
+      ],
+      "create_url": "https://developers.facebook.com/apps",
+      "docs_url": "https://developers.facebook.com/docs/facebook-login",
+      "enables": "Page-scoped publishing through the Graph API. Facebook keeps its own ``xpst auth facebook`` flow; this status line shows its stored app.",
+      "config_id_field": "",
+      "config_secret_field": "",
+      "shared_meta": false,
+      "configurable": false,
+      "env_id_var": "XPST_FACEBOOK_APP_ID",
+      "env_secret_var": "XPST_FACEBOOK_APP_SECRET",
+      "env_fields": {}
+    },
+    "tiktok": {
+      "platform": "tiktok",
+      "display_name": "TikTok",
+      "id_label": "Client Key",
+      "secret_label": "Client Secret",
+      "store_id_key": "tiktok_client_key",
+      "store_secret_key": "tiktok_client_secret",
+      "redirect_uri": "http://localhost:8085/callback",
+      "scopes": [
+        "video.publish",
+        "video.upload",
+        "user.info.stats"
+      ],
+      "create_url": "https://developers.tiktok.com/manage/apps",
+      "docs_url": "https://developers.tiktok.com/doc/content-posting-api-get-started",
+      "enables": "Direct-posting to your own TikTok account through the official Content Posting API. Unaudited apps post SELF_ONLY (private) until TikTok audits the app \u2014 xPST never claims public reach it does not have.",
+      "config_id_field": "client_key",
+      "config_secret_field": "client_secret",
+      "shared_meta": false,
+      "configurable": true,
+      "env_id_var": "XPST_TIKTOK_CLIENT_KEY",
+      "env_secret_var": "XPST_TIKTOK_CLIENT_SECRET",
+      "env_fields": {}
+    }
+  }
+}

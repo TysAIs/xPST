@@ -8,7 +8,13 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-[dev-dependencies]
+[dependencies]
+# `json::sort_keys_recursive` is the workspace's one implementation of
+# `json.dumps(..., sort_keys=True)`. It lives here, in the base crate, because
+# the writers that need it are spread across `xpst-config`, `xpst-authflow`,
+# `xpst-cli`, `xpst-mcp` and `xpst-api`, and `xpst-config` already dev-depends
+# on `xpst-authflow` — putting the helper in either of those two would make the
+# pair mutually dependent.
 serde_json = { workspace = true }
 
 [lints]

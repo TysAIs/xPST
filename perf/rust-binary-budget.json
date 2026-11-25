@@ -13,30 +13,42 @@
   },
   "budgets": {
     "xpst": {
-      "max_bytes": 2097152,
-      "rationale": "Measured 961,960 bytes on 2026-11-17 (x86_64-linux, rustc 1.99.1) from `cargo build --release --workspace`. The budget is the measured number doubled and rounded up to a whole MiB: enough headroom that P1-P4 can add HTTP/TLS, stores and providers without the gate becoming a nuisance, tight enough that any single dependency that doubles the binary fails the PR. On 2026-11-18 the same build measured 1,324,968 bytes after serde_yaml/unsafe-libyaml became serde-saphyr (+~204 kB of parser code), still 63% of the budget. On 2026-11-19, on the tree that also carries the rmcp 3.11.0 move, it measured 1,325,944 bytes (63.2%). The budget stands: it was chosen for growth, not re-derived from each measurement.",
+      "max_bytes": 8388608,
+      "rationale": "Measured 961,960 bytes on 2026-11-17 (x86_64-linux, rustc 1.99.1) from `cargo build --release --workspace`. The budget is the measured number doubled and rounded up to a whole MiB: enough headroom that P1-P4 can add HTTP/TLS, stores and providers without the gate becoming a nuisance, tight enough that any single dependency that doubles the binary fails the PR. On 2026-11-18 the same build measured 1,324,968 bytes after serde_yaml/unsafe-libyaml became serde-saphyr (+~204 kB of parser code), still 63% of the budget. On 2026-11-19, on the tree that also carries the rmcp 3.11.0 move, it measured 1,325,944 bytes (63.2%). The budget stands: it was chosen for growth, not re-derived from each measurement. **Raised to 8 MiB on 2026-11-25, with a new measurement.** The 2 MiB ceiling was set before `xpst-cli` depended on `xpst-mcp`. PR #34 (`feat/rust-tranche-9-2026-11-24`, \"serve the MCP surface from the CLI\") made `xpst mcp start` serve the agent surface in-process, which links rmcp 3.11.0, tokio and the stdio transport stack into the CLI binary; that is the growth, and it is a dependency, not new CLI code. The evidence: `main` @ b8d1553, which does not yet carry the move, measures 1,704,896 bytes (1.63 MiB) — already 81% of the old ceiling, and itself above the 1,325,944 bytes this record carried; the stack tip that does carry it measures 6,154,856 bytes (5.87 MiB); and the same stack tip with the tranche-11 change stashed measures 6,113,640 bytes, so tranche 11 itself added 29 kB. The gate has been red on every Rust branch since `feat/rust-local-tranche-4-2026-11-24` (2.96 MiB on the runner) and jumped to 5.44 MiB at PR #34 — the record was stale, not the binary regressing. The new ceiling is the measured number rounded up to the next whole MiB (6 MiB) plus 2 MiB of headroom: 1.36x the measurement, which still fails a PR that doubles the binary, and leaves room for the remaining CLI parity tranches. The alternative — splitting the MCP server back out so `xpst mcp start` spawns `xpst-mcp` and the CLI returns to ~1.3 MiB — changes the documented `xpst mcp` entry point and needs its own parity proof, so it is a separate decision, not folded into this one.",
       "measured": {
-        "bytes": 1325944,
-        "mib": 1.264,
-        "measured_utc": "2026-11-19",
+        "bytes": 6154856,
+        "mib": 5.87,
+        "measured_utc": "2026-11-25",
         "host": "x86_64-linux, rustc 1.99.1, `cargo build --release --workspace`",
-        "single_crate_build_bytes": 1324672
+        "tree": "feat/rust-cli-tranche-11-2026-11-25 @ 95918c1 — the Rust CLI stack tip, the tree this ceiling has to cover",
+        "single_crate_build_bytes": 6143080,
+        "main_tree": {
+          "commit": "b8d1553",
+          "bytes": 1704896,
+          "note": "main does not carry the MCP-in-CLI move yet (PR #34 in the stack), so it measures 1.63 MiB; the ceiling is set for the tree that lands, not for today's main."
+        }
       }
     },
     "xpst-mcp": {
       "max_bytes": 6291456,
-      "rationale": "Measured 3,146,912 bytes on 2026-11-17 from the same workspace build (rmcp + tokio + chrono + the YAML binding statically linked in); the budget is that measurement doubled and rounded up to a MiB. On 2026-11-18 the binary measured 1,826,288 bytes: serde_yaml/unsafe-libyaml became serde-saphyr (+~204 kB of parser code) and chrono-tz, which embedded the whole IANA database, was replaced by jiff, which reads the platform's zoneinfo (-~1.3 MB). On 2026-11-19, on the tree that also carries the rmcp 3.11.0 move, it measured 2,274,048 bytes (36.1%): the newer SDK's model and transport tables cost ~448 kB over that number, and removing chrono-tz still accounts for the rest of the drop from 3,630,144 bytes. The budget was deliberately NOT lowered with the measurement: it is a ceiling chosen for what the crate is expected to grow into, and re-deriving it from a smaller number would turn a one-off win into a tighter gate.",
+      "rationale": "Measured 3,146,912 bytes on 2026-11-17 from the same workspace build (rmcp + tokio + chrono + the YAML binding statically linked in); the budget is that measurement doubled and rounded up to a MiB. On 2026-11-18 the binary measured 1,826,288 bytes: serde_yaml/unsafe-libyaml became serde-saphyr (+~204 kB of parser code) and chrono-tz, which embedded the whole IANA database, was replaced by jiff, which reads the platform's zoneinfo (-~1.3 MB). On 2026-11-19, on the tree that also carries the rmcp 3.11.0 move, it measured 2,274,048 bytes (36.1%): the newer SDK's model and transport tables cost ~448 kB over that number, and removing chrono-tz still accounts for the rest of the drop from 3,630,144 bytes. The budget was deliberately NOT lowered with the measurement: it is a ceiling chosen for what the crate is expected to grow into, and re-deriving it from a smaller number would turn a one-off win into a tighter gate. Re-measured 2026-11-25 on the same stack tip as `xpst`: 4,115,944 bytes (3.92 MiB, 65.4% of the ceiling) — the crate grew with the MCP surface it now serves (the setup transaction, the schedule writers, the analytics read model and the URL guard all landed in `xpst-mcp`/`xpst-surface`), while `main` @ b8d1553 still measures 2,274,048 bytes. The 6 MiB ceiling holds, so it is not raised.",
       "measured": {
-        "bytes": 2274048,
-        "mib": 2.169,
-        "measured_utc": "2026-11-19",
-        "host": "x86_64-linux, rustc 1.99.1, `cargo build --release --workspace`"
+        "bytes": 4115944,
+        "mib": 3.925,
+        "measured_utc": "2026-11-25",
+        "host": "x86_64-linux, rustc 1.99.1, `cargo build --release --workspace`",
+        "tree": "feat/rust-cli-tranche-11-2026-11-25 @ 95918c1 — the Rust CLI stack tip",
+        "main_tree": {
+          "commit": "b8d1553",
+          "bytes": 2274048
+        }
       }
     }
   },
   "notes": [
     "This file is the record of the decision, not a copy of the current output: raise a budget only together with a new measurement and a sentence saying what grew and why, in the same commit that changes it.",
-    "`cargo build --release --workspace` and `cargo build --release -p xpst-cli` differ by the workspace feature unification reaching serde/clap differently (961,960 vs 961,912 measured on 2026-11-17; 1,325,944 vs 1,324,672 on 2026-11-19). The gate is run on the workspace build; the smaller number is recorded only so the difference is not mistaken for nondeterminism.",
+    "`cargo build --release --workspace` and `cargo build --release -p xpst-cli` differ by the workspace feature unification reaching serde/clap differently (961,960 vs 961,912 measured on 2026-11-17; 1,325,944 vs 1,324,672 on 2026-11-19; 6,154,856 vs 6,143,080 on 2026-11-25). The gate is run on the workspace build; the smaller number is recorded only so the difference is not mistaken for nondeterminism.",
+    "`measured` names the tree it was taken on. On 2026-11-25 that is the Rust CLI stack tip (`feat/rust-cli-tranche-11-2026-11-25` @ 95918c1), not `main`, because the ceiling has to cover the tree that lands: `main` @ b8d1553 still measures 1,704,896 B for `xpst` and 2,274,048 B for `xpst-mcp`. When the stack merges, the recorded numbers and the built numbers agree again.",
     "A binary with no entry in `budgets` is a gate failure (exit 2), not a pass: an unmeasured binary cannot be claimed to be within a budget.",
     "Two binaries are budgeted because the workspace emits two: `xpst` (crates/xpst-cli) and `xpst-mcp` (crates/xpst-mcp). `xpst-app` and `src-tauri` are libraries/bundles, not workspace binaries; the desktop installer size is gated separately in .github/workflows/tauri-release.yml.",
     "Cold start is measured by scripts/measure_rust_boot.py, whose report carries the host, the binary SHA-256 and per-sample cache_purge flags; the 1 s number is D-4's target for the desktop shell on the Mac mini host class, so the CLI number is a floor, not a substitute."

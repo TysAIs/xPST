@@ -8,5 +8,12 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[dependencies]
+# The ingest numbers and the content vocabulary live in the engine crate; this
+# crate runs the probe and judges the result against them, so it depends on the
+# registry rather than restating it.
+xpst-core = { path = "../xpst-core" }
+serde_json = { workspace = true }
+
 [lints]
 workspace = true

@@ -17,20 +17,26 @@ questions and refuses everything else with
 |---|---|
 | `xpst config show` | Reads `~/.xpst/config.yaml` and prints it, secrets masked. Byte-identical to the Python engine's output, including `json.dumps` separators and the masking rule. `--raw` is the only way a secret reaches stdout. |
 | `xpst config validate` | Read-only validation. Reports `{"valid", "checks"}`; exits `2` when a blocker is found. Old-but-supported schemas are reported as *migration pending*, not as errors — P0 has no write path to migrate with. |
-| `xpst doctor` | Local-only diagnostics: config, `state.json`, schedule file, media tool discovery. `engine.live_checks` is `false` and says so; platform probes and auth verdicts land in P1. |
+| `xpst doctor` | The live health report: canonical per-provider status with badge truth, per-role posting verdicts, quota rows, ban-risk advisories, rate-limit cooldowns and the environment checklist. Byte-identical to the Python engine on a profile with no credentials; a provider that holds a credential is reported `unverified` until the live transports land. |
 | `xpst version`, `xpst --version` | What this binary is. `--version` matches Click's `xPST, version <v>` shape. |
 | `xpst status` | The statistics payload the Python engine prints, field for field, from a read-only state load. Creates the first-run `config.yaml` the way Python does when the profile is new. |
 | `xpst schedule list` | The queue with each entry's local rendering, plus the pause marker and any `schedule.json.paused-*` snapshots, so an empty list cannot read as "paused and emptied". |
 | `xpst failures list` | The dead-letter queue: status (`open`/`resolved`), age, count and the platform's error. |
 
-Everything else — 95 of the 102 command paths — parses its arguments exactly as the
+Everything else — 22 of the 88 leaf commands — parses its arguments exactly as the
 Python CLI does and then exits `1` with the message above. Argument errors (missing
-required option, unknown flag) are exit `2`, matching Click.
+required option, unknown flag) are exit `2`, matching Click. The 14 group containers
+(`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`,
+`messenger`, `plugins`, `schedule`, `state`, `stream`) print help in both engines.
 
 `docs/technical/rust-parity-ledger.md` is the per-command answer to "is this one
 implemented, which crate owns it, and does the Python path it replaces call the
 network". It is generated from the engine's own tables by `cargo xtask ledger
 --write`, and `cargo test -p xpst-cli` fails when it drifts.
+
+`docs/technical/cli-parity-gates.md` is the companion map for the stubs: why each
+remaining command is not a mechanical port (network, the dashboard server, the vector
+store, or a named blocker), with the deciding `src/xpst/` call cited for every one.
 
 Read-only is a hard property for the read paths: they open files for reading only,
 never upload and never open a socket. The one write is `status`'s first-run config

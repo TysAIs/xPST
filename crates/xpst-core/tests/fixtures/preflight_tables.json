@@ -1,0 +1,2859 @@
+{
+  "connect_command": {
+    "generic": "`xpst connect youtube`, `xpst connect x`, …",
+    "platform": "`xpst connect youtube`"
+  },
+  "content_types": [
+    "video",
+    "image",
+    "carousel",
+    "text",
+    "thread"
+  ],
+  "destinations": [
+    {
+      "declared": [
+        "video"
+      ],
+      "display_name": "YouTube",
+      "envelope": {
+        "caption": {
+          "max_characters": null
+        },
+        "content_types": {
+          "declared": [
+            "video"
+          ],
+          "implemented": [
+            "video"
+          ]
+        },
+        "display_name": "YouTube",
+        "image": null,
+        "media_transport": "local_upload",
+        "media_transport_requirement": null,
+        "platform": "youtube",
+        "publishing": true,
+        "video": {
+          "audio_codec": "aac",
+          "containers": [
+            ".mp4",
+            ".mov"
+          ],
+          "fps_cap": 60,
+          "max_bytes": 274877906944,
+          "max_duration_seconds": 43200,
+          "max_long_edge": 1920,
+          "pix_fmt": "yuv420p",
+          "video_codec": "h264"
+        }
+      },
+      "envelope_summaries": {
+        "carousel": "youtube: video ≤43200s, MP4/MOV, h264, ≤256 GB",
+        "image": "youtube: video",
+        "text": "youtube: video ≤43200s, MP4/MOV, h264, ≤256 GB",
+        "thread": "youtube: video ≤43200s, MP4/MOV, h264, ≤256 GB",
+        "video": "youtube: video ≤43200s, MP4/MOV, h264, ≤256 GB"
+      },
+      "envelope_summary_unknown": "youtube: video ≤43200s, MP4/MOV, h264, ≤256 GB",
+      "implemented": [
+        "video"
+      ],
+      "media_transport": "local_upload",
+      "media_transport_error_code": "content_type.media_transport",
+      "media_transport_requirement": "",
+      "platform": "youtube",
+      "publishing": true,
+      "text_limit": null
+    },
+    {
+      "declared": [
+        "carousel",
+        "image",
+        "text",
+        "video"
+      ],
+      "display_name": "X",
+      "envelope": {
+        "caption": {
+          "max_characters": 280
+        },
+        "content_types": {
+          "declared": [
+            "carousel",
+            "image",
+            "text",
+            "video"
+          ],
+          "implemented": [
+            "carousel",
+            "image",
+            "text",
+            "video"
+          ]
+        },
+        "display_name": "X",
+        "image": {
+          "aspect_max": 3.0,
+          "aspect_min": 0.3333333333333333,
+          "containers": [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp"
+          ],
+          "max_bytes": 5242880
+        },
+        "media_transport": "local_upload",
+        "media_transport_requirement": null,
+        "platform": "x",
+        "publishing": true,
+        "video": {
+          "audio_codec": "aac",
+          "containers": [
+            ".mp4",
+            ".mov"
+          ],
+          "fps_cap": 60,
+          "max_bytes": 536870912,
+          "max_duration_seconds": 140,
+          "max_long_edge": 1920,
+          "pix_fmt": "yuv420p",
+          "video_codec": "h264"
+        }
+      },
+      "envelope_summaries": {
+        "carousel": "x: video ≤140s, MP4/MOV, h264, ≤512 MB, caption ≤280 chars",
+        "image": "x: image JPG/JPEG/PNG/WEBP, ≤5.0 MB, aspect 0.3333333333333333:1–3.0:1, caption ≤280 chars",
+        "text": "x: video ≤140s, MP4/MOV, h264, ≤512 MB, caption ≤280 chars",
+        "thread": "x: video ≤140s, MP4/MOV, h264, ≤512 MB, caption ≤280 chars",
+        "video": "x: video ≤140s, MP4/MOV, h264, ≤512 MB, caption ≤280 chars"
+      },
+      "envelope_summary_unknown": "x: video ≤140s, MP4/MOV, h264, ≤512 MB, caption ≤280 chars",
+      "implemented": [
+        "carousel",
+        "image",
+        "text",
+        "video"
+      ],
+      "media_transport": "local_upload",
+      "media_transport_error_code": "content_type.media_transport",
+      "media_transport_requirement": "",
+      "platform": "x",
+      "publishing": true,
+      "text_limit": 280
+    },
+    {
+      "declared": [
+        "carousel",
+        "image",
+        "video"
+      ],
+      "display_name": "Instagram Reels",
+      "envelope": {
+        "caption": {
+          "max_characters": 2200
+        },
+        "content_types": {
+          "declared": [
+            "carousel",
+            "image",
+            "video"
+          ],
+          "implemented": [
+            "carousel",
+            "image",
+            "video"
+          ]
+        },
+        "display_name": "Instagram Reels",
+        "image": {
+          "aspect_max": 1.91,
+          "aspect_min": 0.8,
+          "containers": [
+            ".jpg",
+            ".jpeg"
+          ],
+          "max_bytes": 8388608
+        },
+        "media_transport": "local_upload",
+        "media_transport_requirement": null,
+        "platform": "instagram",
+        "publishing": true,
+        "video": {
+          "audio_codec": "aac",
+          "containers": [
+            ".mp4",
+            ".mov"
+          ],
+          "fps_cap": 60,
+          "max_bytes": 4294967296,
+          "max_duration_seconds": 900,
+          "max_long_edge": 1920,
+          "pix_fmt": "yuv420p",
+          "video_codec": "h264"
+        }
+      },
+      "envelope_summaries": {
+        "carousel": "instagram: video ≤900s, MP4/MOV, h264, ≤4.0 GB, caption ≤2200 chars",
+        "image": "instagram: image JPG/JPEG, ≤8.0 MB, aspect 0.8:1–1.91:1, caption ≤2200 chars",
+        "text": "instagram: video ≤900s, MP4/MOV, h264, ≤4.0 GB, caption ≤2200 chars",
+        "thread": "instagram: video ≤900s, MP4/MOV, h264, ≤4.0 GB, caption ≤2200 chars",
+        "video": "instagram: video ≤900s, MP4/MOV, h264, ≤4.0 GB, caption ≤2200 chars"
+      },
+      "envelope_summary_unknown": "instagram: video ≤900s, MP4/MOV, h264, ≤4.0 GB, caption ≤2200 chars",
+      "implemented": [
+        "carousel",
+        "image",
+        "video"
+      ],
+      "media_transport": "local_upload",
+      "media_transport_error_code": "content_type.media_transport",
+      "media_transport_requirement": "",
+      "platform": "instagram",
+      "publishing": true,
+      "text_limit": 2200
+    },
+    {
+      "declared": [
+        "video"
+      ],
+      "display_name": "TikTok",
+      "envelope": {
+        "caption": {
+          "max_characters": 2200
+        },
+        "content_types": {
+          "declared": [
+            "video"
+          ],
+          "implemented": [
+            "video"
+          ]
+        },
+        "display_name": "TikTok",
+        "image": null,
+        "media_transport": "local_upload",
+        "media_transport_requirement": null,
+        "platform": "tiktok",
+        "publishing": true,
+        "video": {
+          "audio_codec": "aac",
+          "containers": [
+            ".mp4",
+            ".mov"
+          ],
+          "fps_cap": 60,
+          "max_bytes": 1073741824,
+          "max_duration_seconds": 600,
+          "max_long_edge": 1920,
+          "pix_fmt": "yuv420p",
+          "video_codec": "h264"
+        }
+      },
+      "envelope_summaries": {
+        "carousel": "tiktok: video ≤600s, MP4/MOV, h264, ≤1.0 GB, caption ≤2200 chars",
+        "image": "tiktok: caption ≤2200 chars",
+        "text": "tiktok: video ≤600s, MP4/MOV, h264, ≤1.0 GB, caption ≤2200 chars",
+        "thread": "tiktok: video ≤600s, MP4/MOV, h264, ≤1.0 GB, caption ≤2200 chars",
+        "video": "tiktok: video ≤600s, MP4/MOV, h264, ≤1.0 GB, caption ≤2200 chars"
+      },
+      "envelope_summary_unknown": "tiktok: video ≤600s, MP4/MOV, h264, ≤1.0 GB, caption ≤2200 chars",
+      "implemented": [
+        "video"
+      ],
+      "media_transport": "local_upload",
+      "media_transport_error_code": "content_type.media_transport",
+      "media_transport_requirement": "",
+      "platform": "tiktok",
+      "publishing": true,
+      "text_limit": 2200
+    },
+    {
+      "declared": [
+        "text",
+        "video"
+      ],
+      "display_name": "Threads",
+      "envelope": {
+        "caption": {
+          "max_characters": 500
+        },
+        "content_types": {
+          "declared": [
+            "text",
+            "video"
+          ],
+          "implemented": [
+            "text",
+            "video"
+          ]
+        },
+        "display_name": "Threads",
+        "image": null,
+        "media_transport": "public_url",
+        "media_transport_requirement": "Threads has no upload endpoint: its API fetches your media from a public server, and xPST is a local tool with no server to host a file for it. A local file cannot be published to Threads, and xPST cannot deliver a media URL either yet — post this content from the Threads app instead.",
+        "platform": "threads",
+        "publishing": true,
+        "video": {
+          "audio_codec": "aac",
+          "containers": [
+            ".mp4",
+            ".mov"
+          ],
+          "fps_cap": 60,
+          "max_bytes": 4294967296,
+          "max_duration_seconds": 300,
+          "max_long_edge": 1920,
+          "pix_fmt": "yuv420p",
+          "video_codec": "h264"
+        }
+      },
+      "envelope_summaries": {
+        "carousel": "threads: video ≤300s, MP4/MOV, h264, ≤4.0 GB, caption ≤500 chars",
+        "image": "threads: caption ≤500 chars",
+        "text": "threads: video ≤300s, MP4/MOV, h264, ≤4.0 GB, caption ≤500 chars",
+        "thread": "threads: video ≤300s, MP4/MOV, h264, ≤4.0 GB, caption ≤500 chars",
+        "video": "threads: video ≤300s, MP4/MOV, h264, ≤4.0 GB, caption ≤500 chars"
+      },
+      "envelope_summary_unknown": "threads: video ≤300s, MP4/MOV, h264, ≤4.0 GB, caption ≤500 chars",
+      "implemented": [
+        "text",
+        "video"
+      ],
+      "media_transport": "public_url",
+      "media_transport_error_code": "THREADS_NEEDS_URL",
+      "media_transport_requirement": "Threads has no upload endpoint: its API fetches your media from a public server, and xPST is a local tool with no server to host a file for it. A local file cannot be published to Threads, and xPST cannot deliver a media URL either yet — post this content from the Threads app instead.",
+      "platform": "threads",
+      "publishing": true,
+      "text_limit": 500
+    },
+    {
+      "declared": [
+        "video"
+      ],
+      "display_name": "Facebook Page",
+      "envelope": {
+        "caption": {
+          "max_characters": null
+        },
+        "content_types": {
+          "declared": [
+            "video"
+          ],
+          "implemented": [
+            "video"
+          ]
+        },
+        "display_name": "Facebook Page",
+        "image": null,
+        "media_transport": "local_upload",
+        "media_transport_requirement": null,
+        "platform": "facebook",
+        "publishing": true,
+        "video": {
+          "audio_codec": "aac",
+          "containers": [
+            ".mp4",
+            ".mov"
+          ],
+          "fps_cap": 60,
+          "max_bytes": 10737418240,
+          "max_duration_seconds": 14400,
+          "max_long_edge": 1920,
+          "pix_fmt": "yuv420p",
+          "video_codec": "h264"
+        }
+      },
+      "envelope_summaries": {
+        "carousel": "facebook: video ≤14400s, MP4/MOV, h264, ≤10 GB",
+        "image": "facebook: video",
+        "text": "facebook: video ≤14400s, MP4/MOV, h264, ≤10 GB",
+        "thread": "facebook: video ≤14400s, MP4/MOV, h264, ≤10 GB",
+        "video": "facebook: video ≤14400s, MP4/MOV, h264, ≤10 GB"
+      },
+      "envelope_summary_unknown": "facebook: video ≤14400s, MP4/MOV, h264, ≤10 GB",
+      "implemented": [
+        "video"
+      ],
+      "media_transport": "local_upload",
+      "media_transport_error_code": "content_type.media_transport",
+      "media_transport_requirement": "",
+      "platform": "facebook",
+      "publishing": true,
+      "text_limit": null
+    },
+    {
+      "declared": [
+        "video"
+      ],
+      "display_name": "Rumble",
+      "envelope": {
+        "caption": {
+          "max_characters": null
+        },
+        "content_types": {
+          "declared": [
+            "video"
+          ],
+          "implemented": [
+            "video"
+          ]
+        },
+        "display_name": "Rumble",
+        "image": null,
+        "media_transport": "local_upload",
+        "media_transport_requirement": null,
+        "platform": "rumble",
+        "publishing": true,
+        "video": {
+          "audio_codec": "aac",
+          "containers": [
+            ".mp4",
+            ".mov"
+          ],
+          "fps_cap": 60,
+          "max_bytes": null,
+          "max_duration_seconds": null,
+          "max_long_edge": 1920,
+          "pix_fmt": "yuv420p",
+          "video_codec": "h264"
+        }
+      },
+      "envelope_summaries": {
+        "carousel": "rumble: video MP4/MOV, h264",
+        "image": "rumble: video",
+        "text": "rumble: video MP4/MOV, h264",
+        "thread": "rumble: video MP4/MOV, h264",
+        "video": "rumble: video MP4/MOV, h264"
+      },
+      "envelope_summary_unknown": "rumble: video MP4/MOV, h264",
+      "implemented": [
+        "video"
+      ],
+      "media_transport": "local_upload",
+      "media_transport_error_code": "content_type.media_transport",
+      "media_transport_requirement": "",
+      "platform": "rumble",
+      "publishing": true,
+      "text_limit": null
+    },
+    {
+      "declared": [
+        "carousel",
+        "image",
+        "text"
+      ],
+      "display_name": "Bluesky",
+      "envelope": {
+        "caption": {
+          "max_characters": 300
+        },
+        "content_types": {
+          "declared": [
+            "carousel",
+            "image",
+            "text"
+          ],
+          "implemented": [
+            "carousel",
+            "image",
+            "text"
+          ]
+        },
+        "display_name": "Bluesky",
+        "image": {
+          "aspect_max": null,
+          "aspect_min": null,
+          "containers": [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
+            ".gif"
+          ],
+          "max_bytes": 2000000.0
+        },
+        "media_transport": "local_upload",
+        "media_transport_requirement": null,
+        "platform": "bluesky",
+        "publishing": true,
+        "video": null
+      },
+      "envelope_summaries": {
+        "carousel": "bluesky: caption ≤300 chars",
+        "image": "bluesky: image JPG/JPEG/PNG/WEBP/GIF, ≤1.9 MB, caption ≤300 chars",
+        "text": "bluesky: caption ≤300 chars",
+        "thread": "bluesky: caption ≤300 chars",
+        "video": "bluesky: caption ≤300 chars"
+      },
+      "envelope_summary_unknown": "bluesky: caption ≤300 chars",
+      "implemented": [
+        "carousel",
+        "image",
+        "text"
+      ],
+      "media_transport": "local_upload",
+      "media_transport_error_code": "content_type.media_transport",
+      "media_transport_requirement": "",
+      "platform": "bluesky",
+      "publishing": true,
+      "text_limit": 300
+    }
+  ],
+  "ingest": [
+    {
+      "audio_codec": "aac",
+      "audio_rate": 48000,
+      "containers": [
+        ".mp4",
+        ".mov"
+      ],
+      "destination_display_name": "YouTube",
+      "display_name": "YouTube",
+      "duration_cap_s": 43200,
+      "file_size_cap_mb": 262144,
+      "fps_cap": 60,
+      "image_aspect_max": null,
+      "image_aspect_min": null,
+      "image_containers": [],
+      "image_file_size_cap_mb": null,
+      "long_edge": 1920,
+      "lufs": -14.0,
+      "max_video_bitrate_bps": 10000000,
+      "modalities": [
+        "video"
+      ],
+      "pix_fmt": "yuv420p",
+      "platform": "youtube",
+      "video_codec": "h264"
+    },
+    {
+      "audio_codec": "aac",
+      "audio_rate": 44100,
+      "containers": [
+        ".mp4",
+        ".mov"
+      ],
+      "destination_display_name": "TikTok",
+      "display_name": "TikTok",
+      "duration_cap_s": 600,
+      "file_size_cap_mb": 1024,
+      "fps_cap": 60,
+      "image_aspect_max": null,
+      "image_aspect_min": null,
+      "image_containers": [],
+      "image_file_size_cap_mb": null,
+      "long_edge": 1920,
+      "lufs": -14.0,
+      "max_video_bitrate_bps": 10000000,
+      "modalities": [
+        "video"
+      ],
+      "pix_fmt": "yuv420p",
+      "platform": "tiktok",
+      "video_codec": "h264"
+    },
+    {
+      "audio_codec": "aac",
+      "audio_rate": 44100,
+      "containers": [
+        ".mp4",
+        ".mov"
+      ],
+      "destination_display_name": "Instagram Reels",
+      "display_name": "Instagram Reels",
+      "duration_cap_s": 900,
+      "file_size_cap_mb": 4096,
+      "fps_cap": 60,
+      "image_aspect_max": 1.91,
+      "image_aspect_min": 0.8,
+      "image_containers": [
+        ".jpg",
+        ".jpeg"
+      ],
+      "image_file_size_cap_mb": 8,
+      "long_edge": 1920,
+      "lufs": -14.0,
+      "max_video_bitrate_bps": 10000000,
+      "modalities": [
+        "video",
+        "image"
+      ],
+      "pix_fmt": "yuv420p",
+      "platform": "instagram",
+      "video_codec": "h264"
+    },
+    {
+      "audio_codec": "aac",
+      "audio_rate": 44100,
+      "containers": [
+        ".mp4",
+        ".mov"
+      ],
+      "destination_display_name": "X (Twitter)",
+      "display_name": "X (Twitter)",
+      "duration_cap_s": 140,
+      "file_size_cap_mb": 512,
+      "fps_cap": 60,
+      "image_aspect_max": 3.0,
+      "image_aspect_min": 0.3333333333333333,
+      "image_containers": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp"
+      ],
+      "image_file_size_cap_mb": 5,
+      "long_edge": 1920,
+      "lufs": -16.0,
+      "max_video_bitrate_bps": 12000000,
+      "modalities": [
+        "video",
+        "image"
+      ],
+      "pix_fmt": "yuv420p",
+      "platform": "x",
+      "video_codec": "h264"
+    },
+    {
+      "audio_codec": "aac",
+      "audio_rate": 44100,
+      "containers": [
+        ".mp4",
+        ".mov"
+      ],
+      "destination_display_name": "Bluesky",
+      "display_name": "Bluesky",
+      "duration_cap_s": null,
+      "file_size_cap_mb": null,
+      "fps_cap": 60,
+      "image_aspect_max": null,
+      "image_aspect_min": null,
+      "image_containers": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".gif"
+      ],
+      "image_file_size_cap_mb": 1.9073486328125,
+      "long_edge": 4000,
+      "lufs": -14.0,
+      "max_video_bitrate_bps": 10000000,
+      "modalities": [
+        "image"
+      ],
+      "pix_fmt": "yuv420p",
+      "platform": "bluesky",
+      "video_codec": "h264"
+    },
+    {
+      "audio_codec": "aac",
+      "audio_rate": 44100,
+      "containers": [
+        ".mp4",
+        ".mov"
+      ],
+      "destination_display_name": "Threads",
+      "display_name": "Threads",
+      "duration_cap_s": 300,
+      "file_size_cap_mb": 4096,
+      "fps_cap": 60,
+      "image_aspect_max": null,
+      "image_aspect_min": null,
+      "image_containers": [],
+      "image_file_size_cap_mb": null,
+      "long_edge": 1920,
+      "lufs": -14.0,
+      "max_video_bitrate_bps": 10000000,
+      "modalities": [
+        "video"
+      ],
+      "pix_fmt": "yuv420p",
+      "platform": "threads",
+      "video_codec": "h264"
+    },
+    {
+      "audio_codec": "aac",
+      "audio_rate": 44100,
+      "containers": [
+        ".mp4",
+        ".mov"
+      ],
+      "destination_display_name": "Facebook Page",
+      "display_name": "Facebook Page",
+      "duration_cap_s": 14400,
+      "file_size_cap_mb": 10240,
+      "fps_cap": 60,
+      "image_aspect_max": null,
+      "image_aspect_min": null,
+      "image_containers": [],
+      "image_file_size_cap_mb": null,
+      "long_edge": 1920,
+      "lufs": -14.0,
+      "max_video_bitrate_bps": 10000000,
+      "modalities": [
+        "video"
+      ],
+      "pix_fmt": "yuv420p",
+      "platform": "facebook",
+      "video_codec": "h264"
+    },
+    {
+      "audio_codec": "aac",
+      "audio_rate": 44100,
+      "containers": [
+        ".mp4",
+        ".mov"
+      ],
+      "destination_display_name": "Rumble",
+      "display_name": "Rumble",
+      "duration_cap_s": null,
+      "file_size_cap_mb": null,
+      "fps_cap": 60,
+      "image_aspect_max": null,
+      "image_aspect_min": null,
+      "image_containers": [],
+      "image_file_size_cap_mb": null,
+      "long_edge": 1920,
+      "lufs": -14.0,
+      "max_video_bitrate_bps": 10000000,
+      "modalities": [
+        "video"
+      ],
+      "pix_fmt": "yuv420p",
+      "platform": "rumble",
+      "video_codec": "h264"
+    }
+  ],
+  "no_connected_accounts": {
+    "code": "NO_CONNECTED_ACCOUNTS",
+    "message": "No platform account is connected, so there is nowhere to publish. Connect one with `xpst connect youtube`, `xpst connect x`, … — nothing is connected by default."
+  },
+  "no_destinations": {
+    "code": "NO_DESTINATIONS",
+    "message": "Choose at least one destination platform."
+  },
+  "no_route_for_format": {
+    "code": "NO_ROUTE_FOR_FORMAT",
+    "message": "No connected account accepts image posts (connected: youtube, tiktok). Connect one with `xpst connect youtube`, `xpst connect x`, … that supports image, or pick the destinations explicitly with --platforms."
+  },
+  "publish_destinations": [
+    "youtube",
+    "x",
+    "instagram",
+    "tiktok",
+    "threads",
+    "facebook",
+    "rumble",
+    "bluesky"
+  ],
+  "state_for_code": {
+    "AUTH_NOT_READY": "skipped_unconnected",
+    "CAPTION_TOO_LONG": "unsupported_format",
+    "MEDIA_MODALITY_UNSUPPORTED": "unsupported_format",
+    "MEDIA_NOT_FOUND": "failed",
+    "MEDIA_REQUIRED": "failed",
+    "MEDIA_SPEC_ASPECT_RATIO": "unsupported_format",
+    "MEDIA_SPEC_CONTAINER": "unsupported_format",
+    "MEDIA_SPEC_DIMENSIONS": "unsupported_format",
+    "MEDIA_SPEC_FILE_SIZE": "unsupported_format",
+    "MEDIA_SPEC_VIDEO_CODEC": "unsupported_format",
+    "MEDIA_TRANSPORT": "unsupported_format",
+    "PLATFORM_DISABLED": "skipped_unconnected",
+    "QUOTA_NOT_READY": "failed",
+    "REMOTE_MEDIA_UNSUPPORTED": "unsupported_format",
+    "SOMETHING_NOBODY_CLASSIFIED": "failed",
+    "THREADS_NEEDS_URL": "unsupported_format",
+    "UNKNOWN_PLATFORM": "failed",
+    "VISIBILITY_UNAVAILABLE": "refused_visibility"
+  },
+  "text_refusals": [
+    {
+      "length": 0,
+      "platform": "youtube",
+      "refusal": null
+    },
+    {
+      "length": 1,
+      "platform": "youtube",
+      "refusal": null
+    },
+    {
+      "length": 0,
+      "platform": "youtube",
+      "refusal": null
+    },
+    {
+      "length": 1,
+      "platform": "youtube",
+      "refusal": null
+    },
+    {
+      "length": 2,
+      "platform": "youtube",
+      "refusal": null
+    },
+    {
+      "length": 5000,
+      "platform": "youtube",
+      "refusal": null
+    },
+    {
+      "length": 0,
+      "platform": "x",
+      "refusal": null
+    },
+    {
+      "length": 1,
+      "platform": "x",
+      "refusal": null
+    },
+    {
+      "length": 279,
+      "platform": "x",
+      "refusal": null
+    },
+    {
+      "length": 280,
+      "platform": "x",
+      "refusal": null
+    },
+    {
+      "length": 281,
+      "platform": "x",
+      "refusal": "x accepts 280 characters and this caption is 281; xPST refuses rather than truncates. Shorten it to 280 characters or use --caption-for x=<text>. Envelope — x: video ≤140s, MP4/MOV, h264, ≤512 MB, caption ≤280 chars."
+    },
+    {
+      "length": 5000,
+      "platform": "x",
+      "refusal": "x accepts 280 characters and this caption is 5000; xPST refuses rather than truncates. Shorten it to 280 characters or use --caption-for x=<text>. Envelope — x: video ≤140s, MP4/MOV, h264, ≤512 MB, caption ≤280 chars."
+    },
+    {
+      "length": 0,
+      "platform": "instagram",
+      "refusal": null
+    },
+    {
+      "length": 1,
+      "platform": "instagram",
+      "refusal": null
+    },
+    {
+      "length": 2199,
+      "platform": "instagram",
+      "refusal": null
+    },
+    {
+      "length": 2200,
+      "platform": "instagram",
+      "refusal": null
+    },
+    {
+      "length": 2201,
+      "platform": "instagram",
+      "refusal": "instagram accepts 2200 characters and this caption is 2201; xPST refuses rather than truncates. Shorten it to 2200 characters or use --caption-for instagram=<text>. Envelope — instagram: video ≤900s, MP4/MOV, h264, ≤4.0 GB, caption ≤2200 chars."
+    },
+    {
+      "length": 5000,
+      "platform": "instagram",
+      "refusal": "instagram accepts 2200 characters and this caption is 5000; xPST refuses rather than truncates. Shorten it to 2200 characters or use --caption-for instagram=<text>. Envelope — instagram: video ≤900s, MP4/MOV, h264, ≤4.0 GB, caption ≤2200 chars."
+    },
+    {
+      "length": 0,
+      "platform": "tiktok",
+      "refusal": null
+    },
+    {
+      "length": 1,
+      "platform": "tiktok",
+      "refusal": null
+    },
+    {
+      "length": 2199,
+      "platform": "tiktok",
+      "refusal": null
+    },
+    {
+      "length": 2200,
+      "platform": "tiktok",
+      "refusal": null
+    },
+    {
+      "length": 2201,
+      "platform": "tiktok",
+      "refusal": "tiktok accepts 2200 characters and this caption is 2201; xPST refuses rather than truncates. Shorten it to 2200 characters or use --caption-for tiktok=<text>. Envelope — tiktok: video ≤600s, MP4/MOV, h264, ≤1.0 GB, caption ≤2200 chars."
+    },
+    {
+      "length": 5000,
+      "platform": "tiktok",
+      "refusal": "tiktok accepts 2200 characters and this caption is 5000; xPST refuses rather than truncates. Shorten it to 2200 characters or use --caption-for tiktok=<text>. Envelope — tiktok: video ≤600s, MP4/MOV, h264, ≤1.0 GB, caption ≤2200 chars."
+    },
+    {
+      "length": 0,
+      "platform": "threads",
+      "refusal": null
+    },
+    {
+      "length": 1,
+      "platform": "threads",
+      "refusal": null
+    },
+    {
+      "length": 499,
+      "platform": "threads",
+      "refusal": null
+    },
+    {
+      "length": 500,
+      "platform": "threads",
+      "refusal": null
+    },
+    {
+      "length": 501,
+      "platform": "threads",
+      "refusal": "threads accepts 500 characters and this caption is 501; xPST refuses rather than truncates. Shorten it to 500 characters or use --caption-for threads=<text>. Envelope — threads: video ≤300s, MP4/MOV, h264, ≤4.0 GB, caption ≤500 chars."
+    },
+    {
+      "length": 5000,
+      "platform": "threads",
+      "refusal": "threads accepts 500 characters and this caption is 5000; xPST refuses rather than truncates. Shorten it to 500 characters or use --caption-for threads=<text>. Envelope — threads: video ≤300s, MP4/MOV, h264, ≤4.0 GB, caption ≤500 chars."
+    },
+    {
+      "length": 0,
+      "platform": "facebook",
+      "refusal": null
+    },
+    {
+      "length": 1,
+      "platform": "facebook",
+      "refusal": null
+    },
+    {
+      "length": 0,
+      "platform": "facebook",
+      "refusal": null
+    },
+    {
+      "length": 1,
+      "platform": "facebook",
+      "refusal": null
+    },
+    {
+      "length": 2,
+      "platform": "facebook",
+      "refusal": null
+    },
+    {
+      "length": 5000,
+      "platform": "facebook",
+      "refusal": null
+    },
+    {
+      "length": 0,
+      "platform": "rumble",
+      "refusal": null
+    },
+    {
+      "length": 1,
+      "platform": "rumble",
+      "refusal": null
+    },
+    {
+      "length": 0,
+      "platform": "rumble",
+      "refusal": null
+    },
+    {
+      "length": 1,
+      "platform": "rumble",
+      "refusal": null
+    },
+    {
+      "length": 2,
+      "platform": "rumble",
+      "refusal": null
+    },
+    {
+      "length": 5000,
+      "platform": "rumble",
+      "refusal": null
+    },
+    {
+      "length": 0,
+      "platform": "bluesky",
+      "refusal": null
+    },
+    {
+      "length": 1,
+      "platform": "bluesky",
+      "refusal": null
+    },
+    {
+      "length": 299,
+      "platform": "bluesky",
+      "refusal": null
+    },
+    {
+      "length": 300,
+      "platform": "bluesky",
+      "refusal": null
+    },
+    {
+      "length": 301,
+      "platform": "bluesky",
+      "refusal": "bluesky accepts 300 characters and this caption is 301; xPST refuses rather than truncates. Shorten it to 300 characters or use --caption-for bluesky=<text>. Envelope — bluesky: caption ≤300 chars."
+    },
+    {
+      "length": 5000,
+      "platform": "bluesky",
+      "refusal": "bluesky accepts 300 characters and this caption is 5000; xPST refuses rather than truncates. Shorten it to 300 characters or use --caption-for bluesky=<text>. Envelope — bluesky: caption ≤300 chars."
+    }
+  ],
+  "visibility_plan_entries": [
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "youtube",
+      "refusal": null,
+      "requested": null,
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "refuse",
+        "honoured": true,
+        "level": "public",
+        "note": null,
+        "requested": "public",
+        "route": "api"
+      },
+      "platform": "youtube",
+      "refusal": null,
+      "requested": "public",
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "refuse",
+        "honoured": true,
+        "level": "unlisted",
+        "note": null,
+        "requested": "unlisted",
+        "route": "api"
+      },
+      "platform": "youtube",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "refuse",
+        "honoured": true,
+        "level": "private",
+        "note": null,
+        "requested": "private",
+        "route": "api"
+      },
+      "platform": "youtube",
+      "refusal": null,
+      "requested": "private",
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "youtube",
+      "refusal": null,
+      "requested": null,
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "tiktok_browser"
+      },
+      "platform": "youtube",
+      "refusal": null,
+      "requested": "public",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": "youtube cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "tiktok_browser"
+      },
+      "platform": "youtube",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": "youtube cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "tiktok_browser"
+      },
+      "platform": "youtube",
+      "refusal": null,
+      "requested": "private",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "youtube",
+      "refusal": null,
+      "requested": null,
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "inbox_draft"
+      },
+      "platform": "youtube",
+      "refusal": null,
+      "requested": "public",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": "youtube cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "inbox_draft"
+      },
+      "platform": "youtube",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": "youtube cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "inbox_draft"
+      },
+      "platform": "youtube",
+      "refusal": null,
+      "requested": "private",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "youtube",
+      "refusal": null,
+      "requested": null,
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "youtube",
+      "refusal": null,
+      "requested": "public",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": "youtube cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "youtube",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": "youtube cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "youtube",
+      "refusal": null,
+      "requested": "private",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "x",
+      "refusal": null,
+      "requested": null,
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+        "requested": "public",
+        "route": "api"
+      },
+      "platform": "x",
+      "refusal": null,
+      "requested": "public",
+      "route": "api"
+    },
+    {
+      "advisory": "x cannot honour --visibility unlisted: it has no per-post private/unlisted mode on any route, so the post is PUBLIC there. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+        "requested": "unlisted",
+        "route": "api"
+      },
+      "platform": "x",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "api"
+    },
+    {
+      "advisory": "x cannot honour --visibility private: it has no per-post private/unlisted mode on any route, so the post is PUBLIC there. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+        "requested": "private",
+        "route": "api"
+      },
+      "platform": "x",
+      "refusal": null,
+      "requested": "private",
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "x",
+      "refusal": null,
+      "requested": null,
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "tiktok_browser"
+      },
+      "platform": "x",
+      "refusal": null,
+      "requested": "public",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": "x cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "tiktok_browser"
+      },
+      "platform": "x",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": "x cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "tiktok_browser"
+      },
+      "platform": "x",
+      "refusal": null,
+      "requested": "private",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "x",
+      "refusal": null,
+      "requested": null,
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "inbox_draft"
+      },
+      "platform": "x",
+      "refusal": null,
+      "requested": "public",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": "x cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "inbox_draft"
+      },
+      "platform": "x",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": "x cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "inbox_draft"
+      },
+      "platform": "x",
+      "refusal": null,
+      "requested": "private",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "x",
+      "refusal": null,
+      "requested": null,
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "x",
+      "refusal": null,
+      "requested": "public",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": "x cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "x",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": "x cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "x",
+      "refusal": null,
+      "requested": "private",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "instagram",
+      "refusal": null,
+      "requested": null,
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+        "requested": "public",
+        "route": "api"
+      },
+      "platform": "instagram",
+      "refusal": null,
+      "requested": "public",
+      "route": "api"
+    },
+    {
+      "advisory": "instagram cannot honour --visibility unlisted: it has no per-post private/unlisted mode on any route, so the post is PUBLIC there. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+        "requested": "unlisted",
+        "route": "api"
+      },
+      "platform": "instagram",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "api"
+    },
+    {
+      "advisory": "instagram cannot honour --visibility private: it has no per-post private/unlisted mode on any route, so the post is PUBLIC there. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+        "requested": "private",
+        "route": "api"
+      },
+      "platform": "instagram",
+      "refusal": null,
+      "requested": "private",
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "instagram",
+      "refusal": null,
+      "requested": null,
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "tiktok_browser"
+      },
+      "platform": "instagram",
+      "refusal": null,
+      "requested": "public",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": "instagram cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "tiktok_browser"
+      },
+      "platform": "instagram",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": "instagram cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "tiktok_browser"
+      },
+      "platform": "instagram",
+      "refusal": null,
+      "requested": "private",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "instagram",
+      "refusal": null,
+      "requested": null,
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "inbox_draft"
+      },
+      "platform": "instagram",
+      "refusal": null,
+      "requested": "public",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": "instagram cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "inbox_draft"
+      },
+      "platform": "instagram",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": "instagram cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "inbox_draft"
+      },
+      "platform": "instagram",
+      "refusal": null,
+      "requested": "private",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "instagram",
+      "refusal": null,
+      "requested": null,
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "instagram",
+      "refusal": null,
+      "requested": "public",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": "instagram cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "instagram",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": "instagram cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "instagram",
+      "refusal": null,
+      "requested": "private",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "tiktok",
+      "refusal": null,
+      "requested": null,
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "refuse",
+        "honoured": true,
+        "level": "PUBLIC_TO_EVERYONE",
+        "note": null,
+        "requested": "public",
+        "route": "api"
+      },
+      "platform": "tiktok",
+      "refusal": null,
+      "requested": "public",
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "refuse",
+        "honoured": false,
+        "level": null,
+        "note": "TikTok Direct Post writes post_info.privacy_level: private is SELF_ONLY and public is PUBLIC_TO_EVERYONE. TikTok has no unlisted level, and the level is validated against creator_info/query — a level the client may not use is refused, never downgraded.",
+        "requested": "unlisted",
+        "route": "api"
+      },
+      "platform": "tiktok",
+      "refusal": "tiktok cannot honour --visibility unlisted on this route: TikTok Direct Post writes post_info.privacy_level: private is SELF_ONLY and public is PUBLIC_TO_EVERYONE. TikTok has no unlisted level, and the level is validated against creator_info/query — a level the client may not use is refused, never downgraded. The request is refused rather than posting publicly; drop --visibility unlisted (the post is public there) or use a route that can honour it.",
+      "requested": "unlisted",
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "refuse",
+        "honoured": true,
+        "level": "SELF_ONLY",
+        "note": null,
+        "requested": "private",
+        "route": "api"
+      },
+      "platform": "tiktok",
+      "refusal": null,
+      "requested": "private",
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "tiktok",
+      "refusal": null,
+      "requested": null,
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "refuse",
+        "honoured": true,
+        "level": "public",
+        "note": null,
+        "requested": "public",
+        "route": "tiktok_browser"
+      },
+      "platform": "tiktok",
+      "refusal": null,
+      "requested": "public",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "refuse",
+        "honoured": false,
+        "level": null,
+        "note": "TikTok's browser-native route drives TikTok Studio's composer, which decides the audience itself: xPST can neither read nor set it, and that route publishes publicly.",
+        "requested": "unlisted",
+        "route": "tiktok_browser"
+      },
+      "platform": "tiktok",
+      "refusal": "tiktok cannot honour --visibility unlisted on this route: TikTok's browser-native route drives TikTok Studio's composer, which decides the audience itself: xPST can neither read nor set it, and that route publishes publicly. The request is refused rather than posting publicly; drop --visibility unlisted (the post is public there) or use a route that can honour it.",
+      "requested": "unlisted",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "refuse",
+        "honoured": false,
+        "level": null,
+        "note": "TikTok's browser-native route drives TikTok Studio's composer, which decides the audience itself: xPST can neither read nor set it, and that route publishes publicly.",
+        "requested": "private",
+        "route": "tiktok_browser"
+      },
+      "platform": "tiktok",
+      "refusal": "tiktok cannot honour --visibility private on this route: TikTok's browser-native route drives TikTok Studio's composer, which decides the audience itself: xPST can neither read nor set it, and that route publishes publicly. The request is refused rather than posting publicly; drop --visibility private (the post is public there) or use a route that can honour it.",
+      "requested": "private",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "tiktok",
+      "refusal": null,
+      "requested": null,
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "refuse",
+        "honoured": false,
+        "level": null,
+        "note": "An inbox draft is finished by hand in the TikTok app, so xPST never publishes it and cannot honour a visibility for it.",
+        "requested": "public",
+        "route": "inbox_draft"
+      },
+      "platform": "tiktok",
+      "refusal": "tiktok cannot honour --visibility public on this route: An inbox draft is finished by hand in the TikTok app, so xPST never publishes it and cannot honour a visibility for it. The request is refused rather than posting publicly; drop --visibility public (the post is public there) or use a route that can honour it.",
+      "requested": "public",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "refuse",
+        "honoured": false,
+        "level": null,
+        "note": "An inbox draft is finished by hand in the TikTok app, so xPST never publishes it and cannot honour a visibility for it.",
+        "requested": "unlisted",
+        "route": "inbox_draft"
+      },
+      "platform": "tiktok",
+      "refusal": "tiktok cannot honour --visibility unlisted on this route: An inbox draft is finished by hand in the TikTok app, so xPST never publishes it and cannot honour a visibility for it. The request is refused rather than posting publicly; drop --visibility unlisted (the post is public there) or use a route that can honour it.",
+      "requested": "unlisted",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "refuse",
+        "honoured": false,
+        "level": null,
+        "note": "An inbox draft is finished by hand in the TikTok app, so xPST never publishes it and cannot honour a visibility for it.",
+        "requested": "private",
+        "route": "inbox_draft"
+      },
+      "platform": "tiktok",
+      "refusal": "tiktok cannot honour --visibility private on this route: An inbox draft is finished by hand in the TikTok app, so xPST never publishes it and cannot honour a visibility for it. The request is refused rather than posting publicly; drop --visibility private (the post is public there) or use a route that can honour it.",
+      "requested": "private",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "tiktok",
+      "refusal": null,
+      "requested": null,
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "refuse",
+        "honoured": true,
+        "level": "PUBLIC_TO_EVERYONE",
+        "note": null,
+        "requested": "public",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "tiktok",
+      "refusal": null,
+      "requested": "public",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "refuse",
+        "honoured": false,
+        "level": null,
+        "note": "The rented aggregator route posts through a TikTok for Business connection, which publishes video publicly only (PUBLIC_TO_EVERYONE); there is no private or unlisted level on it.",
+        "requested": "unlisted",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "tiktok",
+      "refusal": "tiktok cannot honour --visibility unlisted on this route: The rented aggregator route posts through a TikTok for Business connection, which publishes video publicly only (PUBLIC_TO_EVERYONE); there is no private or unlisted level on it. The request is refused rather than posting publicly; drop --visibility unlisted (the post is public there) or use a route that can honour it.",
+      "requested": "unlisted",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "refuse",
+        "honoured": false,
+        "level": null,
+        "note": "The rented aggregator route posts through a TikTok for Business connection, which publishes video publicly only (PUBLIC_TO_EVERYONE); there is no private or unlisted level on it.",
+        "requested": "private",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "tiktok",
+      "refusal": "tiktok cannot honour --visibility private on this route: The rented aggregator route posts through a TikTok for Business connection, which publishes video publicly only (PUBLIC_TO_EVERYONE); there is no private or unlisted level on it. The request is refused rather than posting publicly; drop --visibility private (the post is public there) or use a route that can honour it.",
+      "requested": "private",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "threads",
+      "refusal": null,
+      "requested": null,
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+        "requested": "public",
+        "route": "api"
+      },
+      "platform": "threads",
+      "refusal": null,
+      "requested": "public",
+      "route": "api"
+    },
+    {
+      "advisory": "threads cannot honour --visibility unlisted: it has no per-post private/unlisted mode on any route, so the post is PUBLIC there. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+        "requested": "unlisted",
+        "route": "api"
+      },
+      "platform": "threads",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "api"
+    },
+    {
+      "advisory": "threads cannot honour --visibility private: it has no per-post private/unlisted mode on any route, so the post is PUBLIC there. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+        "requested": "private",
+        "route": "api"
+      },
+      "platform": "threads",
+      "refusal": null,
+      "requested": "private",
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "threads",
+      "refusal": null,
+      "requested": null,
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "tiktok_browser"
+      },
+      "platform": "threads",
+      "refusal": null,
+      "requested": "public",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": "threads cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "tiktok_browser"
+      },
+      "platform": "threads",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": "threads cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "tiktok_browser"
+      },
+      "platform": "threads",
+      "refusal": null,
+      "requested": "private",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "threads",
+      "refusal": null,
+      "requested": null,
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "inbox_draft"
+      },
+      "platform": "threads",
+      "refusal": null,
+      "requested": "public",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": "threads cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "inbox_draft"
+      },
+      "platform": "threads",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": "threads cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "inbox_draft"
+      },
+      "platform": "threads",
+      "refusal": null,
+      "requested": "private",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "threads",
+      "refusal": null,
+      "requested": null,
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "threads",
+      "refusal": null,
+      "requested": "public",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": "threads cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "threads",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": "threads cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "threads",
+      "refusal": null,
+      "requested": "private",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "facebook",
+      "refusal": null,
+      "requested": null,
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+        "requested": "public",
+        "route": "api"
+      },
+      "platform": "facebook",
+      "refusal": null,
+      "requested": "public",
+      "route": "api"
+    },
+    {
+      "advisory": "facebook cannot honour --visibility unlisted: it has no per-post private/unlisted mode on any route, so the post is PUBLIC there. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+        "requested": "unlisted",
+        "route": "api"
+      },
+      "platform": "facebook",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "api"
+    },
+    {
+      "advisory": "facebook cannot honour --visibility private: it has no per-post private/unlisted mode on any route, so the post is PUBLIC there. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+        "requested": "private",
+        "route": "api"
+      },
+      "platform": "facebook",
+      "refusal": null,
+      "requested": "private",
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "facebook",
+      "refusal": null,
+      "requested": null,
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "tiktok_browser"
+      },
+      "platform": "facebook",
+      "refusal": null,
+      "requested": "public",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": "facebook cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "tiktok_browser"
+      },
+      "platform": "facebook",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": "facebook cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "tiktok_browser"
+      },
+      "platform": "facebook",
+      "refusal": null,
+      "requested": "private",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "facebook",
+      "refusal": null,
+      "requested": null,
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "inbox_draft"
+      },
+      "platform": "facebook",
+      "refusal": null,
+      "requested": "public",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": "facebook cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "inbox_draft"
+      },
+      "platform": "facebook",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": "facebook cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "inbox_draft"
+      },
+      "platform": "facebook",
+      "refusal": null,
+      "requested": "private",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "facebook",
+      "refusal": null,
+      "requested": null,
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "facebook",
+      "refusal": null,
+      "requested": "public",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": "facebook cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "facebook",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": "facebook cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "facebook",
+      "refusal": null,
+      "requested": "private",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "rumble",
+      "refusal": null,
+      "requested": null,
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "it hands the rendition off for a manual upload, so xPST does not publish it at all",
+        "requested": "public",
+        "route": "api"
+      },
+      "platform": "rumble",
+      "refusal": null,
+      "requested": "public",
+      "route": "api"
+    },
+    {
+      "advisory": "rumble cannot honour --visibility unlisted: it hands the rendition off for a manual upload, so xPST does not publish it at all. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "it hands the rendition off for a manual upload, so xPST does not publish it at all",
+        "requested": "unlisted",
+        "route": "api"
+      },
+      "platform": "rumble",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "api"
+    },
+    {
+      "advisory": "rumble cannot honour --visibility private: it hands the rendition off for a manual upload, so xPST does not publish it at all. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "it hands the rendition off for a manual upload, so xPST does not publish it at all",
+        "requested": "private",
+        "route": "api"
+      },
+      "platform": "rumble",
+      "refusal": null,
+      "requested": "private",
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "rumble",
+      "refusal": null,
+      "requested": null,
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "tiktok_browser"
+      },
+      "platform": "rumble",
+      "refusal": null,
+      "requested": "public",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": "rumble cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "tiktok_browser"
+      },
+      "platform": "rumble",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": "rumble cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "tiktok_browser"
+      },
+      "platform": "rumble",
+      "refusal": null,
+      "requested": "private",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "rumble",
+      "refusal": null,
+      "requested": null,
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "inbox_draft"
+      },
+      "platform": "rumble",
+      "refusal": null,
+      "requested": "public",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": "rumble cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "inbox_draft"
+      },
+      "platform": "rumble",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": "rumble cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "inbox_draft"
+      },
+      "platform": "rumble",
+      "refusal": null,
+      "requested": "private",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "rumble",
+      "refusal": null,
+      "requested": null,
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "rumble",
+      "refusal": null,
+      "requested": "public",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": "rumble cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "rumble",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": "rumble cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "rumble",
+      "refusal": null,
+      "requested": "private",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "bluesky",
+      "refusal": null,
+      "requested": null,
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+        "requested": "public",
+        "route": "api"
+      },
+      "platform": "bluesky",
+      "refusal": null,
+      "requested": "public",
+      "route": "api"
+    },
+    {
+      "advisory": "bluesky cannot honour --visibility unlisted: it has no per-post private/unlisted mode on any route, so the post is PUBLIC there. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+        "requested": "unlisted",
+        "route": "api"
+      },
+      "platform": "bluesky",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "api"
+    },
+    {
+      "advisory": "bluesky cannot honour --visibility private: it has no per-post private/unlisted mode on any route, so the post is PUBLIC there. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+        "requested": "private",
+        "route": "api"
+      },
+      "platform": "bluesky",
+      "refusal": null,
+      "requested": "private",
+      "route": "api"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "bluesky",
+      "refusal": null,
+      "requested": null,
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "tiktok_browser"
+      },
+      "platform": "bluesky",
+      "refusal": null,
+      "requested": "public",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": "bluesky cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "tiktok_browser"
+      },
+      "platform": "bluesky",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": "bluesky cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "tiktok_browser"
+      },
+      "platform": "bluesky",
+      "refusal": null,
+      "requested": "private",
+      "route": "tiktok_browser"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "bluesky",
+      "refusal": null,
+      "requested": null,
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "inbox_draft"
+      },
+      "platform": "bluesky",
+      "refusal": null,
+      "requested": "public",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": "bluesky cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "inbox_draft"
+      },
+      "platform": "bluesky",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": "bluesky cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "inbox_draft"
+      },
+      "platform": "bluesky",
+      "refusal": null,
+      "requested": "private",
+      "route": "inbox_draft"
+    },
+    {
+      "advisory": null,
+      "entry": null,
+      "platform": "bluesky",
+      "refusal": null,
+      "requested": null,
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": null,
+      "entry": {
+        "enforced": "advise",
+        "honoured": true,
+        "level": "public",
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "public",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "bluesky",
+      "refusal": null,
+      "requested": "public",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": "bluesky cannot honour --visibility unlisted: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "unlisted",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "bluesky",
+      "refusal": null,
+      "requested": "unlisted",
+      "route": "tiktok_aggregator"
+    },
+    {
+      "advisory": "bluesky cannot honour --visibility private: no upload-time visibility control is declared for this destination. The post is PUBLIC there.",
+      "entry": {
+        "enforced": "advise",
+        "honoured": false,
+        "level": null,
+        "note": "no upload-time visibility control is declared for this destination",
+        "requested": "private",
+        "route": "tiktok_aggregator"
+      },
+      "platform": "bluesky",
+      "refusal": null,
+      "requested": "private",
+      "route": "tiktok_aggregator"
+    }
+  ],
+  "visibility_routes": [
+    {
+      "default_level": "public",
+      "levels": {
+        "public": "public"
+      },
+      "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+      "platform": "bluesky",
+      "policy": "advise",
+      "requestable": [
+        "public"
+      ],
+      "route": "api"
+    },
+    {
+      "default_level": "public",
+      "levels": {
+        "public": "public"
+      },
+      "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+      "platform": "facebook",
+      "policy": "advise",
+      "requestable": [
+        "public"
+      ],
+      "route": "api"
+    },
+    {
+      "default_level": "public",
+      "levels": {
+        "public": "public"
+      },
+      "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+      "platform": "instagram",
+      "policy": "advise",
+      "requestable": [
+        "public"
+      ],
+      "route": "api"
+    },
+    {
+      "default_level": "public",
+      "levels": {
+        "public": "public"
+      },
+      "note": "it hands the rendition off for a manual upload, so xPST does not publish it at all",
+      "platform": "rumble",
+      "policy": "advise",
+      "requestable": [
+        "public"
+      ],
+      "route": "api"
+    },
+    {
+      "default_level": "public",
+      "levels": {
+        "public": "public"
+      },
+      "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+      "platform": "threads",
+      "policy": "advise",
+      "requestable": [
+        "public"
+      ],
+      "route": "api"
+    },
+    {
+      "default_level": null,
+      "levels": {
+        "private": "SELF_ONLY",
+        "public": "PUBLIC_TO_EVERYONE"
+      },
+      "note": "TikTok Direct Post writes post_info.privacy_level: private is SELF_ONLY and public is PUBLIC_TO_EVERYONE. TikTok has no unlisted level, and the level is validated against creator_info/query — a level the client may not use is refused, never downgraded.",
+      "platform": "tiktok",
+      "policy": "refuse",
+      "requestable": [
+        "public",
+        "private"
+      ],
+      "route": "api"
+    },
+    {
+      "default_level": null,
+      "levels": {},
+      "note": "An inbox draft is finished by hand in the TikTok app, so xPST never publishes it and cannot honour a visibility for it.",
+      "platform": "tiktok",
+      "policy": "refuse",
+      "requestable": [],
+      "route": "inbox_draft"
+    },
+    {
+      "default_level": "PUBLIC_TO_EVERYONE",
+      "levels": {
+        "public": "PUBLIC_TO_EVERYONE"
+      },
+      "note": "The rented aggregator route posts through a TikTok for Business connection, which publishes video publicly only (PUBLIC_TO_EVERYONE); there is no private or unlisted level on it.",
+      "platform": "tiktok",
+      "policy": "refuse",
+      "requestable": [
+        "public"
+      ],
+      "route": "tiktok_aggregator"
+    },
+    {
+      "default_level": "public",
+      "levels": {
+        "public": "public"
+      },
+      "note": "TikTok's browser-native route drives TikTok Studio's composer, which decides the audience itself: xPST can neither read nor set it, and that route publishes publicly.",
+      "platform": "tiktok",
+      "policy": "refuse",
+      "requestable": [
+        "public"
+      ],
+      "route": "tiktok_browser"
+    },
+    {
+      "default_level": "public",
+      "levels": {
+        "public": "public"
+      },
+      "note": "it has no per-post private/unlisted mode on any route, so the post is PUBLIC there",
+      "platform": "x",
+      "policy": "advise",
+      "requestable": [
+        "public"
+      ],
+      "route": "api"
+    },
+    {
+      "default_level": "public",
+      "levels": {
+        "private": "private",
+        "public": "public",
+        "unlisted": "unlisted"
+      },
+      "note": "YouTube writes status.privacyStatus at upload time, so every level is honoured.",
+      "platform": "youtube",
+      "policy": "refuse",
+      "requestable": [
+        "public",
+        "unlisted",
+        "private"
+      ],
+      "route": "api"
+    }
+  ]
+}

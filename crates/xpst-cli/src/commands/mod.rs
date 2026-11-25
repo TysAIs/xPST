@@ -7,10 +7,46 @@
 //! Everything else in the tree is declared-but-unimplemented and answers with
 //! `not implemented in the Rust engine yet` (see `crate::not_implemented`).
 
+pub mod analytics;
+pub mod app;
+pub mod auth;
+pub mod best_time;
+pub mod bio;
 pub mod bootstrap;
+pub mod byo;
+pub mod capabilities;
+pub mod chat;
 pub mod config;
+pub mod config_view;
+pub mod connect;
+pub mod devices;
+pub mod diagnostics;
+pub mod disconnect;
 pub mod doctor;
 pub mod failures;
+pub mod followers;
+pub mod generate;
+pub mod kb;
+pub mod kb_store;
+pub mod logs;
+pub mod mcp;
+pub mod media;
+pub mod messenger;
+pub mod plugins;
+pub mod preflight;
+pub mod provider_status;
+pub mod providers;
+pub mod quota;
+pub mod readiness;
 pub mod schedule;
+pub mod security;
+pub mod setup;
+pub mod setup_transaction;
+pub mod state;
 pub mod status;
+pub mod stream;
+pub mod transcript;
+pub mod update;
+pub mod updates;
 pub mod version;
+pub mod wizard;

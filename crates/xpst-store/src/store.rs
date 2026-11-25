@@ -421,8 +421,10 @@ impl Store {
             ) m ON s.platform = m.platform AND s.post_id = m.post_id
                AND s.captured_at = m.captured_at
         ";
-        // Python leaves the order undefined; this pins it for reproducible output.
-        const ORDER: &str = " ORDER BY s.captured_at DESC, s.platform, s.post_id";
+        // Python leaves the order undefined; SQLite returns the grouped rows in
+        // `(platform, post_id)` order (the GROUP BY key), and `xpst_analytics`
+        // serves `latest()` verbatim, so that is the order pinned here.
+        const ORDER: &str = " ORDER BY s.platform, s.post_id";
         let mut rows = Vec::new();
         match platform {
             Some(platform) => {
@@ -646,6 +648,30 @@ impl Store {
         Ok(latest)
     }
 
+    /// Follower history for one platform, oldest first.
+    ///
+    /// `AnalyticsStore.follower_history` selects the newest `limit` rows and
+    /// reverses them, so the payload reads oldest → newest.
+    pub fn follower_history(
+        &self,
+        platform: &str,
+        limit: u32,
+    ) -> Result<Vec<(i64, String)>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "
+            SELECT count, captured_at FROM follower_snapshots
+            WHERE platform = ? ORDER BY captured_at DESC LIMIT ?
+            ",
+        )?;
+        let mut query = stmt.query(params![platform, limit])?;
+        let mut rows = Vec::new();
+        while let Some(row) = query.next()? {
+            rows.push((row.get("count")?, row.get("captured_at")?));
+        }
+        rows.reverse();
+        Ok(rows)
+    }
+
     // ── cross-post groups ──────────────────────────────────────────────
 
     pub fn record_cross_post_group(&self, group: &CrossPostGroup) -> Result<(), StoreError> {
@@ -677,19 +703,66 @@ impl Store {
             .query_row(
                 "SELECT * FROM cross_post_groups WHERE content_hash = ?",
                 params![content_hash],
-                |row| {
-                    Ok(CrossPostGroup {
-                        content_hash: row.get("content_hash")?,
-                        video_id: row.get("video_id")?,
-                        caption: row.get("caption")?,
-                        source_url: row.get("source_url")?,
-                        created_at: row.get("created_at")?,
-                        platforms_json: row.get("platforms_json")?,
-                    })
-                },
+                cross_post_group_from_row,
             )
             .optional()?)
     }
+
+    /// `AnalyticsStore.get_cross_post_groups()` — newest first.
+    ///
+    /// Python's default is `limit=50, offset=0`; the MCP tool takes no
+    /// arguments, so the defaults are the contract.
+    pub fn get_cross_post_groups(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<CrossPostGroup>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "
+            SELECT * FROM cross_post_groups
+            ORDER BY created_at DESC LIMIT ? OFFSET ?
+            ",
+        )?;
+        let mut query = stmt.query(params![limit, offset])?;
+        let mut rows = Vec::new();
+        while let Some(row) = query.next()? {
+            rows.push(cross_post_group_from_row(row)?);
+        }
+        Ok(rows)
+    }
+
+    /// `AnalyticsStore.latest_for_post()` — every snapshot for one post,
+    /// oldest first, so the last element is the most recent.
+    pub fn latest_for_post(
+        &self,
+        platform: &str,
+        post_id: &str,
+    ) -> Result<Vec<SnapshotRow>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "
+            SELECT * FROM metric_snapshots
+            WHERE platform = ? AND post_id = ?
+            ORDER BY captured_at ASC
+            ",
+        )?;
+        let mut query = stmt.query(params![platform, post_id])?;
+        let mut rows = Vec::new();
+        while let Some(row) = query.next()? {
+            rows.push(snapshot_from_row(row)?);
+        }
+        Ok(rows)
+    }
+}
+
+fn cross_post_group_from_row(row: &rusqlite::Row<'_>) -> Result<CrossPostGroup, rusqlite::Error> {
+    Ok(CrossPostGroup {
+        content_hash: row.get("content_hash")?,
+        video_id: row.get("video_id")?,
+        caption: row.get("caption")?,
+        source_url: row.get("source_url")?,
+        created_at: row.get("created_at")?,
+        platforms_json: row.get("platforms_json")?,
+    })
 }
 
 fn snapshot_from_row(row: &rusqlite::Row<'_>) -> Result<SnapshotRow, rusqlite::Error> {

@@ -9,7 +9,30 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+# Credential store (the encrypted-file fallback the Python engine writes).
+# Every crate below is RustCrypto or the `base64` crate, all MIT OR Apache-2.0,
+# and all but `scrypt` were already in the lockfile through `keyring`'s
+# `secret-service` backend. `scrypt` is the one addition: the Python engine
+# derives the Fernet key with scrypt(N=2^14, r=8, p=1), and re-implementing a
+# KDF by hand to avoid one audited crate would be the worse trade.
+# Reviewed for `deny.toml`: permissive licences only, no advisory against any of
+# them at the pinned versions.
+aes = "0.8"
+base64 = "0.22"
+cbc = "0.1"
+# Random material for the fallback secret/salt and the Fernet IV. Already in the
+# lockfile (0.4.3) through other crates, so this adds no package; MIT OR
+# Apache-2.0, and it is the audited way to get OS entropy without `unsafe`.
+getrandom = "0.4"
+hmac = "0.12"
+# Timestamp rendering for badge fields (`token_state._iso`). Already in the
+# workspace graph through `xpst-state`/`xpst-limits`.
+jiff = { workspace = true }
+scrypt = { version = "0.11", default-features = false, features = ["simple"] }
 serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.10"
+thiserror = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

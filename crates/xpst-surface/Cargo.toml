@@ -1,0 +1,28 @@
+[package]
+name = "xpst-surface"
+description = "Payload builders shared by the CLI and the MCP server: config view, provider status, readiness, security audit, best-time, KB query and bio links."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Why this crate exists: `xpst-cli` depends on `xpst-mcp` (it serves the MCP
+# surface from `xpst mcp start`), so the MCP crate can never depend on the CLI.
+# The payload builders both surfaces must share therefore live here, below both
+# of them — one implementation, two renderers, no second copy to drift.
+[dependencies]
+jiff.workspace = true
+serde_json.workspace = true
+xpst-auth = { path = "../xpst-auth" }
+xpst-authflow = { path = "../xpst-authflow" }
+xpst-config = { workspace = true }
+xpst-core = { path = "../xpst-core" }
+xpst-media = { path = "../xpst-media" }
+xpst-state = { workspace = true }
+xpst-store = { path = "../xpst-store" }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

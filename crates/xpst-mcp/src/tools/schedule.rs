@@ -5,6 +5,11 @@
 //! with a `scheduled_time_local` display value, the pause marker's state, and
 //! — when a paused snapshot exists — the `note` that stops an empty queue from
 //! reading as "the user's posts were deleted".
+//!
+//! The four writers (`add`, `cancel`, `pause`, `resume`) are the same store
+//! through a different projection: the payload builders live in
+//! `xpst_surface::schedule` because `xpst-cli` depends on this crate, so the
+//! store document and the validation order cannot be re-derived here.
 
 use jiff::tz::TimeZone;
 use jiff::Timestamp;
@@ -187,4 +192,95 @@ fn paused_snapshots(config_dir: &std::path::Path) -> Vec<Value> {
             })
         })
         .collect()
+}
+
+// ── the write half ──────────────────────────────────────────────────────────
+
+/// `_handle_schedule_add`.
+///
+/// Two failure shapes reach the wire: the handler's own `CallToolResult(isError)`
+/// documents (served bare) and the exceptions it does not catch (served as
+/// `Error: <message>`). `xpst_surface::schedule::AddFailure` keeps them apart.
+pub fn add(ctx: &ToolContext, arguments: &Value) -> Result<Value, ToolError> {
+    let view = ctx.config()?;
+    let env = |name: &str| std::env::var(name).ok();
+    xpst_surface::schedule::add(view, ctx.paths.config_dir(), &env, arguments).map_err(|failure| {
+        match failure {
+            xpst_surface::schedule::AddFailure::Reported(message) => {
+                ToolError::Reported { message }
+            }
+            xpst_surface::schedule::AddFailure::Raised(message) => ToolError::Handler { message },
+        }
+    })
+}
+
+/// `_handle_schedule_cancel` — `recovery_service.cancel_scheduled_post`.
+///
+/// `arguments["entry_id"]` is a hard index (a missing key is `Error: 'entry_id'`),
+/// and a non-string id is accepted: it simply never matches an entry, so the
+/// answer is `POST_NOT_FOUND` carrying the value the caller sent.
+pub fn cancel(ctx: &ToolContext, arguments: &Value) -> Result<Value, ToolError> {
+    let entry_id = arguments
+        .get("entry_id")
+        .ok_or_else(|| ToolError::Handler {
+            message: "'entry_id'".to_string(),
+        })?;
+    let dry_run = truthy(arguments.get("dry_run"));
+    let payload = xpst_surface::schedule::cancel(ctx.paths.config_dir(), entry_id, dry_run);
+    if payload.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+        return Ok(payload);
+    }
+    // `isError=not payload["ok"]` with the payload as the body: the handler
+    // answered with its own document, so there is no `Error: ` prefix.
+    Err(ToolError::Reported {
+        message: xpst_config::python_style_json_compact(&payload)
+            .unwrap_or_else(|_| payload.to_string()),
+    })
+}
+
+/// `_handle_schedule_pause` — `ScheduleManager.pause`.
+///
+/// Not in Python's `_MUTATING_TOOLS`: stopping a queue is always safe, so an
+/// agent never needs consent to halt one. The registry row keeps that split.
+pub fn pause(ctx: &ToolContext, arguments: &Value) -> Result<Value, ToolError> {
+    let reason = match arguments.get("reason") {
+        Some(value) if truthy(Some(value)) => python_str(value),
+        _ => String::new(),
+    };
+    xpst_surface::schedule::pause(ctx.paths.config_dir(), &reason, Timestamp::now()).map_err(
+        |error| ToolError::Handler {
+            message: error.to_string(),
+        },
+    )
+}
+
+/// `_handle_schedule_resume` — `ScheduleManager.resume`.
+pub fn resume(ctx: &ToolContext, _arguments: &Value) -> Result<Value, ToolError> {
+    xpst_surface::schedule::resume(ctx.paths.config_dir()).map_err(|error| ToolError::Handler {
+        message: error.to_string(),
+    })
+}
+
+/// Python truthiness for a JSON value.
+fn truthy(value: Option<&Value>) -> bool {
+    match value {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(flag)) => *flag,
+        Some(Value::Number(number)) => number.as_f64().is_some_and(|float| float != 0.0),
+        Some(Value::String(text)) => !text.is_empty(),
+        Some(Value::Array(items)) => !items.is_empty(),
+        Some(Value::Object(map)) => !map.is_empty(),
+    }
+}
+
+/// `str(value)` for the scalars a schedule argument can carry.
+fn python_str(value: &Value) -> String {
+    match value {
+        Value::Null => "None".to_string(),
+        Value::Bool(true) => "True".to_string(),
+        Value::Bool(false) => "False".to_string(),
+        Value::Number(number) => number.to_string(),
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
 }

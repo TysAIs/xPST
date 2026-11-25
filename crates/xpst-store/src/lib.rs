@@ -41,6 +41,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod best_time;
 pub mod migrations;
 pub mod ownership;
 pub mod schema;

@@ -140,8 +140,8 @@
     },
     {
       "path": "disconnect",
-      "network": "yes",
-      "evidence": "revokes credentials with the platform where supported"
+      "network": "none",
+      "evidence": "connect.py:2227 disconnect_platform() deletes the stored credentials and flips accounts.<platform>.enabled; no network call exists (there is no platform revoke)"
     },
     {
       "path": "doctor",
@@ -170,8 +170,8 @@
     },
     {
       "path": "followers",
-      "network": "yes",
-      "evidence": "fetches follower counts from each platform"
+      "network": "possible",
+      "evidence": "the live fetch is best-effort and every failure is swallowed (cli.py:7632-7644, platforms/youtube.py:680-693); the payload is built from store.latest_followers() (cli.py:7628)"
     },
     {
       "path": "generate",
@@ -265,8 +265,8 @@
     },
     {
       "path": "media fetch",
-      "network": "yes",
-      "evidence": "downloads ffmpeg/ffprobe artifacts"
+      "network": "possible",
+      "evidence": "ensure_media_binaries skips every binary that already resolves (media/binaries.py:533-536); only a missing one is downloaded (media/binaries.py:244)"
     },
     {
       "path": "media status",
@@ -405,8 +405,8 @@
     },
     {
       "path": "setup",
-      "network": "yes",
-      "evidence": "runs the connect flows"
+      "network": "possible",
+      "evidence": "the transaction half is local (cli.py:447-469); the interactive executor pip-installs yt-dlp when it is absent (setup.py:100) and runs the connectivity probes (setup.py:346)"
     },
     {
       "path": "state",
@@ -480,8 +480,8 @@
     },
     {
       "path": "transcript",
-      "network": "possible",
-      "evidence": "serves a stored transcript; fetches one when it is missing"
+      "network": "none",
+      "evidence": "cli.py:7929 does three local lookups through Workspace.get_transcript() (workspace.py:108, create=False) and exits 1 on a miss; no network call exists"
     },
     {
       "path": "ui",

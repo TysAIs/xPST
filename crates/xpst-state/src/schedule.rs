@@ -26,6 +26,7 @@ use std::path::Path;
 use serde_json::{json, Map, Value};
 
 use crate::status::parse_instant;
+use crate::store::StateError;
 
 /// File names that make up the queue's local state.
 pub const SCHEDULE_FILE_NAME: &str = "schedule.json";
@@ -114,7 +115,7 @@ fn sort_key(entry: &Value) -> &str {
 }
 
 /// Copy of an entry plus its `scheduled_time_local` rendering.
-fn with_local_view(mut entry: Value) -> Value {
+pub fn with_local_view(mut entry: Value) -> Value {
     let rendered = local_time(&entry);
     if let Some(object) = entry.as_object_mut() {
         object.insert(
@@ -126,6 +127,10 @@ fn with_local_view(mut entry: Value) -> Value {
 }
 
 /// `ScheduleManager.local_time(entry).isoformat()`.
+///
+/// `isoformat()` drops the fraction when the microsecond field is zero and
+/// prints exactly six digits otherwise — jiff's `%.f` trims trailing zeros
+/// (`.5` for half a second), which is a different string for the same instant.
 fn local_time(entry: &Value) -> Option<String> {
     let raw = entry.get("scheduled_time")?.as_str()?;
     let entry_zone = entry
@@ -136,12 +141,151 @@ fn local_time(entry: &Value) -> Option<String> {
     let system = jiff::tz::TimeZone::system();
     let zone = entry_zone.unwrap_or(system.clone());
     let instant = parse_instant(raw)?;
-    Some(
-        instant
-            .to_zoned_datetime(zone)
-            .strftime("%Y-%m-%dT%H:%M:%S%.f%:z")
-            .to_string(),
-    )
+    let zoned = instant.to_zoned_datetime(zone);
+    Some(if zoned.subsec_nanosecond() / 1_000 == 0 {
+        zoned.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string()
+    } else {
+        zoned.strftime("%Y-%m-%dT%H:%M:%S%.6f%:z").to_string()
+    })
+}
+
+// ── `schedule add` ──────────────────────────────────────────────────────────
+
+/// Everything `ScheduleManager.add()` persists, already resolved by the caller.
+///
+/// The caller owns the clock, the zone and the randomness (a Rust `xpst-state`
+/// has no RNG and no wall clock of its own); this type owns the *document* —
+/// the key order, the UTC storage and the local view — because that is the
+/// contract the fire path and every reader depend on.
+pub struct NewEntry {
+    /// `str(uuid.uuid4())[:8]`.
+    pub id: String,
+    /// `str(uuid.uuid4())` — also stored as `idempotency_key`.
+    pub operation_id: String,
+    /// The resolved absolute media path, or `""` for a text post.
+    pub video_path: String,
+    pub caption: String,
+    /// `{platform: caption}` overrides, in the order the caller supplied them.
+    pub per_platform_captions: Vec<(String, String)>,
+    pub platforms: Vec<String>,
+    /// `to_utc(scheduled_time).isoformat()` — always `+00:00`.
+    pub scheduled_time_utc: String,
+    /// The IANA name of the zone the entry was entered in.
+    pub timezone: String,
+    /// `datetime.now().isoformat()` — naive local wall clock.
+    pub created_at: String,
+    pub repeat_rule: Option<String>,
+    pub content_type: Option<String>,
+    pub media_paths: Vec<String>,
+}
+
+/// `ScheduleManager.add()`'s entry document, in Python's key order.
+///
+/// `content_type` and `media_paths` are appended only when set, exactly as the
+/// Python `if content_type:` / `if media_paths:` blocks do — a legacy-shaped
+/// entry must not gain empty keys.
+#[must_use]
+pub fn new_entry(spec: &NewEntry) -> Value {
+    let mut entry = Map::new();
+    entry.insert("id".to_string(), Value::String(spec.id.clone()));
+    entry.insert(
+        "operation_id".to_string(),
+        Value::String(spec.operation_id.clone()),
+    );
+    entry.insert(
+        "idempotency_key".to_string(),
+        Value::String(spec.operation_id.clone()),
+    );
+    entry.insert(
+        "video_path".to_string(),
+        Value::String(spec.video_path.clone()),
+    );
+    entry.insert("caption".to_string(), Value::String(spec.caption.clone()));
+    let mut captions = Map::new();
+    for (platform, text) in &spec.per_platform_captions {
+        captions.insert(platform.clone(), Value::String(text.clone()));
+    }
+    entry.insert("per_platform_captions".to_string(), Value::Object(captions));
+    entry.insert(
+        "platforms".to_string(),
+        Value::Array(
+            spec.platforms
+                .iter()
+                .map(|name| Value::String(name.clone()))
+                .collect(),
+        ),
+    );
+    entry.insert(
+        "scheduled_time".to_string(),
+        Value::String(spec.scheduled_time_utc.clone()),
+    );
+    entry.insert("timezone".to_string(), Value::String(spec.timezone.clone()));
+    entry.insert("status".to_string(), Value::String("pending".to_string()));
+    entry.insert(
+        "created_at".to_string(),
+        Value::String(spec.created_at.clone()),
+    );
+    entry.insert("completed_at".to_string(), Value::Null);
+    entry.insert("error".to_string(), Value::Null);
+    entry.insert("post_results".to_string(), Value::Object(Map::new()));
+    entry.insert(
+        "repeat_rule".to_string(),
+        spec.repeat_rule
+            .as_ref()
+            .map_or(Value::Null, |rule| Value::String(rule.clone())),
+    );
+    if let Some(content_type) = &spec.content_type {
+        entry.insert(
+            "content_type".to_string(),
+            Value::String(content_type.clone()),
+        );
+    }
+    if !spec.media_paths.is_empty() {
+        entry.insert(
+            "media_paths".to_string(),
+            Value::Array(
+                spec.media_paths
+                    .iter()
+                    .map(|path| Value::String(path.clone()))
+                    .collect(),
+            ),
+        );
+    }
+    Value::Object(entry)
+}
+
+/// `ScheduleManager.add()`'s store half: reload under the process lock, append,
+/// and write the whole list back.
+///
+/// The lock spans the read and the write, which is the whole point: two
+/// concurrent adds that each loaded before the other saved would drop one
+/// entry. `render` is the caller's `json.dump(indent=2, ensure_ascii=False)`
+/// equivalent, so the byte contract stays with the renderer that owns it.
+pub fn append(
+    dir: &Path,
+    entry: Value,
+    render: &dyn Fn(&Value) -> String,
+) -> Result<(), StateError> {
+    let lock_path = dir.join(PAUSE_LOCK_FILE_NAME);
+    crate::store::with_exclusive_lock(&lock_path, || {
+        let path = dir.join(SCHEDULE_FILE_NAME);
+        let mut entries: Vec<Value> = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .and_then(|value| match value {
+                Value::Array(items) => Some(items),
+                _ => None,
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .filter(Value::is_object)
+            .collect();
+        entries.push(entry);
+        let text = render(&Value::Array(entries));
+        crate::store::write_atomic_bytes(&path, text.as_bytes())?;
+        restrict_to_owner(&path);
+        Ok(())
+    })
 }
 
 /// `ScheduleManager.pause_state()`. An unreadable marker fails closed: it still
@@ -243,6 +387,76 @@ pub fn payload(listing: &ScheduleListing) -> Value {
     }
     Value::Object(object)
 }
+
+/// The cross-process lock `ScheduleManager._process_lock()` takes.
+///
+/// Same file name as Python's, so a Rust `schedule pause` and a Python
+/// `schedule add` exclude each other instead of interleaving.
+pub const PAUSE_LOCK_FILE_NAME: &str = ".schedule.lock";
+
+/// `ScheduleManager.pause()`: create the pause marker.
+///
+/// Returns `true` when this call created the marker and `false` when the queue
+/// was already paused — the distinction the CLI reports as `already_paused`.
+///
+/// The marker is written exactly as Python writes it (`json.dumps(indent=2)`,
+/// no trailing newline, mode 0600) because `schedule list` reads it back and
+/// `pause_state()` reports `paused_at` verbatim.
+pub fn pause(dir: &Path, reason: &str, now: jiff::Timestamp) -> Result<bool, StateError> {
+    let lock_path = dir.join(PAUSE_LOCK_FILE_NAME);
+    crate::store::with_exclusive_lock(&lock_path, || {
+        let path = dir.join(PAUSE_FILE_NAME);
+        if path.exists() {
+            return Ok(false);
+        }
+        let stamp = now
+            .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+            // `datetime.now(timezone.utc).isoformat()` always carries six
+            // fractional digits and a `+00:00` offset.
+            .strftime("%Y-%m-%dT%H:%M:%S%.6f%:z")
+            .to_string();
+        let reason = serde_json::to_string(reason).map_err(|err| StateError::Io {
+            path: path.display().to_string(),
+            message: format!("cannot encode the pause reason: {err}"),
+        })?;
+        let payload = format!("{{\n  \"paused_at\": \"{stamp}\",\n  \"reason\": {reason}\n}}");
+        crate::store::write_atomic_bytes(&path, payload.as_bytes())?;
+        // `write_text_atomic` creates the file 0600; the marker names the
+        // operator's reason, which is not a secret but is still profile data.
+        restrict_to_owner(&path);
+        Ok(true)
+    })
+}
+
+/// `ScheduleManager.resume()`: remove the pause marker.
+///
+/// Returns `true` when a marker was removed and `false` when the queue was not
+/// paused. Snapshots are deliberately left alone — Python's `resume()` only
+/// unlinks the marker, and deleting a snapshot would destroy the only copy of a
+/// queue that was renamed aside.
+pub fn resume(dir: &Path) -> Result<bool, StateError> {
+    let lock_path = dir.join(PAUSE_LOCK_FILE_NAME);
+    crate::store::with_exclusive_lock(&lock_path, || {
+        let path = dir.join(PAUSE_FILE_NAME);
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(true),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(StateError::Io {
+                path: path.display().to_string(),
+                message: err.to_string(),
+            }),
+        }
+    })
+}
+
+#[cfg(unix)]
+fn restrict_to_owner(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+}
+
+#[cfg(not(unix))]
+fn restrict_to_owner(_path: &Path) {}
 
 #[cfg(test)]
 mod tests {
@@ -361,6 +575,61 @@ mod tests {
         let listing = listing(&dir);
         assert_eq!(listing.entries.len(), 1);
         assert_eq!(listing.entries[0]["id"], json!("keep"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pause_writes_the_marker_python_writes_and_is_idempotent() {
+        let dir = scratch("pause-write");
+        let now = parse_instant("2026-01-02T03:04:05.678901+00:00").unwrap();
+        assert!(pause(&dir, "operator pause", now).unwrap());
+        let written = std::fs::read_to_string(dir.join(PAUSE_FILE_NAME)).unwrap();
+        assert_eq!(
+            written,
+            "{\n  \"paused_at\": \"2026-01-02T03:04:05.678901+00:00\",\n  \"reason\": \"operator pause\"\n}",
+            "the marker must be byte-identical to json.dumps(indent=2)"
+        );
+        // A second pause reports "already paused" and leaves the first marker.
+        assert!(!pause(&dir, "second reason", now).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(dir.join(PAUSE_FILE_NAME)).unwrap(),
+            written
+        );
+        // The lock file is created, as Python's `_process_lock` does.
+        assert!(dir.join(PAUSE_LOCK_FILE_NAME).exists());
+        // And the listing sees it.
+        let listing = listing(&dir);
+        assert_eq!(listing.pause["paused"], json!(true));
+        assert_eq!(listing.pause["reason"], json!("operator pause"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pause_escapes_a_reason_that_would_break_the_json() {
+        let dir = scratch("pause-escape");
+        let now = parse_instant("2026-01-02T03:04:05+00:00").unwrap();
+        pause(&dir, "quote \" and \\ backslash", now).unwrap();
+        let written = std::fs::read_to_string(dir.join(PAUSE_FILE_NAME)).unwrap();
+        let parsed: Value = serde_json::from_str(&written).unwrap();
+        assert_eq!(parsed["reason"], json!("quote \" and \\ backslash"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resume_removes_only_the_marker_and_reports_whether_it_was_paused() {
+        let dir = scratch("resume");
+        let now = parse_instant("2026-01-02T03:04:05+00:00").unwrap();
+        pause(&dir, "why", now).unwrap();
+        let snapshot = dir.join(format!("{SNAPSHOT_PREFIX}20260101-000000"));
+        std::fs::write(&snapshot, "[]").unwrap();
+
+        assert!(resume(&dir).unwrap(), "a paused queue resumes");
+        assert!(!dir.join(PAUSE_FILE_NAME).exists());
+        assert!(
+            snapshot.exists(),
+            "resume must not delete a pause snapshot — it is the only copy"
+        );
+        assert!(!resume(&dir).unwrap(), "an unpaused queue reports false");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

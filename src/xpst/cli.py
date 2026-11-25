@@ -18,7 +18,6 @@ Uses Click for CLI framework with rich for beautiful output.
 """
 
 import asyncio
-import importlib.metadata
 import json as _json
 import os
 import shutil
@@ -58,6 +57,7 @@ from xpst.utils.credentials import CredentialStore
 from xpst.utils.logger import get_logger, setup_logging
 from xpst.utils.platform import get_config_dir, stdin_is_interactive
 from xpst.utils.quota import QuotaManager
+from xpst.version import package_version
 from xpst.wizard import GUIDE_PLATFORMS
 
 console = Console()
@@ -350,7 +350,7 @@ def load_config(config_path: str | None = None) -> XPSTConfig:
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose logging")
 @click.option("--quiet", "-q", is_flag=True, help="Suppress decorative output")
 @click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
-@click.version_option(version=importlib.metadata.version("xpst"), prog_name="xPST")
+@click.version_option(version=package_version(), prog_name="xPST")
 @click.pass_context
 def main(ctx: click.Context, config: str | None, verbose: bool, quiet: bool, json_output: bool):
     """

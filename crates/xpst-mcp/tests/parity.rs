@@ -283,11 +283,41 @@ fn the_ported_surface_is_exactly_the_read_only_network_free_set() {
     assert_eq!(
         ported,
         vec![
+            "kb_areas",
+            "kb_query",
+            "messenger_set_rules",
+            "xpst_activity",
+            "xpst_analytics",
+            "xpst_auth_start",
+            "xpst_best_time",
+            "xpst_bio_get",
+            "xpst_byo_app",
+            "xpst_capabilities",
+            "xpst_chat",
             "xpst_config_show",
+            "xpst_cross_post_analytics",
+            "xpst_disconnect",
+            "xpst_followers",
+            "xpst_generate_ideas",
+            "xpst_preflight",
             "xpst_providers",
             "xpst_rate_limit_status",
+            "xpst_readiness",
+            "xpst_schedule_add",
+            "xpst_schedule_cancel",
             "xpst_schedule_list",
+            "xpst_schedule_pause",
+            "xpst_schedule_resume",
+            "xpst_search",
+            "xpst_security_audit",
+            "xpst_setup_reset",
+            "xpst_setup_resume",
+            "xpst_setup_start",
+            "xpst_setup_status",
             "xpst_status",
+            "xpst_stream",
+            "xpst_suggest_caption",
+            "xpst_transcript",
         ]
     );
 }
@@ -334,7 +364,7 @@ fn the_readme_ported_and_stub_tables_match_the_registry() {
     stubbed.sort();
 
     assert_eq!(
-        readme_table_names("## Ported tools (read-only, no network)"),
+        readme_table_names("## Ported tools (local, no network)"),
         ported,
         "crates/xpst-mcp/README.md no longer matches the ported set"
     );

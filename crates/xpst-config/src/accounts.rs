@@ -231,6 +231,8 @@ fn yaml_type(value: &Value) -> &'static str {
         Value::Null => "null",
         Value::Bool(_) => "a boolean",
         Value::Number(_) => "a number",
+        Value::NonFinite(_) => "a non-finite number",
+        Value::Timestamp(_) => "a timestamp",
         Value::String(_) => "a string",
         Value::Sequence(_) => "a list",
         Value::Mapping(_) => "a mapping",

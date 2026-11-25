@@ -27,7 +27,25 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 19;
+const EXPECTED_SCENARIOS: usize = 249;
+
+/// The environment both engines are run under, whatever the caller inherited.
+///
+/// The capture script pins the same block (`PINNED_ENV` in
+/// `xtask/scripts/capture_local_surface.py`) and records it in the fixture, so
+/// a capture and a replay cannot disagree about the environment. A scenario's
+/// own `env` is applied after these and therefore overrides them.
+const PINNED_ENV: &[(&str, &str)] = &[
+    // `ScheduleManager._tz` is `local_zone()`, which reads TZ first, so an
+    // entry with no `timezone` field renders in the machine zone.
+    ("TZ", "UTC"),
+    // rich's log stamp is `[%x %X]`; a locale that Python adopted would change
+    // it, and stderr is part of a mismatch report.
+    ("LC_ALL", "C"),
+    ("LANG", "C"),
+    // A payload that serialises a set would otherwise vary between runs.
+    ("PYTHONHASHSEED", "0"),
+];
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -74,12 +92,113 @@ impl Profile {
         let Some(files) = seed.as_object() else {
             return;
         };
+        let root = self.dir.display().to_string();
         for (relative, content) in files {
             let path = self.dir.join(relative);
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).expect("seed directory");
             }
-            std::fs::write(&path, content.as_str().expect("seed is text")).expect("seed file");
+            // `PROFILE` is the scratch profile itself, so a seeded config can
+            // name a path inside it (a local source folder, a download
+            // directory). The capture script substitutes it too.
+            let text = content
+                .as_str()
+                .expect("seed is text")
+                .replace("PROFILE", &root);
+            std::fs::write(&path, text).expect("seed file");
+        }
+    }
+
+    /// Seed a file whose bytes are not text (a still image's header), recorded
+    /// as base64 so an image row is a real header read rather than a text file
+    /// wearing a `.png` name.
+    fn seed_binary(&self, files: &Value) {
+        let Some(entries) = files.as_object() else {
+            return;
+        };
+        for (relative, encoded) in entries {
+            let path = self.dir.join(relative);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("seed directory");
+            }
+            let bytes = base64_decode(encoded.as_str().expect("binary seed is text"));
+            std::fs::write(&path, bytes).expect("seed binary file");
+        }
+    }
+
+    /// Seed JSON credentials (a stored stream key, an app credential) with the
+    /// same Fernet store the Python engine writes, so both engines read the same
+    /// material.
+    fn seed_credential_json(&self, credentials: &Value) {
+        let Some(entries) = credentials.as_object() else {
+            return;
+        };
+        let store = xpst_auth::credentials::CredentialStore::new(&self.dir);
+        for (key, value) in entries {
+            store.store_json(key, value).expect("seed JSON credential");
+        }
+    }
+
+    /// Seed the encrypted credential store the way the capture script does, so a
+    /// command that reads a stored secret sees the same value in both engines.
+    fn seed_credentials(&self, credentials: &Value) {
+        let Some(entries) = credentials.as_object() else {
+            return;
+        };
+        let store = xpst_auth::credentials::CredentialStore::new(&self.dir);
+        for (key, value) in entries {
+            store
+                .store(key, value.as_str().expect("credential is text"))
+                .expect("seed credential");
+        }
+    }
+
+    /// Mark seeded files executable (`executable` rows).
+    ///
+    /// The readiness and `media fetch` rows point the engine at a stub binary;
+    /// a stub without the exec bit is reported as "Permission denied", which is
+    /// a property of the harness rather than of the engine.
+    fn mark_executable(&self, paths: &Value) {
+        let Some(entries) = paths.as_array() else {
+            return;
+        };
+        for relative in entries {
+            let path = self
+                .dir
+                .join(relative.as_str().expect("executable path is text"));
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut mode = std::fs::metadata(&path)
+                    .expect("seeded executable")
+                    .permissions();
+                mode.set_mode(mode.mode() | 0o755);
+                std::fs::set_permissions(&path, mode).expect("mark executable");
+            }
+            #[cfg(not(unix))]
+            let _ = path;
+        }
+    }
+
+    /// Seed a SQLite store the way the capture script does (`sqlite` rows):
+    /// the analytics ledger is a database, not a JSON file, so a scenario that
+    /// pins `best-time` has to create it with the same statements.
+    fn seed_sqlite(&self, databases: &Value) {
+        let Some(entries) = databases.as_object() else {
+            return;
+        };
+        for (relative, statements) in entries {
+            let path = self.dir.join(relative);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("seed sqlite directory");
+            }
+            let connection =
+                rusqlite::Connection::open(&path).expect("open the seeded sqlite store");
+            for statement in statements.as_array().expect("sqlite statements") {
+                connection
+                    .execute_batch(statement.as_str().expect("sqlite statement is text"))
+                    .expect("seed sqlite statement");
+            }
         }
     }
 
@@ -94,17 +213,525 @@ impl Drop for Profile {
     }
 }
 
-fn run(binary: &str, profile: &Profile, argv: &[String]) -> (i32, String, String) {
-    let output = Command::new(binary)
-        .args(argv)
-        .env("XPST_CONFIG_DIR", profile.path())
-        .output()
-        .expect("the rust binary runs");
+/// The profile directory both engines are pointed at.
+///
+/// A scenario may pin it to a subdirectory (`config_dir`): the config write
+/// commands need that, because Python resolves `~/.xpst/config.yaml` from HOME
+/// (and `config import` hardcodes it) while the Rust engine resolves
+/// `XPST_CONFIG_DIR`. HOME=profile + XPST_CONFIG_DIR=profile/.xpst makes both
+/// engines touch the same file.
+fn config_dir_for(row: &Value, profile: &Profile) -> std::path::PathBuf {
+    match row.get("config_dir").and_then(Value::as_str) {
+        Some(suffix) if !suffix.is_empty() => profile.path().join(suffix),
+        _ => profile.path().to_path_buf(),
+    }
+}
+
+fn run(
+    binary: &str,
+    profile: &Profile,
+    argv: &[String],
+    env: &[(String, String)],
+    config_dir: &std::path::Path,
+    cwd: Option<&Path>,
+) -> (i32, String, String) {
+    let mut command = Command::new(binary);
+    command.args(argv).env("XPST_CONFIG_DIR", config_dir);
+    // A `cwd` scenario runs from the scratch profile so the config path in the
+    // message is relative and therefore machine-independent.
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
+    // The capture strips inherited `XPST_*` overrides so the fixture is
+    // machine-independent; the replay must do the same or a developer with
+    // `XPST_X_AUTH_MODE` exported would see a spurious failure.
+    for (name, _) in std::env::vars() {
+        if name.starts_with("XPST_") {
+            command.env_remove(&name);
+        }
+    }
+    command.env("XPST_CONFIG_DIR", config_dir);
+    // The pinned environment after the purge; the scenario's own `env` is
+    // applied after and therefore wins.
+    for (name, value) in PINNED_ENV {
+        command.env(name, value);
+    }
+    for (name, value) in env {
+        command.env(
+            name,
+            value.replace("PROFILE", &profile.path().display().to_string()),
+        );
+    }
+    let output = command.output().expect("the rust binary runs");
     (
         output.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&output.stdout).to_string(),
         String::from_utf8_lossy(&output.stderr).to_string(),
     )
+}
+
+/// The scenario's extra environment, with `PROFILE` substituted.
+fn env_for(row: &Value, profile: &Profile) -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = row
+        .get("env")
+        .and_then(Value::as_object)
+        .map(|map| {
+            map.iter()
+                .map(|(name, value)| {
+                    (
+                        name.clone(),
+                        value
+                            .as_str()
+                            .unwrap_or_default()
+                            .replace("PROFILE", &profile.path().display().to_string()),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if row.get("config_dir").and_then(Value::as_str).is_some() {
+        env.push(("HOME".to_string(), profile.path().display().to_string()));
+    }
+    env
+}
+
+/// Replace the scratch profile's absolute path with `<PROFILE>` everywhere in a
+/// payload, and blank the wall-clock fields the fixture masks.
+fn normalize(
+    value: &mut Value,
+    profile: &Profile,
+    mask: &[String],
+    mask_findings: &[String],
+    mask_checks: &[String],
+    mask_lines: &[String],
+) {
+    let root = profile.path().display().to_string();
+    walk(value, &root, mask, mask_findings, mask_checks, mask_lines);
+}
+
+/// The recursive half of [`normalize`]: the capture script applies every mask
+/// at any depth, so a `checks` array nested under `readiness` is masked too.
+fn walk(
+    value: &mut Value,
+    root: &str,
+    mask: &[String],
+    mask_findings: &[String],
+    mask_checks: &[String],
+    mask_lines: &[String],
+) {
+    match value {
+        Value::String(text) => {
+            if text.contains(root) {
+                *text = text.replace(root, "<PROFILE>");
+            }
+            if !mask_lines.is_empty() {
+                *text = mask_line_prefixes(text, mask_lines);
+            }
+        }
+        Value::Array(items) => items
+            .iter_mut()
+            .for_each(|item| walk(item, root, mask, mask_findings, mask_checks, mask_lines)),
+        Value::Object(map) => {
+            for item in map.values_mut() {
+                walk(item, root, mask, mask_findings, mask_checks, mask_lines);
+            }
+            for path in mask {
+                if map.contains_key(path) {
+                    map.insert(path.clone(), Value::String("<TS>".to_string()));
+                }
+            }
+            // `mask_checks` names readiness checks whose answer is a property of
+            // the machine rather than of the engine (the `python` row: a Rust
+            // binary has no Python runtime to version). The row keeps its id,
+            // label, ok, severity and action; only the message and details are
+            // blanked, so a dropped or reordered row still fails.
+            for key in ["checks", "blocking", "warnings"] {
+                if let Some(Value::Array(items)) = map.get_mut(key) {
+                    for item in items.iter_mut() {
+                        let Value::Object(check) = item else { continue };
+                        let matched = check
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .is_some_and(|id| mask_checks.iter().any(|name| name == id));
+                        if matched {
+                            check.insert("message".to_string(), Value::String("<ENV>".to_string()));
+                            check.insert("details".to_string(), Value::String("<ENV>".to_string()));
+                        }
+                    }
+                }
+            }
+            // `mask_findings` names `kb doctor` findings whose answer depends on
+            // the interpreter's installed packages (`dependencies`). The finding
+            // is blanked and the severity count it contributed is decremented, so
+            // every other finding and the remaining counts are still compared
+            // exactly.
+            if !mask_findings.is_empty() {
+                let mut warnings = 0u64;
+                let mut errors = 0u64;
+                if let Some(Value::Array(items)) = map.get_mut("findings") {
+                    for item in items.iter_mut() {
+                        let Value::Object(finding) = item else {
+                            continue;
+                        };
+                        let matched = finding
+                            .get("check")
+                            .and_then(Value::as_str)
+                            .is_some_and(|check| mask_findings.iter().any(|name| name == check));
+                        if !matched {
+                            continue;
+                        }
+                        match finding.get("severity").and_then(Value::as_str) {
+                            Some("warning") => warnings += 1,
+                            Some("error") => errors += 1,
+                            _ => {}
+                        }
+                        finding.insert("severity".to_string(), Value::String("<ENV>".to_string()));
+                        finding.insert("message".to_string(), Value::String("<ENV>".to_string()));
+                    }
+                }
+                for (key, count) in [("warning_count", warnings), ("error_count", errors)] {
+                    if count > 0 {
+                        let current = map.get(key).and_then(Value::as_u64).unwrap_or(0);
+                        map.insert(key.to_string(), Value::from(current.saturating_sub(count)));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Decode standard base64 (with padding), for the `binary` seed rows.
+///
+/// Dependency-free on purpose: the workspace has no base64 dev-dependency for
+/// this crate, and a 20-line decoder is smaller than the dependency decision.
+fn base64_decode(text: &str) -> Vec<u8> {
+    fn value(byte: u8) -> Option<u8> {
+        match byte {
+            b'A'..=b'Z' => Some(byte - b'A'),
+            b'a'..=b'z' => Some(byte - b'a' + 26),
+            b'0'..=b'9' => Some(byte - b'0' + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+    let mut out = Vec::new();
+    let mut buffer = 0u32;
+    let mut bits = 0u32;
+    for byte in text.bytes() {
+        if byte == b'=' || byte.is_ascii_whitespace() {
+            continue;
+        }
+        let Some(six) = value(byte) else {
+            panic!("binary seed is not base64: {byte}");
+        };
+        buffer = (buffer << 6) | u32::from(six);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buffer >> bits) as u8);
+        }
+    }
+    out
+}
+
+/// FNV-1a 64-bit, the same digest `capture_local_surface.py` records.
+///
+/// Dependency-free on purpose: this is a regression guard, not a security
+/// boundary, and adding a hashing crate to the workspace for a test would be a
+/// dependency decision the card does not need.
+fn fnv1a64(text: &str) -> String {
+    let mut value: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in text.as_bytes() {
+        value ^= u64::from(*byte);
+        value = value.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{value:016x}")
+}
+
+fn mask_for(row: &Value) -> Vec<String> {
+    mask_list(row, "mask")
+}
+
+/// The string list a row records under `key` (`mask`, `mask_findings`,
+/// `mask_checks`), or an empty list.
+fn mask_list(row: &Value, key: &str) -> Vec<String> {
+    row.get(key)
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Replace the two wall-clock values a config-error row carries: the
+/// `config.yaml.corrupt_<epoch>` backup name and the `[MM/DD/YY HH:MM:SS]` log
+/// timestamp. The capture script does the same, so the row is reproducible.
+fn normalize_clock(text: &str) -> String {
+    let mut without_epoch = String::with_capacity(text.len());
+    let mut rest = text;
+    loop {
+        match rest.find("corrupt_") {
+            Some(position) => {
+                without_epoch.push_str(&rest[..position + "corrupt_".len()]);
+                let tail = &rest[position + "corrupt_".len()..];
+                let digits = tail.chars().take_while(|ch| ch.is_ascii_digit()).count();
+                if digits > 0 {
+                    without_epoch.push_str("<EPOCH>");
+                }
+                rest = &tail[digits..];
+            }
+            None => {
+                without_epoch.push_str(rest);
+                break;
+            }
+        }
+    }
+
+    let chars: Vec<char> = without_epoch.chars().collect();
+    let mut out = String::with_capacity(without_epoch.len());
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] == '[' && index + 19 <= chars.len() {
+            let candidate: String = chars[index..index + 19].iter().collect();
+            if is_log_stamp(&candidate) {
+                out.push_str("[<TIME>]");
+                index += 19;
+                continue;
+            }
+        }
+        out.push(chars[index]);
+        index += 1;
+    }
+    out
+}
+
+/// `[MM/DD/YY HH:MM:SS]` — `RichHandler`'s default `log_time_format`.
+fn is_log_stamp(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+    chars.len() == 19
+        && chars[0] == '['
+        && chars[18] == ']'
+        && chars[1..3].iter().all(|ch| ch.is_ascii_digit())
+        && chars[3] == '/'
+        && chars[4..6].iter().all(|ch| ch.is_ascii_digit())
+        && chars[6] == '/'
+        && chars[7..9].iter().all(|ch| ch.is_ascii_digit())
+        && chars[9] == ' '
+        && chars[10..12].iter().all(|ch| ch.is_ascii_digit())
+        && chars[12] == ':'
+        && chars[13..15].iter().all(|ch| ch.is_ascii_digit())
+        && chars[15] == ':'
+        && chars[16..18].iter().all(|ch| ch.is_ascii_digit())
+}
+
+/// Windows renders a relative path with `\`; the fixture was captured with
+/// `/`. The two are the same length, so the wrap is unaffected.
+fn normalize_separators(text: &str) -> String {
+    text.replace('\\', "/")
+}
+
+/// Compare the `backups/` files a corrupt-config run left behind.
+fn assert_backups_match(row: &Value, profile: &Profile, scenario: &str) {
+    let Some(expected) = row.get("backups").and_then(Value::as_array) else {
+        return;
+    };
+    assert!(
+        !expected.is_empty(),
+        "scenario `{scenario}` records an empty backups list"
+    );
+    let relative = row
+        .get("backup_dir")
+        .and_then(Value::as_str)
+        .unwrap_or("backups");
+    let dir = profile.path().join(relative);
+    let mut actual: Vec<(String, String)> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            actual.push((
+                normalize_clock(&entry.file_name().to_string_lossy()),
+                std::fs::read_to_string(entry.path()).unwrap_or_default(),
+            ));
+        }
+    }
+    actual.sort();
+    let want: Vec<(String, String)> = expected
+        .iter()
+        .map(|row| {
+            (
+                row["name"].as_str().unwrap_or_default().to_string(),
+                row["content"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        actual, want,
+        "scenario `{scenario}`: the backup the engine wrote differs from the Python engine's"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for (index, entry) in std::fs::read_dir(&dir)
+            .expect("backup directory")
+            .flatten()
+            .enumerate()
+        {
+            let mode = format!(
+                "0o{:o}",
+                entry.metadata().unwrap().permissions().mode() & 0o777
+            );
+            let want_mode = expected[index]["mode"].as_str().unwrap_or_default();
+            assert_eq!(
+                mode, want_mode,
+                "scenario `{scenario}`: backup mode differs from the Python engine's"
+            );
+        }
+    }
+}
+
+/// Replace the values `mask` names, wherever they appear.
+///
+/// A bare name (`checked_at`) is replaced at ANY depth — the doctor payload
+/// carries it once per provider. A dotted name (`environment.network.detail`)
+/// is a path, and a segment that is not a key selects the list element whose
+/// `name` field matches it. Masked values become `"<TS>"`, so the rest of the
+/// document is still compared byte for byte.
+fn mask_payload(payload: &mut Value, mask: &[String]) {
+    fn walk(value: &mut Value, keys: &[String]) {
+        let Some((head, rest)) = keys.split_first() else {
+            *value = Value::String("<TS>".to_string());
+            return;
+        };
+        match value {
+            Value::Object(map) => {
+                if let Some(child) = map.get_mut(head) {
+                    walk(child, rest);
+                }
+            }
+            Value::Array(items) => {
+                for item in items.iter_mut() {
+                    if item.get("name").and_then(Value::as_str) == Some(head.as_str()) {
+                        walk(item, rest);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn replace(value: &mut Value, key: &str) {
+        match value {
+            Value::Object(map) => {
+                for (name, child) in map.iter_mut() {
+                    if name == key {
+                        *child = Value::String("<TS>".to_string());
+                    } else {
+                        replace(child, key);
+                    }
+                }
+            }
+            Value::Array(items) => {
+                for item in items.iter_mut() {
+                    replace(item, key);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for entry in mask {
+        if entry.contains('.') {
+            let keys: Vec<String> = entry.split('.').map(str::to_string).collect();
+            walk(payload, &keys);
+        } else {
+            replace(payload, entry);
+        }
+    }
+}
+
+/// Mask a `--json` payload and re-render it with Python's separators.
+///
+/// The re-render is asserted to reproduce the original bytes before masking, so
+/// the comparison stays a byte comparison of the whole document (key order,
+/// separators, number formatting) with only the named values replaced.
+fn masked_stdout(text: &str, row: &Value) -> String {
+    let mask = mask_for(row);
+    let sections = mask_list(row, "mask_stdout_keys");
+    let version = row
+        .get("mask_engine_version")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if mask.is_empty() && sections.is_empty() && !version {
+        return text.to_string();
+    }
+    let mut payload: Value = serde_json::from_str(text.trim())
+        .unwrap_or_else(|error| panic!("stdout is not JSON ({error}):\n{text}"));
+    let rendered = xpst_config::python_style_json(&xpst_cli::output::from_json(&payload))
+        .expect("render the payload");
+    assert_eq!(
+        rendered,
+        text.trim_end_matches('\n'),
+        "stdout is not `json.dumps` output; a masked byte case would be comparing a re-rendered \
+         document"
+    );
+    mask_payload(&mut payload, &mask);
+    if let Value::Object(map) = &mut payload {
+        for key in &sections {
+            if map.contains_key(key) {
+                map.insert(key.clone(), Value::String("<ENV>".to_string()));
+            }
+        }
+    }
+    let mut masked = xpst_config::python_style_json(&xpst_cli::output::from_json(&payload))
+        .expect("render the masked payload");
+    if version {
+        // The engine's own version literal, asked of the binary under test the
+        // way the capture script asks the Python engine (`--version`).
+        let output = std::process::Command::new(binary())
+            .arg("--version")
+            .output()
+            .expect("run the binary for its version");
+        let text = String::from_utf8_lossy(&output.stdout);
+        let reported = text
+            .trim()
+            .rsplit(' ')
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        masked = masked.replace(
+            &serde_json::to_string(&reported).expect("serialise the version"),
+            "\"<VERSION>\"",
+        );
+    }
+    // The capture script's two mask paths differ in one byte: a row with `mask`
+    // is re-rendered a second time (no trailing newline), while a row masked
+    // only by `mask_stdout_keys`/`mask_engine_version` keeps the newline the
+    // engine printed.
+    if mask.is_empty() {
+        masked.push('\n');
+    }
+    masked
+}
+
+/// Point the connectivity probe at a loopback listener.
+///
+/// `check_network()` is the one environment check whose answer depends on the
+/// machine (and whose detail carries a measured latency). A listener makes the
+/// answer deterministically "online" on every runner; the detail is masked.
+fn network_probe_env(env: &mut Vec<(String, String)>) -> std::net::TcpListener {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("loopback listener");
+    let port = listener.local_addr().expect("listener address").port();
+    env.push((
+        "XPST_NETWORK_PROBE_HOST".to_string(),
+        "127.0.0.1".to_string(),
+    ));
+    env.push(("XPST_NETWORK_PROBE_PORT".to_string(), port.to_string()));
+    listener
 }
 
 fn argv_for(row: &Value, profile: &Profile) -> Vec<String> {
@@ -136,7 +763,12 @@ fn argv_for(row: &Value, profile: &Profile) -> Vec<String> {
                 .collect();
         }
     }
-    argv
+    // `PROFILE` is the scratch profile itself: a scenario that writes a file
+    // names it inside the profile so the run stays hermetic.
+    let root = profile.path().display().to_string();
+    argv.into_iter()
+        .map(|argument| argument.replace("PROFILE", &root))
+        .collect()
 }
 
 /// Compare the payload, allowing for the two values the fixture cannot pin:
@@ -187,6 +819,101 @@ fn assert_payload_matches(expected: &Value, actual: &Value, scenario: &str) {
     assert_eq!(actual, expected, "scenario `{scenario}` payload drifted");
 }
 
+/// Compare the files a scenario wrote, byte for byte (after the same
+/// `<PROFILE>` normalisation the payload gets).
+/// Replace the tail of any line that starts with a named prefix.
+///
+/// `plugins docs` stamps `Auto-generated on <wall clock>` and `analytics
+/// export` writes `"exported_at": "<wall clock>"`; two runs never agree on
+/// either. The prefix is kept, so the key is still compared and only the value
+/// after it is blanked.
+fn mask_line_prefixes(text: &str, prefixes: &[String]) -> String {
+    text.split('\n')
+        .map(|line| {
+            for prefix in prefixes {
+                if line.starts_with(prefix.as_str()) {
+                    return format!("{prefix}<MASK>");
+                }
+            }
+            line.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Replace the *values* of named top-level keys inside a written JSON file.
+///
+/// `schedule add` writes a `uuid4` id, an operation id and a wall-clock
+/// `created_at` into `schedule.json`; two runs never agree on them. Only those
+/// values are substituted — every other byte, including the key order and the
+/// `json.dump(indent=2)` separators, is still compared, which is the contract
+/// the fire path reads back.
+fn mask_file_keys(text: &str, keys: &[String]) -> String {
+    if keys.is_empty() {
+        return text.to_string();
+    }
+    let Ok(Value::Array(entries)) = serde_json::from_str::<Value>(text) else {
+        return text.to_string();
+    };
+    let mut masked = text.to_string();
+    for entry in entries {
+        let Value::Object(entry) = entry else {
+            continue;
+        };
+        for key in keys {
+            let Some(value) = entry.get(key) else {
+                continue;
+            };
+            let serialized = serde_json::to_string(value).expect("serialise the masked value");
+            masked = masked.replace(&serialized, "\"<TS>\"");
+        }
+    }
+    masked
+}
+
+fn assert_files_match(row: &Value, profile: &Profile, scenario: &str) {
+    let Some(expected) = row.get("files").and_then(Value::as_object) else {
+        return;
+    };
+    assert!(
+        !expected.is_empty(),
+        "scenario `{scenario}` records an empty files map"
+    );
+    for (relative, want) in expected {
+        let path = profile.path().join(relative);
+        let actual = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("scenario `{scenario}`: {relative} unreadable: {error}"))
+            .replace(&profile.path().display().to_string(), "<PROFILE>");
+        let actual = mask_line_prefixes(&actual, &mask_list(row, "mask_lines"));
+        let actual = mask_file_keys(&actual, &mask_list(row, "mask_file_keys"));
+        assert_eq!(
+            actual,
+            want.as_str().unwrap_or_default(),
+            "scenario `{scenario}`: {relative} differs from the Python engine"
+        );
+    }
+}
+
+#[test]
+fn the_fixture_records_the_environment_this_test_pins() {
+    // The capture and the replay are two programs; if they pin different
+    // environments the fixture is a record of a run this test never repeats,
+    // and the difference shows up as a payload mismatch with no cause.
+    let document = document();
+    let recorded = document
+        .get("environment")
+        .and_then(Value::as_object)
+        .expect("the fixture records the pinned environment");
+    let expected: serde_json::Map<String, Value> = PINNED_ENV
+        .iter()
+        .map(|(name, value)| (name.to_string(), Value::String(value.to_string())))
+        .collect();
+    assert_eq!(
+        recorded, &expected,
+        "the fixture was captured under a different environment than this test replays"
+    );
+}
+
 #[test]
 fn every_recorded_scenario_matches_the_python_engine() {
     let document = document();
@@ -195,8 +922,25 @@ fn every_recorded_scenario_matches_the_python_engine() {
         let name = row["name"].as_str().expect("scenario name");
         let profile = Profile::new(name);
         profile.seed(&row["seed"]);
+        profile.seed_binary(&row["binary"]);
+        profile.mark_executable(&row["executable"]);
+        profile.seed_sqlite(&row["sqlite"]);
+        profile.seed_credentials(&row["credential"]);
+        profile.seed_credential_json(&row["credential_json"]);
         let argv = argv_for(row, &profile);
-        let (code, stdout, stderr) = run(binary(), &profile, &argv);
+        let mut env = env_for(row, &profile);
+        let _listener = row
+            .get("network_probe")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            .then(|| network_probe_env(&mut env));
+        let config_dir = config_dir_for(row, &profile);
+        let cwd = row
+            .get("cwd")
+            .and_then(Value::as_str)
+            .map(|_| profile.path().to_path_buf());
+        let (code, stdout, stderr) =
+            run(binary(), &profile, &argv, &env, &config_dir, cwd.as_deref());
         let compare = row["compare"].as_str().expect("compare mode");
 
         match compare {
@@ -206,10 +950,93 @@ fn every_recorded_scenario_matches_the_python_engine() {
                     row["exit_code"].as_i64().unwrap_or(-1) as i32,
                     "scenario `{name}` exit code drifted: {stderr}"
                 );
-                let actual: Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
-                    panic!("scenario `{name}` did not print JSON ({error}):\n{stdout}\n{stderr}")
-                });
+                let mut actual: Value =
+                    serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
+                        panic!(
+                            "scenario `{name}` did not print JSON ({error}):\n{stdout}\n{stderr}"
+                        )
+                    });
+                normalize(
+                    &mut actual,
+                    &profile,
+                    &mask_for(row),
+                    &mask_list(row, "mask_findings"),
+                    &mask_list(row, "mask_checks"),
+                    &mask_list(row, "mask_lines"),
+                );
                 assert_payload_matches(&row["stdout_json"], &actual, name);
+                assert_files_match(row, &profile, name);
+            }
+            "stdout" => {
+                assert_eq!(
+                    code,
+                    row["exit_code"].as_i64().unwrap_or(-1) as i32,
+                    "scenario `{name}` exit code drifted: {stderr}"
+                );
+                let expected = row["stdout"]
+                    .as_str()
+                    .expect("stdout scenarios record the text");
+                let actual = stdout.replace(&profile.path().display().to_string(), "<PROFILE>");
+                let actual = masked_stdout(&actual, row);
+                assert_eq!(actual, expected, "scenario `{name}` stdout drifted");
+            }
+            "text" => {
+                // The config-error path is Rich text on stdout plus a
+                // RichHandler block on stderr, even under `--json`; both are
+                // the expectation, and the backup the run wrote is part of it.
+                assert_eq!(
+                    code,
+                    row["exit_code"].as_i64().unwrap_or(-1) as i32,
+                    "scenario `{name}` exit code drifted: {stderr}"
+                );
+                let root = profile.path().display().to_string();
+                let expected_stdout = row["stdout"]
+                    .as_str()
+                    .expect("text scenarios record stdout");
+                let actual_stdout =
+                    normalize_clock(&normalize_separators(&stdout.replace(&root, "<PROFILE>")));
+                assert_eq!(
+                    actual_stdout, expected_stdout,
+                    "scenario `{name}` stdout drifted"
+                );
+                let expected_stderr = row["stderr"]
+                    .as_str()
+                    .expect("text scenarios record stderr");
+                let actual_stderr =
+                    normalize_clock(&normalize_separators(&stderr.replace(&root, "<PROFILE>")));
+                assert_eq!(
+                    actual_stderr, expected_stderr,
+                    "scenario `{name}` stderr drifted"
+                );
+                assert_backups_match(row, &profile, name);
+            }
+            "digest" => {
+                // `providers` prints ~54 kB; the fixture pins a digest of the
+                // exact stdout instead of the document. Any byte change fails,
+                // and `capture_local_surface.py --check-with` prints the real
+                // diff in CI.
+                assert_eq!(
+                    code,
+                    row["exit_code"].as_i64().unwrap_or(-1) as i32,
+                    "scenario `{name}` exit code drifted: {stderr}"
+                );
+                let actual = stdout.replace(&profile.path().display().to_string(), "<PROFILE>");
+                let expected = row["stdout_digest"]
+                    .as_str()
+                    .expect("digest scenarios record the digest");
+                assert_eq!(
+                    fnv1a64(&actual),
+                    expected,
+                    "scenario `{name}` stdout drifted ({} bytes, expected {}):\n{}",
+                    actual.len(),
+                    row["stdout_bytes"].as_u64().unwrap_or(0),
+                    actual.chars().take(400).collect::<String>()
+                );
+                assert_eq!(
+                    actual.len() as u64,
+                    row["stdout_bytes"].as_u64().unwrap_or(0),
+                    "scenario `{name}` stdout length drifted"
+                );
             }
             "exit" => {
                 assert_eq!(
@@ -254,6 +1081,9 @@ fn a_fresh_profile_is_created_with_the_same_config_the_python_engine_writes() {
         binary(),
         &profile,
         &["status".to_string(), "--json".to_string()],
+        &[],
+        profile.path(),
+        None,
     );
     assert_eq!(code, 0, "status must not fail on a fresh profile: {stderr}");
     let written = std::fs::read_to_string(profile.path().join("config.yaml"))
@@ -300,6 +1130,9 @@ fn schedule_list_never_writes_into_the_profile() {
             "list".to_string(),
             "--json".to_string(),
         ],
+        &[],
+        profile.path(),
+        None,
     );
     assert_eq!(code, 0, "{stderr}");
     let after = std::fs::read_dir(profile.path())

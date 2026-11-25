@@ -259,15 +259,16 @@ jobs:
         run: cargo test --workspace
 
       # The capture script introspects the real Click tree, so it needs the
-      # Python engine importable. A base install (`-e .`, no extras) is enough
-      # to import `xpst.cli`.
+      # Python engine importable. `[mcp]` is required as well: the local-surface
+      # check below replays `mcp list`, and without the extra the Python engine
+      # answers `MCP_EXTRA_MISSING` where the Rust engine serves the registry.
       #
       # `cargo xtask parity` compares the *command surface* (not the raw bytes:
       # provenance names the local commit, and Click's flag-default sentinel
       # varies by version), so this is the same check a developer runs.
       - name: CLI parity manifest is current
         run: |
-          python -m pip install --quiet -e .
+          python -m pip install --quiet -e ".[mcp]"
           XPST_PYTHON=python cargo xtask parity
 
       # The Rust tests replay checked-in fixtures captured from the Python

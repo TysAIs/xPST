@@ -25,18 +25,24 @@ installer stays gated by `.github/workflows/tauri-release.yml` until then. So
 "one binary, no interpreter" is met by `xpst` alone — it depends on no Python, no
 `libsqlite3`, no OpenSSL, and no plugin loader.
 
-## 2. Measured against D-4 (this tree, 2026-11-17)
+## 2. Measured against D-4 (this tree, 2026-11-25)
 
 Host: x86_64 Linux, rustc 1.99.1, profile from the root `Cargo.toml`.
 Record: [`../../perf/rust-binary-budget.json`](../../perf/rust-binary-budget.json).
 
+The tree measured here is the Rust CLI stack tip
+(`feat/rust-cli-tranche-11-2026-11-25` @ 95918c1), not `main`: `main` @ b8d1553
+still measures 1,704,896 B for `xpst` and 2,274,048 B for `xpst-mcp`, because the
+MCP-in-CLI move (PR #34) is still in the stack. The budget record names the tree
+it was taken on for the same reason.
+
 | D-4 metric | Target | Measured | Verdict |
 |---|---|---|---|
-| Engine payload, one binary | ≤ 25 MiB | **961,960 B = 0.92 MiB** (`xpst`, 3.7 % of target) | met, 24.1 MiB spare |
-| Second shipped binary | n/a (not a D-4 row) | 3,146,912 B = 3.00 MiB (`xpst-mcp`) | — |
-| Install without media tools | ≤ 30 MiB | **4.11 MB across both binaries** (formal installer not built yet) | met on binaries alone |
+| Engine payload, one binary | ≤ 25 MiB | **6,154,856 B = 5.87 MiB** (`xpst`, 23.5 % of target) | met, 19.1 MiB spare |
+| Second shipped binary | n/a (not a D-4 row) | 4,115,944 B = 3.92 MiB (`xpst-mcp`) | — |
+| Install without media tools | ≤ 30 MiB | **10.27 MB across both binaries** (formal installer not built yet) | met on binaries alone |
 | Install with media tools | ≤ 120 MiB | not measurable by us — see §6, FFmpeg is not ours to ship | — |
-| Cold boot to usable | ≤ 1 s median | **4.1–31.9 ms median** for the engine process, cache dropped (five 30-sample runs on a shared host) | met for the engine half; the shell half is P4 |
+| Cold boot to usable | ≤ 1 s median | **226 ms median** for the engine process, cache dropped, on a host at load average 16 of 16 cores; 4.1 ms median on a quiet host (2026-11-17) | met for the engine half; the shell half is P4 |
 | Install path | one binary, no interpreter | `xpst` + its data dir only | met |
 
 Commands that produced those numbers, verbatim:
@@ -45,40 +51,42 @@ Commands that produced those numbers, verbatim:
 cargo build --release --workspace
 python3 scripts/check_rust_binary_size.py \
     --binary target/release/xpst --binary target/release/xpst-mcp
-python3 scripts/measure_rust_boot.py --binary target/release/xpst --runs 30
+python3 scripts/measure_rust_boot.py --binary target/release/xpst --runs 20
 ```
 
 Output of the size gate:
 
 ```
-generated: 2026-11-17T20:00:21+00:00
-xpst: 961960 bytes (0.92 MiB)
-  budget 2097152 bytes (2.00 MiB)  -> 45.9% used, 1135192 bytes headroom
-  D-4 target 26214400 bytes (25 MiB)  -> 3.67% of it
-xpst-mcp: 3146912 bytes (3.00 MiB)
-  budget 6291456 bytes (6.00 MiB)  -> 50.0% used, 3144544 bytes headroom
-  D-4 target 26214400 bytes (25 MiB)  -> 12.0% of it
+generated: 2026-11-25T11:47:28+00:00
+xpst: 6154856 bytes (5.87 MiB)
+  budget 8388608 bytes (8.00 MiB)  -> 73.4% used, 2233752 bytes headroom
+  D-4 target 26214400 bytes (25 MiB)  -> 23.48% of it
+xpst-mcp: 4115944 bytes (3.92 MiB)
+  budget 6291456 bytes (6.00 MiB)  -> 65.4% used, 2175512 bytes headroom
+  D-4 target 26214400 bytes (25 MiB)  -> 15.7% of it
 size budget: PASS
 ```
 
-Output of the cold-start harness (one of five runs; this is the lowest-median
-run of the quietest machine state observed):
+Output of the cold-start harness (20 samples, cache dropped per sample, host at
+load average 16 of 16 cores — the same run against `main`'s 1.70 MiB binary
+measured 136.8 ms median, so the spread is host load, not the binary):
 
 ```
-binary: target/release/xpst  (961960 bytes)
+binary: target/release/xpst  (6154856 bytes)
 command: target/release/xpst version --json
 cache purge per sample: True
-n=30  min 2.299 ms  median 4.053 ms  p95 35.902 ms  max 115.401 ms
-budget median 1000 ms  -> 0.4053% of it
+n=20  min 58.668 ms  median 226.338 ms  p95 452.684 ms  max 735.382 ms
+budget median 1000 ms  -> 22.6338% of it
 cold-start budget: PASS
 ```
 
-Five 30-sample runs of the same command on the same host measured medians of
-4.053, 6.111, 14.456, 20.785 and 31.907 ms, with the worst single sample at
-308 ms; the spread tracks host load (the high end was recorded immediately after
-a workspace build), not anything in the binary. The lowest median is the best
-available estimate of the binary's own cold cost; the range is what a shared
-machine will produce. Every run is still at most 3.2 % of the 1 s budget.
+On a quiet host the same command measured a 4.053 ms median (2026-11-17, five
+30-sample runs: medians of 4.053, 6.111, 14.456, 20.785 and 31.907 ms, worst
+single sample 308 ms). The spread tracks host load — the high end was recorded
+immediately after a workspace build — not anything in the binary. The lowest
+median is the best available estimate of the binary's own cold cost; the range is
+what a shared machine will produce. Every run is still at most 32 % of the 1 s
+budget, and the CI gate is 250 ms median on a shared runner.
 
 ### Cold-start methodology, and what this number is not
 
@@ -127,8 +135,8 @@ The last row reads 961,912 B because that table is built with
 `cargo build --release --workspace` produced 961,960 B at the time. The 48-byte
 difference is workspace feature unification reaching `serde`/`clap` differently,
 not nondeterminism — the gate runs on the workspace build and records that
-number. The same pair measured on the current tree is 1,324,672 B (`-p`) against
-1,325,944 B (`--workspace`), so the effect is the same size, not a growing one.
+number. The same pair measured on the current tree is 6,143,080 B (`-p`) against
+6,154,856 B (`--workspace`), so the effect is the same size, not a growing one.
 
 Two later changes moved the absolute column without touching the profile: the
 Tauri-era dependency updates, and the replacement of `serde_yaml`/`unsafe-libyaml`
@@ -141,50 +149,70 @@ were re-measured. Do not quote this table's totals as current.
 Not a guess: section sizes come from `objdump -h`, code attribution from the
 symbol table of an otherwise identical unstripped build
 (`python3 scripts/check_rust_binary_size.py --binary … --attribute`). Both were
-re-measured on 2026-11-19, on the tree that carries both changes: the YAML parser
-replacing the deprecated `serde_yaml` binding, and the MCP SDK move from
-`rmcp` 0.11.0 to 3.11.0.
+re-measured on 2026-11-25, on the Rust CLI stack tip, which carries the
+MCP-in-CLI move (PR #34) on top of the YAML-parser and `rmcp` 3.11.0 changes
+this section recorded on 2026-11-19.
 
-`xpst`, 1,325,944 B total:
+`xpst`, 6,154,856 B total:
 
 | Section | Bytes | Share | What it is |
 |---|---|---|---|
-| `.text` | 863,547 | 65.1 % | all machine code, ours and linked crates' |
-| `.rodata` | 238,456 | 18.0 % | string literals, help text, and embedded data (below) |
-| `.eh_frame` + `.eh_frame_hdr` | 158,068 | 11.9 % | unwind tables that abort-mode code never uses — a lever nobody has pulled |
-| relocations, `.gcc_except_table`, `.data*` | 65,749 | 5.0 % | |
+| `.text` | 3,716,330 | 60.4 % | all machine code, ours and linked crates' |
+| `.rodata` | 1,102,041 | 17.9 % | string literals, help text, and embedded data (below) |
+| `.eh_frame` + `.eh_frame_hdr` | 720,660 | 11.7 % | unwind tables that abort-mode code never uses — a lever nobody has pulled |
+| relocations, `.gcc_except_table`, `.data*` | 617,387 | 10.0 % | |
+
+The 2026-11-19 record for the same sections was 863,547 / 238,456 / 158,068 /
+65,749 B. Every section grew, and the growth is the MCP server: `xpst mcp start`
+serves the agent surface in-process, so the CLI binary now links the async
+runtime and the transport stack. `main` @ b8d1553, which does not carry that
+move, still measures 1,704,896 B.
 
 Code by owning crate (symbol bytes, so it sums to slightly more than `.text`):
 
 | Crate | Bytes | Note |
 |---|---|---|
-| `serde_saphyr` + `granit_parser` + `annotate_snippets` | 277,314 | YAML config parsing. It is 3.8× the `unsafe_libyaml` + `serde_yaml` binding it replaced (73,697 B): that binding was a thin wrapper over c2rust-translated libyaml, while this is a safety-first parser that rejects malformed input instead of invoking undefined behaviour. The swap bought removal of the last unmaintained C-translation in the graph and cost ~204 kB; both binaries remain far inside their budgets. |
-| `core` | 143,428 | |
-| `clap_builder` | 108,797 | the command tree parser |
-| `std` + `alloc` | 137,679 | includes ~77,299 B of panic-backtrace machinery (`gimli` 36,375, `rustc_demangle` 19,628, `addr2line` 11,511, `miniz_oxide` 9,785) that only `RUST_BACKTRACE=1` uses |
-| `xpst_cli` + `xpst_config` | 67,558 | our own code |
-| `serde_json` | 33,909 | config/state/invocation envelopes |
-| everything else | < 20,000 each | `thiserror`, `memchr`, `indexmap`, `rustix`, … |
+| `<unattributed>` | 833,895 | monomorphised async machinery whose symbols carry no crate path after LTO |
+| `core` | 345,473 | |
+| `xpst_cli` | 291,378 | our own code: the command tree and the parity tranches |
+| `xpst_surface` | 285,176 | the payload builders the CLI and the MCP tools share |
+| `regex_automata` + `regex_syntax` + `regex` | 307,279 | `diagnostics` redacts log lines with the same four patterns the shipped `redact_log_line()` uses |
+| `rmcp` | 196,673 | the MCP SDK |
+| `std` + `alloc` | 308,732 | includes ~77,299 B of panic-backtrace machinery (`gimli` 36,375, `rustc_demangle` 19,628, `addr2line` 11,511, `miniz_oxide` 9,785) that only `RUST_BACKTRACE=1` uses |
+| `xpst_mcp` | 144,732 | the tool registry and handlers |
+| `clap_builder` | 109,016 | the command tree parser |
+| `aho_corasick` | 107,181 | pulled in by `regex` |
+| `serde_json` | 103,721 | config/state/invocation envelopes |
+| `serde` + `serde_core` | 126,784 | |
+| `jiff` + `jiff_core` | 122,547 | time zones, read from the platform's `zoneinfo` |
+| `granit_parser` + `xpst_config` | 124,412 | YAML config parsing |
+| `tokio` | 48,014 | the async runtime the MCP transport needs |
+| everything else | < 40,000 each | `tracing`, `hashbrown`, `xpst_core`, `xpst_state`, `xpst_media`, `xpst_store`, `memchr`, … |
 
-The single largest object in the binary is not a dependency: `crates/xpst-cli/src/parity/cli_parity.json`
-(141,457 B) is compiled in with `include_str!` and is **10.7 % of the whole
-binary**, 59 % of `.rodata`. It is deliberate — the manifest is the P0 parity
-contract and the shipped help cannot drift from it — so it is reported as a cost,
-not a bug. Levers, none of them taken here because each changes behaviour:
-store it compressed and decompress on first use (`miniz_oxide` is already linked
-in via std), or emit help from typed data and gate the raw manifest behind a
-feature for the parity test only.
+The YAML parser is no longer a meaningful share: `granit_parser` 62,855 B plus
+`xpst_config` 61,557 B, against the 73,697 B the `unsafe_libyaml` + `serde_yaml`
+binding it replaced cost. That swap bought removal of the last unmaintained
+C-translation in the graph and cost ~204 kB at the time; it is 2 % of a 5.87 MiB
+binary.
 
-`xpst-mcp`, 2,274,048 B, is dominated by code, not tables: `.text` 1,443,034 B
-(63.5 %), `.rodata` 407,320 B (17.9 %), `.eh_frame` + `.eh_frame_hdr` 296,332 B
-(13.0 %), relocations and `.data*` 125,383 B (5.5 %). Its per-crate leaders are
-`rmcp` 204,307 B, the YAML parser it inherits through `xpst-config` (270,149 B:
-`serde_saphyr` 125,292, `granit_parser` 104,577, `annotate_snippets` 40,280),
-`jiff` + `jiff_core` 114,172 B, `xpst_mcp` 92,602 B, `serde_json` 79,998 B and
-`tokio` 49,489 B. It also embeds two test fixtures (`python_tool_registry.json`
-40,355 B, `python_providers.json` 11,859 B) as parity data. `chrono` no longer
-reaches the attribution's 4 KiB threshold: the three direct uses are gone and
-only the third-party edge remains.
+The parity manifest is no longer the largest object: `crates/xpst-cli/src/parity/cli_parity.json`
+(141,519 B) is compiled in with `include_str!` and is now **2.3 % of the whole
+binary** (it was 10.7 % of the 1.33 MiB binary in 2026-11-19). It is deliberate —
+the manifest is the P0 parity contract and the shipped help cannot drift from it —
+so it is reported as a cost, not a bug. Levers, none of them taken here because
+each changes behaviour: store it compressed and decompress on first use
+(`miniz_oxide` is already linked in via std), or emit help from typed data and
+gate the raw manifest behind a feature for the parity test only.
+
+`xpst-mcp`, 4,115,944 B, is dominated by code, not tables: `.text` 2,707,514 B
+(65.8 %), `.rodata` 609,913 B (14.8 %), `.eh_frame` + `.eh_frame_hdr` 528,444 B
+(12.8 %), relocations and `.data*` 270,377 B (6.6 %). Its per-crate leaders are
+`core` 261,863 B, `xpst_surface` 234,805 B, `xpst_mcp` 228,181 B, `rmcp`
+196,637 B, `serde` 96,432 B, `serde_json` 90,189 B, `jiff` 84,006 B,
+`granit_parser` 62,698 B and `tokio` 48,984 B. It also embeds two test fixtures
+(`python_tool_registry.json` 40,355 B, `python_providers.json` 11,859 B) as
+parity data. `chrono` no longer reaches the attribution's 4 KiB threshold: the
+three direct uses are gone and only the third-party edge remains.
 
 The drop from the 3,630,144 B this section recorded for `rmcp` 3.11.0 with the
 old YAML/time stack is not the parser, which grew: it is `chrono-tz` leaving the
@@ -194,8 +222,9 @@ reads the platform's `zoneinfo` database instead and only embeds one where the
 platform has none (Windows), which is why the Linux build lost 1,356,096 B and
 the Windows build gains a smaller bundle rather than inheriting a frozen table.
 
-Neither binary is near its budget, so none of this is urgent. It is written down
-so that the *next* dependency decision has a baseline to be measured against.
+`xpst` is at 73 % of its budget and `xpst-mcp` at 65 %, so neither is urgent. It
+is written down so that the *next* dependency decision has a baseline to be
+measured against.
 
 ## 5. The size gate, and how to change it
 
@@ -208,14 +237,18 @@ Budgets and their derivation:
 
 | Binary | Measured | Budget | Multiple | Share of the 25 MiB target |
 |---|---|---|---|---|
-| `xpst` | 1,324,968 B | 2,097,152 B (2 MiB) | 1.58× | 5 % |
-| `xpst-mcp` | 1,826,288 B | 6,291,456 B (6 MiB) | 3.44× | 7 % |
+| `xpst` | 6,154,856 B | 8,388,608 B (8 MiB) | 1.36× | 32 % |
+| `xpst-mcp` | 4,115,944 B | 6,291,456 B (6 MiB) | 1.53× | 24 % |
 
-The rule is "double the measured number, round up to a whole MiB". That is tight
-enough that one dependency which doubles the binary fails the PR it arrives in,
-and loose enough that P1–P4 can add TLS, SQLite and providers without the gate
-becoming noise. It also means the D-4 target cannot be missed quietly: the
-budget fires at 8 % of 25 MiB, twenty-three MiB before the target does.
+The rule is "double the measured number, round up to a whole MiB", and it is what
+`xpst-mcp`'s 6 MiB still is. `xpst`'s 8 MiB is the one deliberate departure:
+doubling 5.87 MiB would be 12 MiB, which is 46 % of the D-4 target and would stop
+being a regression detector, so the ceiling is the measurement rounded up to the
+next whole MiB plus 2 MiB of headroom (1.36×). Both are tight enough that one
+dependency which doubles the binary fails the PR it arrives in, and loose enough
+that the remaining parity tranches can land without the gate becoming noise. It
+also means the D-4 target cannot be missed quietly: the larger budget fires at
+32 % of 25 MiB, seventeen MiB before the target does.
 
 CI wiring is `.github/workflows/rust-binary-size.yml` — the same shape as the
 existing `Engine bundle size budget` lane: path-scoped to the inputs that can move
@@ -234,8 +267,8 @@ own measurement, or more than 4× it, or at/above the D-4 target.
 Prove the gate can fail (it has been run this way):
 
 ```bash
-python3 scripts/check_rust_binary_size.py --binary target/release/xpst --max-bytes 524288
-# FAIL: xpst is 961960 bytes (0.92 MiB), over its 524288 byte (0.50 MiB) budget by 437672 bytes
+python3 scripts/check_rust_binary_size.py --binary target/release/xpst --max-bytes 2097152
+# FAIL: xpst is 6154856 bytes (5.87 MiB), over its 2097152 byte (2.00 MiB) budget by 4057704 bytes
 # exit 1
 ```
 

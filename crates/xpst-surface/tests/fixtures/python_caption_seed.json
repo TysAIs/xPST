@@ -1,0 +1,310 @@
+{
+  "schema_version": 1,
+  "source": "src/xpst/cli.py::suggest_caption",
+  "expression": "Path(video_path).stem.replace(\"_\", \" \").replace(\"-\", \" \")",
+  "note": "Captured by importing pathlib and evaluating the shipped expression. `flavour` selects PurePosixPath or PureWindowsPath, so the Windows rows are pinned on any host.",
+  "row_count": 43,
+  "rows": [
+    {
+      "path": "clip.mp4",
+      "flavour": "posix",
+      "name": "clip.mp4",
+      "stem": "clip",
+      "seed": "clip"
+    },
+    {
+      "path": "my_clip-final.mp4",
+      "flavour": "posix",
+      "name": "my_clip-final.mp4",
+      "stem": "my_clip-final",
+      "seed": "my clip final"
+    },
+    {
+      "path": "a.b.mp4",
+      "flavour": "posix",
+      "name": "a.b.mp4",
+      "stem": "a.b",
+      "seed": "a.b"
+    },
+    {
+      "path": "clip",
+      "flavour": "posix",
+      "name": "clip",
+      "stem": "clip",
+      "seed": "clip"
+    },
+    {
+      "path": "clip.",
+      "flavour": "posix",
+      "name": "clip.",
+      "stem": "clip.",
+      "seed": "clip."
+    },
+    {
+      "path": ".mp4",
+      "flavour": "posix",
+      "name": ".mp4",
+      "stem": ".mp4",
+      "seed": ".mp4"
+    },
+    {
+      "path": ".hidden",
+      "flavour": "posix",
+      "name": ".hidden",
+      "stem": ".hidden",
+      "seed": ".hidden"
+    },
+    {
+      "path": "dir/clip.mp4",
+      "flavour": "posix",
+      "name": "clip.mp4",
+      "stem": "clip",
+      "seed": "clip"
+    },
+    {
+      "path": "dir/clip.mp4/",
+      "flavour": "posix",
+      "name": "clip.mp4",
+      "stem": "clip",
+      "seed": "clip"
+    },
+    {
+      "path": "dir/",
+      "flavour": "posix",
+      "name": "dir",
+      "stem": "dir",
+      "seed": "dir"
+    },
+    {
+      "path": ".",
+      "flavour": "posix",
+      "name": "",
+      "stem": "",
+      "seed": ""
+    },
+    {
+      "path": "..",
+      "flavour": "posix",
+      "name": "..",
+      "stem": "..",
+      "seed": ".."
+    },
+    {
+      "path": "/",
+      "flavour": "posix",
+      "name": "",
+      "stem": "",
+      "seed": ""
+    },
+    {
+      "path": "//",
+      "flavour": "posix",
+      "name": "",
+      "stem": "",
+      "seed": ""
+    },
+    {
+      "path": "",
+      "flavour": "posix",
+      "name": "",
+      "stem": "",
+      "seed": ""
+    },
+    {
+      "path": "a/./b.mp4",
+      "flavour": "posix",
+      "name": "b.mp4",
+      "stem": "b",
+      "seed": "b"
+    },
+    {
+      "path": "a//b.mp4",
+      "flavour": "posix",
+      "name": "b.mp4",
+      "stem": "b",
+      "seed": "b"
+    },
+    {
+      "path": "a/.",
+      "flavour": "posix",
+      "name": "a",
+      "stem": "a",
+      "seed": "a"
+    },
+    {
+      "path": "a/..",
+      "flavour": "posix",
+      "name": "..",
+      "stem": "..",
+      "seed": ".."
+    },
+    {
+      "path": "./clip.mp4",
+      "flavour": "posix",
+      "name": "clip.mp4",
+      "stem": "clip",
+      "seed": "clip"
+    },
+    {
+      "path": "clip.MP4",
+      "flavour": "posix",
+      "name": "clip.MP4",
+      "stem": "clip",
+      "seed": "clip"
+    },
+    {
+      "path": "clip.tar.gz",
+      "flavour": "posix",
+      "name": "clip.tar.gz",
+      "stem": "clip.tar",
+      "seed": "clip.tar"
+    },
+    {
+      "path": "  spaced name .mp4",
+      "flavour": "posix",
+      "name": "  spaced name .mp4",
+      "stem": "  spaced name ",
+      "seed": "  spaced name "
+    },
+    {
+      "path": "clip.mp4 ",
+      "flavour": "posix",
+      "name": "clip.mp4 ",
+      "stem": "clip",
+      "seed": "clip"
+    },
+    {
+      "path": "üñï_clip.mp4",
+      "flavour": "posix",
+      "name": "üñï_clip.mp4",
+      "stem": "üñï_clip",
+      "seed": "üñï clip"
+    },
+    {
+      "path": "dir/.hidden.mp4",
+      "flavour": "posix",
+      "name": ".hidden.mp4",
+      "stem": ".hidden",
+      "seed": ".hidden"
+    },
+    {
+      "path": "a/b/c",
+      "flavour": "posix",
+      "name": "c",
+      "stem": "c",
+      "seed": "c"
+    },
+    {
+      "path": "clip..mp4",
+      "flavour": "posix",
+      "name": "clip..mp4",
+      "stem": "clip.",
+      "seed": "clip."
+    },
+    {
+      "path": "-leading-dash.mp4",
+      "flavour": "posix",
+      "name": "-leading-dash.mp4",
+      "stem": "-leading-dash",
+      "seed": " leading dash"
+    },
+    {
+      "path": "under_score-and-dash.mp4",
+      "flavour": "posix",
+      "name": "under_score-and-dash.mp4",
+      "stem": "under_score-and-dash",
+      "seed": "under score and dash"
+    },
+    {
+      "path": "no_extension",
+      "flavour": "posix",
+      "name": "no_extension",
+      "stem": "no_extension",
+      "seed": "no extension"
+    },
+    {
+      "path": "trailing_underscore_",
+      "flavour": "posix",
+      "name": "trailing_underscore_",
+      "stem": "trailing_underscore_",
+      "seed": "trailing underscore "
+    },
+    {
+      "path": "a/b/../c.mp4",
+      "flavour": "posix",
+      "name": "c.mp4",
+      "stem": "c",
+      "seed": "c"
+    },
+    {
+      "path": "C:\\clips\\my_clip.mp4",
+      "flavour": "windows",
+      "name": "my_clip.mp4",
+      "stem": "my_clip",
+      "seed": "my clip"
+    },
+    {
+      "path": "C:/clips/my_clip.mp4",
+      "flavour": "windows",
+      "name": "my_clip.mp4",
+      "stem": "my_clip",
+      "seed": "my clip"
+    },
+    {
+      "path": "C:clip.mp4",
+      "flavour": "windows",
+      "name": "clip.mp4",
+      "stem": "clip",
+      "seed": "clip"
+    },
+    {
+      "path": "C:",
+      "flavour": "windows",
+      "name": "",
+      "stem": "",
+      "seed": ""
+    },
+    {
+      "path": "\\\\server\\share\\clip.mp4",
+      "flavour": "windows",
+      "name": "clip.mp4",
+      "stem": "clip",
+      "seed": "clip"
+    },
+    {
+      "path": "clips\\clip.mp4",
+      "flavour": "windows",
+      "name": "clip.mp4",
+      "stem": "clip",
+      "seed": "clip"
+    },
+    {
+      "path": "clips\\clip.mp4\\",
+      "flavour": "windows",
+      "name": "clip.mp4",
+      "stem": "clip",
+      "seed": "clip"
+    },
+    {
+      "path": "C:\\clips\\a.b.mp4",
+      "flavour": "windows",
+      "name": "a.b.mp4",
+      "stem": "a.b",
+      "seed": "a.b"
+    },
+    {
+      "path": "C:\\clips\\clip.",
+      "flavour": "windows",
+      "name": "clip.",
+      "stem": "clip.",
+      "seed": "clip."
+    },
+    {
+      "path": "C:\\clips\\.mp4",
+      "flavour": "windows",
+      "name": ".mp4",
+      "stem": ".mp4",
+      "seed": ".mp4"
+    }
+  ]
+}

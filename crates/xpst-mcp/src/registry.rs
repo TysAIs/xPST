@@ -37,8 +37,30 @@ pub enum Consent {
 /// How much of a tool this build actually implements.
 #[derive(Debug, Clone, Copy)]
 pub enum Implementation {
-    Ported(Handler),
+    Ported { handler: Handler, render: Render },
     Stub { reason: &'static str },
+}
+
+/// How a ported tool's payload becomes the `content[0].text` body.
+///
+/// Python has no single renderer: every handler calls `json.dumps` itself, and
+/// the shipped calls differ — `indent=2` for most, compact for
+/// `xpst_schedule_list`, `sort_keys=True` only in the generic fallback. The
+/// renderer is therefore a property of the tool, not of the server, and it is
+/// pinned per row so a ported tool cannot silently re-render its payload into a
+/// shape an agent's parser has never seen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Render {
+    /// `json.dumps(payload, indent=2, default=str)` — insertion order.
+    Pretty,
+    /// `json.dumps(payload, indent=2, sort_keys=True)` — every level sorted.
+    ///
+    /// The `xpst_setup_*` handlers are the only ones that sort: they serve the
+    /// transaction document, whose key order is a property of the writer, not
+    /// of the reader.
+    PrettySorted,
+    /// `json.dumps(payload, default=str)` — insertion order, compact.
+    Compact,
 }
 
 /// One row of the surface.
@@ -52,7 +74,7 @@ pub struct ToolEntry {
 
 impl ToolEntry {
     pub fn is_ported(&self) -> bool {
-        matches!(self.implementation, Implementation::Ported(_))
+        matches!(self.implementation, Implementation::Ported { .. })
     }
 
     pub fn is_read_only(&self) -> bool {
@@ -61,8 +83,16 @@ impl ToolEntry {
 
     pub fn stub_reason(&self) -> Option<&'static str> {
         match self.implementation {
-            Implementation::Ported(_) => None,
+            Implementation::Ported { .. } => None,
             Implementation::Stub { reason } => Some(reason),
+        }
+    }
+
+    /// The renderer a ported tool's payload uses; `None` for a stub.
+    pub fn render(&self) -> Option<Render> {
+        match self.implementation {
+            Implementation::Ported { render, .. } => Some(render),
+            Implementation::Stub { .. } => None,
         }
     }
 
@@ -122,104 +152,121 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_analytics",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads analytics.db and can refresh from platform APIs",
+        Implementation::Ported {
+            handler: crate::tools::analytics::run,
+            render: Render::Compact,
         },
     ),
     (
         "xpst_cross_post_analytics",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads analytics.db, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::analytics::cross_post,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_followers",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "requires platform APIs",
+        Implementation::Ported {
+            handler: crate::tools::followers::run,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_best_time",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads engagement history from analytics.db, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::best_time::run,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_security_audit",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "runs the Python security scanner, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::security::run,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_suggest_caption",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "calls the AI caption service",
+        Implementation::Ported {
+            handler: crate::tools::generate::suggest_caption,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_generate_ideas",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "calls the AI content service",
+        Implementation::Ported {
+            handler: crate::tools::generate::generate_ideas,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_transcript",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads the knowledge store, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::transcript::run,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_search",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads the knowledge vector store, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::kb::search,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_activity",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads the activity ledger, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::activity::run,
+            render: Render::Compact,
         },
     ),
     (
         "xpst_schedule_list",
         Consent::ReadOnly,
-        Implementation::Ported(crate::tools::schedule::run),
+        Implementation::Ported {
+            handler: crate::tools::schedule::run,
+            render: Render::Compact,
+        },
     ),
     (
         "xpst_schedule_add",
         Consent::Mutating,
-        Implementation::Stub {
-            reason: "writes the schedule store through Python services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::schedule::add,
+            render: Render::Compact,
         },
     ),
     (
         "xpst_schedule_cancel",
         Consent::Mutating,
-        Implementation::Stub {
-            reason: "mutates the schedule store through Python services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::schedule::cancel,
+            render: Render::Compact,
         },
     ),
     (
         "xpst_schedule_pause",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "writes the pause marker through Python services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::schedule::pause,
+            render: Render::Compact,
         },
     ),
     (
         "xpst_schedule_resume",
         Consent::Mutating,
-        Implementation::Stub {
-            reason: "releases the pause marker through Python services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::schedule::resume,
+            render: Render::Compact,
         },
     ),
     (
@@ -239,12 +286,18 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_status",
         Consent::ReadOnly,
-        Implementation::Ported(crate::tools::status::run),
+        Implementation::Ported {
+            handler: crate::tools::status::run,
+            render: Render::Pretty,
+        },
     ),
     (
         "xpst_rate_limit_status",
         Consent::ReadOnly,
-        Implementation::Ported(crate::tools::rate_limit::run),
+        Implementation::Ported {
+            handler: crate::tools::rate_limit::run,
+            render: Render::Pretty,
+        },
     ),
     (
         "xpst_backfill",
@@ -256,7 +309,10 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_config_show",
         Consent::ReadOnly,
-        Implementation::Ported(crate::tools::config_show::run),
+        Implementation::Ported {
+            handler: crate::tools::config_show::run,
+            render: Render::Pretty,
+        },
     ),
     (
         "xpst_auth_status",
@@ -268,55 +324,65 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_byo_app",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads and decrypts the bring-your-own-app store, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::byo_app::run,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_bio_get",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads the link-in-bio configuration, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::bio::run,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_capabilities",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "provider state is credential-derived, which needs platform probes",
+        Implementation::Ported {
+            handler: crate::tools::capabilities::run,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_preflight",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "resolves destinations against live credentials and the content contract",
+        Implementation::Ported {
+            handler: crate::tools::preflight::run,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_readiness",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "probes credentials, helper binaries and directories",
+        Implementation::Ported {
+            handler: crate::tools::readiness::run,
+            render: Render::Compact,
         },
     ),
     (
         "xpst_auth_start",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "builds the per-platform auth plan from the auth flow, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::auth_start::run,
+            render: Render::Compact,
         },
     ),
     (
         "xpst_providers",
         Consent::ReadOnly,
-        Implementation::Ported(crate::tools::providers::run),
+        Implementation::Ported {
+            handler: crate::tools::providers::run,
+            render: Render::Pretty,
+        },
     ),
     (
         "xpst_disconnect",
         Consent::Mutating,
-        Implementation::Stub {
-            reason: "removes stored credentials through Python services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::disconnect::run,
+            render: Render::Pretty,
         },
     ),
     (
@@ -336,9 +402,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "messenger_set_rules",
         Consent::Mutating,
-        Implementation::Stub {
-            reason:
-                "writes the Messenger rules through Python config services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::messenger_rules::run,
+            render: Render::Pretty,
         },
     ),
     (
@@ -358,8 +424,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "kb_query",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads the knowledge vector store, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::kb::query,
+            render: Render::Pretty,
         },
     ),
     (
@@ -372,53 +439,57 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "kb_areas",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads the knowledge store, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::kb::areas,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_setup_start",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason:
-                "writes the setup transaction file through Python services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::setup::start,
+            render: Render::PrettySorted,
         },
     ),
     (
         "xpst_setup_status",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads the setup transaction service, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::setup::status,
+            render: Render::PrettySorted,
         },
     ),
     (
         "xpst_setup_resume",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason:
-                "writes the setup transaction file through Python services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::setup::resume,
+            render: Render::PrettySorted,
         },
     ),
     (
         "xpst_setup_reset",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason:
-                "removes the setup transaction file through Python services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::setup::reset,
+            render: Render::PrettySorted,
         },
     ),
     (
         "xpst_stream",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads the stream registry and can probe live channels",
+        Implementation::Ported {
+            handler: crate::tools::stream::run,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_chat",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "opens live chat transports over the network",
+        Implementation::Ported {
+            handler: crate::tools::chat::run,
+            render: Render::Pretty,
         },
     ),
 ];
@@ -515,7 +586,7 @@ impl Registry {
             name: name.to_string(),
         })?;
         match entry.implementation {
-            Implementation::Ported(handler) => handler(ctx, arguments),
+            Implementation::Ported { handler, .. } => handler(ctx, arguments),
             Implementation::Stub { reason } => Err(ToolError::NotImplemented {
                 tool: entry.name,
                 reason,

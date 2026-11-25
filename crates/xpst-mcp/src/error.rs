@@ -10,7 +10,10 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum ToolError {
     /// The caller asked for a tool this server does not serve.
-    #[error("{name} is not a tool this server serves")]
+    ///
+    /// The sentence is Python's (`Unknown tool: <name>`), because the wire body
+    /// of an error is the `Display` text.
+    #[error("Unknown tool: {name}")]
     UnknownTool { name: String },
 
     /// The name is part of the surface (so `tools/list` is honest) but the
@@ -38,6 +41,22 @@ pub enum ToolError {
     #[error("invalid arguments for {tool}: {detail}")]
     InvalidArguments { tool: &'static str, detail: String },
 
+    /// A handler raised, the way a Python tool handler raises.
+    ///
+    /// The wire body is `Error: <message>` — Python's `handle_call_tool`
+    /// catches every exception and serves `f"Error: {str(e)}"`, so the message
+    /// here is the Python exception's own text, not a Rust sentence.
+    #[error("Error: {message}")]
+    Handler { message: String },
+
+    /// A handler that answered with its own error document instead of raising.
+    ///
+    /// Some Python handlers build a `CallToolResult(isError=True, ...)` with a
+    /// sentence of their own (`xpst_transcript`'s `Invalid video_id: ...`), so
+    /// the wire body has no `Error: ` prefix. The message is served verbatim.
+    #[error("{message}")]
+    Reported { message: String },
+
     /// Refused by the consent tier, not by the tool.
     #[error("{message}")]
     ConsentDenied { tool: String, message: String },
@@ -52,6 +71,8 @@ impl ToolError {
             ToolError::NotFound { .. } => "not_found",
             ToolError::Malformed { .. } => "malformed_store",
             ToolError::InvalidArguments { .. } => "invalid_arguments",
+            ToolError::Handler { .. } => "handler_error",
+            ToolError::Reported { .. } => "reported_error",
             ToolError::ConsentDenied { .. } => "consent_denied",
         }
     }
@@ -63,12 +84,19 @@ impl ToolError {
             ToolError::NotImplemented { tool, .. } => Some(tool),
             ToolError::InvalidArguments { tool, .. } => Some(tool),
             ToolError::ConsentDenied { tool, .. } => Some(tool),
-            ToolError::NotFound { .. } | ToolError::Malformed { .. } => None,
+            ToolError::NotFound { .. }
+            | ToolError::Malformed { .. }
+            | ToolError::Handler { .. }
+            | ToolError::Reported { .. } => None,
         }
     }
 
-    /// The text an MCP caller receives. One JSON object, so a caller never has
-    /// to parse prose to learn whether something happened.
+    /// A structured view of the failure, for tests and logs.
+    ///
+    /// This is *not* the wire body: an MCP caller receives [`Display`] as plain
+    /// text with `isError: true`, which is what the Python server serves. The
+    /// JSON form exists so a test can assert the discriminant without parsing
+    /// prose.
     pub fn to_payload(&self) -> Value {
         json!({
             "ok": false,

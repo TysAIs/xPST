@@ -1,0 +1,186 @@
+version: 4
+accounts:
+  tiktok:
+    username: ''
+    cookies_from_browser: false
+    cookies_file: null
+    proxy: null
+    enabled: true
+    client_key: ''
+    client_secret: ''
+    access_token: ''
+    refresh_token: ''
+    sandbox: false
+    draft_mode: auto
+    publish_mode: auto
+    browser_headless: true
+    provider: local
+    aggregator:
+      api_key_ref: zernio_api_key
+      account_id: ''
+      profile_id: ''
+      vendor_schedule: false
+      scoped_key: true
+  youtube:
+    enabled: true
+    client_secrets: <PROFILE>/credentials/youtube_client_secrets.json
+    token_file: <PROFILE>/credentials/youtube_token.json
+    channel_id: ''
+    username: ''
+    proxy: null
+  x:
+    enabled: true
+    cookies_file: <PROFILE>/credentials/x_cookies.json
+    username: ''
+    proxy: null
+    auth_mode: cookies
+  instagram:
+    enabled: true
+    session_file: <PROFILE>/credentials/instagram_session.json
+    username: ''
+    proxy: null
+    auth_mode: graph_api
+    device_id: null
+    graph_access_token: ''
+    graph_ig_user_id: ''
+    app_id: ''
+    account_type: ''
+    account_type_source: ''
+  threads:
+    enabled: false
+    graph_access_token: ''
+    threads_user_id: ''
+    proxy: null
+    app_id: ''
+  bluesky:
+    enabled: false
+    identifier: ''
+    service: https://bsky.social
+    proxy: null
+  messenger:
+    enabled: false
+    page_id: ''
+    page_access_token: ''
+    app_id: ''
+    app_secret: ''
+    verify_token: ''
+    webhook_path: /webhook/messenger
+    auto_reply: false
+    reply_rules: {}
+    proxy: null
+  facebook:
+    enabled: false
+    page_id: ''
+    page_name: ''
+    page_access_token: ''
+    app_id: ''
+    app_secret: ''
+    graph_user_token: ''
+    login_config_id: ''
+    proxy: null
+  local:
+    path: ''
+video:
+  download_dir: <HOME>/.xpst/downloads
+  cleanup_after_post: false
+  encoding:
+    youtube:
+      passthrough: false
+      resolution: 1920
+      bitrate: 8M
+      maxrate: 10M
+      bufsize: 12M
+      profile: high
+      gop: 15
+      fps: 60
+      color: bt709
+      pix_fmt: yuv420p
+    instagram:
+      resolution: 1920
+      crf: 20
+      maxrate: 10M
+      profile: high
+      level: '4.0'
+      gop: 72
+      fps: 60
+      color: bt709
+      pix_fmt: yuv420p
+    x:
+      resolution: 1920
+      bitrate: 10M
+      maxrate: 12M
+      profile: high
+      level: '4.0'
+      gop: 90
+      fps: 60
+      color: bt709
+      pix_fmt: yuv420p
+    tiktok:
+      resolution: 1920
+      crf: 20
+      maxrate: 10M
+      bufsize: 20M
+      profile: high
+      level: '4.0'
+      fps: 60
+      color: bt709
+      pix_fmt: yuv420p
+      hw_encoder: null
+reliability:
+  max_retries: 3
+  retry_backoff: 2
+  circuit_breaker_threshold: 5
+  circuit_breaker_reset: 3600
+monitoring:
+  log_level: INFO
+  log_file: <HOME>/.xpst/logs/xpst.log
+  log_rotation: 10 MB
+  healthcheck_port: 8080
+  enable_metrics: true
+  dashboard_username: ''
+  dashboard_password_hash: ''
+  health_check_interval: 300
+anti_bot:
+  caption_variation: false
+schedule:
+  check_interval: 900
+  catchup_window: 172800
+  catchup_times_per_day: 3
+  analytics_snapshot_enabled: false
+  analytics_snapshot_interval: 3600
+  posting_paused: false
+chat:
+  twitch_channels: []
+  kick_channels: []
+  youtube_video_id: ''
+  max_messages: 500
+  youtube_poll_interval_s: 2.0
+notifications:
+  enabled: false
+  on_success: true
+  on_failure: true
+  discord:
+    webhook_url: ''
+  telegram:
+    bot_token: ''
+    chat_id: ''
+rate_limits:
+  youtube: 5
+  instagram: 5
+  x: 5
+  tiktok: 5
+  threads: 5
+  facebook: 5
+bio:
+  handle: ''
+  links: []
+shortcuts:
+  dashboard: Ctrl+1
+  content: Ctrl+2
+  analytics: Ctrl+3
+  connect: Ctrl+4
+  schedule: Ctrl+5
+  refresh: Ctrl+R
+  quit: Ctrl+Q
+first_run_complete: false
+provider_mode: official

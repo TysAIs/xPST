@@ -21,7 +21,7 @@ use clap::ArgMatches;
 use serde_json::Value;
 
 use crate::commands::bootstrap;
-use crate::output::write_json;
+use crate::output::write_python_json_value;
 use crate::{exit, flag, GlobalOptions};
 
 /// Run `status`.
@@ -34,14 +34,14 @@ pub fn run(
     let json_mode = global.json || leaf.is_some_and(|m| flag(m, "opt:json"));
     let config_path = match bootstrap::ensure_config(global) {
         Ok(path) => path,
-        Err(error) => return bootstrap::report(err, json_mode, out, &error),
+        Err(error) => return bootstrap::report(out, err, &error),
     };
     let dir = config_path.parent().unwrap_or_else(|| Path::new("."));
     let state = xpst_state::status::effective_state(dir);
     let stats = xpst_state::status::statistics(&state);
 
     if json_mode {
-        let _ = write_json(out, &stats);
+        let _ = write_python_json_value(out, &stats);
     } else {
         let _ = write!(out, "{}", render_text(&stats));
     }

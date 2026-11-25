@@ -32,8 +32,19 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 jiff.workspace = true
+xpst-auth = { path = "../xpst-auth" }
 xpst-config = { workspace = true }
+# The cooldown report is owned by the rate-limit crate so `doctor`, `health` and
+# the MCP tool render one document.
+xpst-limits = { version = "1.3.0", path = "../xpst-limits" }
+xpst-core = { path = "../xpst-core" }
 xpst-state = { workspace = true }
+xpst-surface = { path = "../xpst-surface" }
+
+[dev-dependencies]
+# The follower tests seed the ledger through the shipped store, so the schema is
+# the engine's rather than a hand-written CREATE TABLE.
+xpst-store = { path = "../xpst-store" }
 
 [lints]
 workspace = true

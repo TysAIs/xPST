@@ -185,7 +185,12 @@ fn plan_id_for(context: &RequestContext<'_>, seed: &str) -> String {
 }
 
 fn digest_for(inputs: &Value) -> String {
-    sha256_hex(&serde_json::to_string(inputs).unwrap_or_default())
+    // `plan_service.py` hashes `json.dumps(value, sort_keys=True,
+    // separators=(",", ":"))`; `preserve_order` keeps insertion order, so the
+    // sort is explicit or the digest stops matching the Python engine.
+    let mut document = inputs.clone();
+    xpst_core::json::sort_keys_recursive(&mut document);
+    sha256_hex(&serde_json::to_string(&document).unwrap_or_default())
 }
 
 /// Extract `media_paths`, honouring `media_path` and refusing `media_ids` that

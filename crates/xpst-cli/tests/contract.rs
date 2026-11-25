@@ -9,7 +9,25 @@ use std::ffi::OsString;
 
 use xpst_cli::run_with_io;
 
+/// Point the engine at a scratch profile for the whole test binary.
+///
+/// `contract` exercises argument parsing, and a command that is implemented
+/// writes to whatever profile it resolves. Without this, the `schedule add` row
+/// appended a real entry to `~/.xpst/schedule.json` the moment that command was
+/// ported — the exact defect the local-surface harness avoids by running the
+/// binary as a subprocess with `XPST_CONFIG_DIR` set. One directory per test
+/// process, created once, so parallel tests cannot race on the value.
+fn scratch_profile() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let dir = std::env::temp_dir().join(format!("xpst-contract-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        std::env::set_var("XPST_CONFIG_DIR", &dir);
+    });
+}
+
 fn run(args: &[&str], stdout_is_tty: bool) -> (i32, String, String) {
+    scratch_profile();
     let mut argv: Vec<OsString> = vec![OsString::from("xpst")];
     argv.extend(args.iter().map(OsString::from));
     let mut out: Vec<u8> = Vec::new();
@@ -77,21 +95,45 @@ fn root_level_json_flag_is_honoured_on_a_tty() {
 
 #[test]
 fn nested_unimplemented_commands_report_their_full_path() {
+    // `schedule run` is still a stub; `schedule add` and then `schedule install`
+    // were the examples here until they were ported, so the row moves to the
+    // next unimplemented nested command rather than being deleted.
+    let (code, out, err) = run(&["schedule", "run", "--json"], false);
+    assert_eq!(code, 1, "stderr: {err}");
+    let payload: serde_json::Value = serde_json::from_str(out.trim()).expect("valid JSON");
+    assert_eq!(payload["error"]["command"], "schedule run");
+}
+
+#[test]
+fn an_implemented_command_writes_into_the_scratch_profile_only() {
+    // `schedule add` is implemented, so it writes a queue entry. It must land in
+    // the profile the engine resolves — never in the developer's real `~/.xpst`,
+    // which is what happened when this row still expected `NOT_IMPLEMENTED`.
     let (code, out, err) = run(
         &[
             "schedule",
             "add",
+            "--text",
             "--caption",
             "hi",
             "--at",
-            "2026-01-01T00:00:00",
+            "2026-01-01 00:00",
+            "-p",
+            "x",
             "--json",
         ],
         false,
     );
-    assert_eq!(code, 1, "stderr: {err}");
+    assert_eq!(code, 0, "stderr: {err}");
     let payload: serde_json::Value = serde_json::from_str(out.trim()).expect("valid JSON");
-    assert_eq!(payload["error"]["command"], "schedule add");
+    assert_eq!(payload["caption"], "hi");
+    let dir = std::env::var("XPST_CONFIG_DIR").expect("the scratch profile is set");
+    let written = std::fs::read_to_string(std::path::Path::new(&dir).join("schedule.json"))
+        .expect("the queue was written into the scratch profile");
+    assert!(
+        written.contains("\"caption\": \"hi\""),
+        "the entry is not in the scratch queue: {written}"
+    );
 }
 
 #[test]
@@ -158,6 +200,62 @@ fn implemented_commands_are_not_reported_as_unimplemented() {
         assert!(
             !out.contains("NOT_IMPLEMENTED") && !err.contains("NOT_IMPLEMENTED"),
             "`{}` reported NOT_IMPLEMENTED",
+            args.join(" ")
+        );
+    }
+}
+
+/// Click converts `IntParamType`/`IntRange` options before the command body
+/// runs, so a value that does not convert is a usage error: exit 2, empty
+/// stdout, and Click's own message on stderr. The Rust engine used to accept
+/// `--port abc` and print `http://127.0.0.1:abc/bio`.
+#[test]
+fn non_integer_options_are_usage_errors_with_clicks_message() {
+    let cases: [(&[&str], &str, &str); 5] = [
+        (
+            &["bio", "--port", "abc", "--json"],
+            "Usage: xpst bio [OPTIONS]",
+            "Error: Invalid value for '--port' / '-p': 'abc' is not a valid integer.",
+        ),
+        (
+            &["pair", "--ttl", "abc", "--json"],
+            "Usage: xpst pair [OPTIONS]",
+            "Error: Invalid value for '--ttl': 'abc' is not a valid integer.",
+        ),
+        (
+            &["state", "backup", "--keep", "abc", "--json"],
+            "Usage: xpst state backup [OPTIONS]",
+            "Error: Invalid value for '--keep': 'abc' is not a valid integer.",
+        ),
+        (
+            &["stream", "relay-config", "--rtmp-port", "abc", "--json"],
+            "Usage: xpst stream relay-config [OPTIONS]",
+            "Error: Invalid value for '--rtmp-port': 'abc' is not a valid integer.",
+        ),
+        (
+            &[
+                "generate", "ideas", "--topic", "x", "--count", "999", "--json",
+            ],
+            "Usage: xpst generate ideas [OPTIONS]",
+            "Error: Invalid value for '--count' / '-n': 999 is not in the range 1<=x<=10.",
+        ),
+    ];
+    for (args, usage, expected) in cases {
+        let (code, out, err) = run(args, false);
+        assert_eq!(code, 2, "`{}` must be a usage error: {err}", args.join(" "));
+        assert!(
+            out.is_empty(),
+            "`{}` must print nothing on stdout, got: {out}",
+            args.join(" ")
+        );
+        assert!(
+            err.starts_with(usage),
+            "`{}` must start with Click's usage line.\n  expected: {usage}\n  got: {err}",
+            args.join(" ")
+        );
+        assert!(
+            err.contains(expected),
+            "`{}` must print Click's message.\n  expected: {expected}\n  got: {err}",
             args.join(" ")
         );
     }
