@@ -30,6 +30,12 @@
 //!   keyword at all (the digits are word characters, so neither `abc` nor `def`
 //!   has a boundary on both sides). A naive "runs of letters" scan invents
 //!   hashtags Python never produces.
+//!
+//! [`caption_seed_from_path`] is the other half of the CLI's contract: when no
+//! transcript is available, `suggest-caption` seeds the generator with the
+//! video's filename stem. It lives here with the generator because it is the
+//! same `caption_gen` port; the MCP tool does not use it (it passes its
+//! `video_path` argument through as the transcript text).
 
 /// `PLATFORM_CHAR_LIMITS` — anything else falls back to 2200.
 const PLATFORM_CHAR_LIMITS: &[(&str, usize)] = &[
@@ -354,6 +360,78 @@ pub fn idea_variants(topic: &str, count: usize) -> Vec<IdeaVariant> {
         .collect()
 }
 
+/// `Path(video_path).stem.replace("_", " ").replace("-", " ")` — the caption
+/// seed `xpst suggest-caption` falls back to when no transcript is available.
+///
+/// `Path.stem` is **not** `Path::file_stem`, and the difference is observable:
+///
+/// * Python's `_splitext` keeps a trailing dot (`clip.` → `clip.`) and keeps a
+///   leading-dot name whole (`.mp4` → `.mp4`); `file_stem` strips both.
+/// * `PurePath.name` answers `""` for `.` and for a root, but `..` for `..`;
+///   `file_stem` answers `None` for all three.
+/// * On Windows `PureWindowsPath` treats `\` as a separator too and splits a
+///   drive off the first component, so `C:clip.mp4` has the name `clip.mp4`
+///   and `C:` has the name `""`.
+///
+/// The grid in `tests/fixtures/python_caption_seed.json` is captured from the
+/// shipped interpreter (both flavours) and replayed by `tests/caption_seed.rs`.
+pub fn caption_seed_from_path(video_path: &str) -> String {
+    caption_seed_from_path_with(video_path, cfg!(windows))
+}
+
+/// [`caption_seed_from_path`] with the path flavour injected.
+///
+/// The shipped entry point uses the host's flavour; the parity test drives both
+/// so the Windows rows are pinned on any host instead of waiting for a runner.
+pub fn caption_seed_from_path_with(video_path: &str, windows: bool) -> String {
+    // Python applies the two replacements in sequence; both map to a space, so
+    // one pass over the pair is the same string (and clippy's preferred form).
+    python_stem(&python_name(video_path, windows)).replace(['_', '-'], " ")
+}
+
+/// `PurePath.name` — the final component, with empty and `.` components
+/// dropped (`a/.` is `a`, `.` is `""`, `..` is `..`).
+fn python_name(path: &str, windows: bool) -> String {
+    let separators: &[char] = if windows { &['/', '\\'] } else { &['/'] };
+    let mut components: Vec<&str> = path
+        .split(|character| separators.contains(&character))
+        .filter(|component| !component.is_empty() && *component != ".")
+        .collect();
+    if windows {
+        // A drive is its own component even without a separator:
+        // `C:clip.mp4` → `("C:", "clip.mp4")`, `C:` → `("C:",)` → name `""`.
+        if let Some(rest) = components.first().copied().and_then(split_drive) {
+            components.remove(0);
+            if !rest.is_empty() {
+                components.insert(0, rest);
+            }
+        }
+    }
+    components.last().copied().unwrap_or_default().to_string()
+}
+
+/// `ntpath.splitdrive`'s drive half: `C:rest` → `rest`, anything else → `None`.
+fn split_drive(component: &str) -> Option<&str> {
+    let bytes = component.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        Some(&component[2..])
+    } else {
+        None
+    }
+}
+
+/// `PurePath.stem` — `_splitext` keeps the name whole unless the last dot has
+/// something on both sides of it.
+fn python_stem(name: &str) -> String {
+    let characters: Vec<char> = name.chars().collect();
+    match characters.iter().rposition(|character| *character == '.') {
+        Some(index) if index > 0 && index + 1 < characters.len() => {
+            characters[..index].iter().collect()
+        }
+        _ => name.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -409,5 +487,57 @@ mod tests {
         assert_eq!(char_limit("threads"), 500);
         assert_eq!(char_limit("youtube"), 5000);
         assert_eq!(char_limit("nope"), 2200);
+    }
+
+    /// The four shapes `Path::file_stem` gets wrong. The full grid is replayed
+    /// from the captured fixture in `tests/caption_seed.rs`; these are the
+    /// cases a reader needs to see named.
+    #[test]
+    fn the_seed_is_pythons_stem_not_rusts_file_stem() {
+        assert_eq!(caption_seed_from_path_with("clip.", false), "clip.");
+        assert_eq!(caption_seed_from_path_with(".mp4", false), ".mp4");
+        assert_eq!(caption_seed_from_path_with("..", false), "..");
+        assert_eq!(caption_seed_from_path_with(".", false), "");
+        assert_eq!(caption_seed_from_path_with("/", false), "");
+        assert_eq!(caption_seed_from_path_with("a/.", false), "a");
+        assert_eq!(caption_seed_from_path_with("clip..mp4", false), "clip.");
+    }
+
+    #[test]
+    fn the_seed_replaces_underscores_and_hyphens_with_spaces() {
+        assert_eq!(
+            caption_seed_from_path_with("my_clip-final.mp4", false),
+            "my clip final"
+        );
+        assert_eq!(
+            caption_seed_from_path_with("under_score-and-dash.mp4", false),
+            "under score and dash"
+        );
+        // A leading dash becomes a leading space; Python does not trim it.
+        assert_eq!(
+            caption_seed_from_path_with("-leading-dash.mp4", false),
+            " leading dash"
+        );
+    }
+
+    #[test]
+    fn the_windows_flavour_splits_backslashes_and_drives() {
+        assert_eq!(
+            caption_seed_from_path_with("C:\\clips\\my_clip.mp4", true),
+            "my clip"
+        );
+        assert_eq!(caption_seed_from_path_with("C:clip.mp4", true), "clip");
+        assert_eq!(caption_seed_from_path_with("C:", true), "");
+        assert_eq!(
+            caption_seed_from_path_with("\\\\server\\share\\clip.mp4", true),
+            "clip"
+        );
+        // The POSIX flavour keeps the backslash, so the whole string is one
+        // component — that is what `PurePosixPath` does, and the fixture pins
+        // it rather than pretending the two agree.
+        assert_eq!(
+            caption_seed_from_path_with("C:\\clips\\my_clip.mp4", false),
+            "C:\\clips\\my clip"
+        );
     }
 }

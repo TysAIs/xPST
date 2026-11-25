@@ -280,6 +280,15 @@ pub const DEVIATIONS: &[&str] = &[
      knowledge extra and an endpoint gets model-written text from Python and template text \
      here. The templates, hashtag table, character limits, truncation rules and payload shape \
      are the shipped behaviour.",
+    "`suggest-caption` always seeds the generator from the video's filename stem. Python tries the \
+     KB transcriber first (`FasterWhisperTranscriber`, from the optional `knowledge` extra) and \
+     falls back to `Path(video_path).stem.replace(\"_\", \" \").replace(\"-\", \" \")` on any \
+     exception; the Rust engine has no ASR path, so it always takes the fallback. That is \
+     Python's answer on a machine without the extra, and the local-surface fixture pins the \
+     fallback branch by making the transcriber unavailable to Python too \
+     (`XPST_KB_WHISPER_MODEL` names a model faster-whisper rejects, with `HF_HUB_OFFLINE=1` and \
+     an empty `HF_HOME` so no download is attempted). A machine with the extra and a resolvable \
+     model gets transcript-seeded captions from Python and stem-seeded ones here.",
     "`kb migrate-store` always answers `{\"ok\": false, \"error\": \"lancedb is not installed\"}` \
      (exit 1) when a JSON store exists: the vector store is not ported. On a machine without the \
      knowledge extra that is exactly Python's answer; with it installed Python migrates the \

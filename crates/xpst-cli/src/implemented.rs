@@ -388,6 +388,12 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         disconnect,
     ),
     implemented(
+        "suggest-caption",
+        "xpst-core",
+        "The caption generator seeded from the video's filename stem (`Path(video_path).stem.replace(\"_\", \" \").replace(\"-\", \" \")`, captured as a 43-row grid from the shipped interpreter and replayed for both path flavours), the `{video_path, platform, char_limit, suggestions}` payload and Click's `exists=True` usage error; payload byte-compared with the Python CLI. The KB transcriber is not ported — the Rust engine always takes the stem fallback, which is Python's answer on a machine without the `knowledge` extra (named divergence, and the fixture pins the fallback branch by making the transcriber unavailable to Python too). The LLM path is the same divergence `generate caption` carries.",
+        suggest_caption,
+    ),
+    implemented(
         "transcript",
         "xpst-store",
         "The three lookups in `Workspace.get_transcript()` order (`<id>.json`, `content:<id>.json`, then the first `transcripts/` file whose name contains the id) with `create=False`; a hit is `json.dumps(indent=2)` and a miss is the compact `{\"error\", \"video_id\"}` document with exit 1. Payload and exit code byte-compared with the Python CLI.",
@@ -967,6 +973,15 @@ fn disconnect(
     err: &mut dyn Write,
 ) -> i32 {
     commands::disconnect::run(global, leaf, out, err)
+}
+
+fn suggest_caption(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::generate::suggest_caption(global, leaf, out, err)
 }
 
 fn transcript(
