@@ -59,13 +59,45 @@ STATE = {
 }
 
 # Read-only calls whose payload is byte-compared. Every one of these is ported.
+# The arguments are recorded with the step so the Rust test replays the same
+# call rather than guessing.
+# Order matters for one row: `xpst_readiness` runs FIRST, because the Python
+# server initializes its engine on the first engine-backed call (`xpst_status`)
+# and that creates `credentials/`, `logs/` and `backups/`. Readiness on a
+# pristine profile is the document the CLI serves; readiness after an engine
+# start is a different (and machine-dependent) one.
 READ_ONLY_CALLS = [
-    "xpst_status",
-    "xpst_config_show",
-    "xpst_providers",
-    "xpst_schedule_list",
-    "xpst_rate_limit_status",
+    ("xpst_readiness", {}),
+    ("xpst_security_audit", {}),
+    ("xpst_status", {}),
+    ("xpst_config_show", {}),
+    ("xpst_providers", {}),
+    ("xpst_schedule_list", {}),
+    ("xpst_rate_limit_status", {}),
+    ("xpst_best_time", {}),
+    ("kb_query", {"text": "parity"}),
+    ("xpst_search", {"query": "parity"}),
+    ("xpst_bio_get", {}),
 ]
+
+# Readiness rows whose value is a property of the interpreter, not of the
+# engine: the `python` row reports the Python version here and the Rust engine
+# there. The row keeps its id/label/ok/severity; only the value is masked, the
+# same way `local_surface.json` masks it.
+MASK_CHECKS = {"xpst_readiness": ["python"]}
+
+# Helper scripts the readiness and security checks probe. Pinned so the
+# `ffmpeg_available` / helper rows are the fixture's, not the machine's.
+# The Python server initializes its engine at startup, which creates
+# `credentials/` and `backups/` before the first tool call. Seeding them makes
+# the readiness `directories` row the same document on both engines instead of
+# a property of the Python server's startup order.
+SEED_DIRS = ["credentials", "backups"]
+
+HELPER_SCRIPTS = {
+    "bin/ffmpeg": "#!/bin/sh\necho \"ffmpeg version 9.9.9-test Copyright (c) the xPST parity fixture\"\n",
+    "bin/yt-dlp": "#!/bin/sh\necho \"2026.01.01\"\n",
+}
 
 POST_ARGUMENTS = {
     "media_path": "/nonexistent/parity.mp4",
@@ -107,19 +139,19 @@ def requests_for(scenario: str) -> list[dict]:
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
     ]
     if scenario == "default":
-        for index, tool in enumerate(READ_ONLY_CALLS, start=10):
+        for index, (tool, arguments) in enumerate(READ_ONLY_CALLS, start=10):
             steps.append(
                 {
                     "jsonrpc": "2.0",
                     "id": index,
                     "method": "tools/call",
-                    "params": {"name": tool, "arguments": {}},
+                    "params": {"name": tool, "arguments": arguments},
                 }
             )
         steps.append(
             {
                 "jsonrpc": "2.0",
-                "id": 20,
+                "id": 30,
                 "method": "tools/call",
                 "params": {"name": "xpst_post", "arguments": POST_ARGUMENTS},
             }
@@ -127,7 +159,7 @@ def requests_for(scenario: str) -> list[dict]:
         steps.append(
             {
                 "jsonrpc": "2.0",
-                "id": 21,
+                "id": 31,
                 "method": "tools/call",
                 "params": {"name": "xpst_not_a_tool", "arguments": {}},
             }
@@ -136,7 +168,7 @@ def requests_for(scenario: str) -> list[dict]:
         steps.append(
             {
                 "jsonrpc": "2.0",
-                "id": 20,
+                "id": 30,
                 "method": "tools/call",
                 "params": {"name": "xpst_post", "arguments": POST_ARGUMENTS},
             }
@@ -147,6 +179,13 @@ def requests_for(scenario: str) -> list[dict]:
 def run_scenario(python: str, scenario: dict) -> dict:
     profile = Path(tempfile.mkdtemp(prefix=f"xpst-mcp-{scenario['name']}-"))
     (profile / "state.json").write_text(json.dumps(STATE), encoding="utf-8")
+    for name in SEED_DIRS:
+        (profile / name).mkdir(parents=True, exist_ok=True)
+    for name, body in HELPER_SCRIPTS.items():
+        path = profile / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        path.chmod(0o755)
 
     env = dict(os.environ)
     env["PYTHONPATH"] = str(ROOT / "src")
@@ -156,6 +195,8 @@ def run_scenario(python: str, scenario: dict) -> dict:
         if name.startswith("XPST_") and name != "XPST_CONFIG_DIR":
             del env[name]
     env.update(scenario["env"])
+    env["XPST_FFMPEG_PATH"] = str(profile / "bin" / "ffmpeg")
+    env["XPST_YTDLP_PATH"] = str(profile / "bin" / "yt-dlp")
 
     steps = requests_for(scenario["name"])
     process = subprocess.Popen(
@@ -212,13 +253,30 @@ def run_scenario(python: str, scenario: dict) -> dict:
             )
             continue
         if step["method"] == "tools/call":
+            tool = step["params"]["name"]
+            text = result["content"][0]["text"].replace(str(profile), "<PROFILE>")
+            mask_checks = MASK_CHECKS.get(tool, [])
+            if mask_checks:
+                payload = json.loads(text)
+                for check in payload.get("readiness", {}).get("checks", []):
+                    if check.get("id") in mask_checks:
+                        check["message"] = "<ENV>"
+                        check["details"] = "<ENV>"
+                text = json.dumps(payload, default=str)
             recorded.append(
                 {
                     "id": step["id"],
                     "method": "tools/call",
-                    "tool": step["params"]["name"],
+                    "tool": tool,
+                    "arguments": step["params"]["arguments"],
                     "is_error": bool(result.get("isError")),
-                    "text": result["content"][0]["text"].replace(str(profile), "<PROFILE>"),
+                    "mask_checks": mask_checks,
+                    # The renderer's observable shape: `indent=2` is multi-line,
+                    # compact is one line. Recorded separately because a masked
+                    # body is re-rendered for comparison, which would otherwise
+                    # hide a renderer regression.
+                    "multiline": "\n" in text,
+                    "text": text,
                 }
             )
             continue
@@ -230,7 +288,10 @@ def run_scenario(python: str, scenario: dict) -> dict:
             }
         )
 
-    return {"name": scenario["name"], "env": scenario["env"], "steps": recorded}
+    recorded_env = dict(scenario["env"])
+    recorded_env["XPST_FFMPEG_PATH"] = "<PROFILE>/bin/ffmpeg"
+    recorded_env["XPST_YTDLP_PATH"] = "<PROFILE>/bin/yt-dlp"
+    return {"name": scenario["name"], "env": recorded_env, "steps": recorded}
 
 
 def main() -> int:

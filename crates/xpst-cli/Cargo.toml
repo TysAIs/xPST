@@ -36,6 +36,7 @@ xpst-media.workspace = true
 # `mcp start` serves the agent surface in-process: one binary, one server. The
 # crate owns the transport and the async runtime, so the CLI stays synchronous.
 xpst-mcp = { version = "1.3.0", path = "../xpst-mcp" }
+xpst-surface = { version = "1.3.0", path = "../xpst-surface" }
 xpst-state.workspace = true
 xpst-store = { version = "1.3.0", path = "../xpst-store" }
 

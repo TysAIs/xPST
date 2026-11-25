@@ -52,6 +52,22 @@ const EXPECTED_SCENARIOS: usize = 3;
 const STATE: &str =
     r#"{"version":2,"posted_videos":{},"health":{"total_processed":0,"platforms":{}}}"#;
 
+/// The helper scripts the readiness and security checks probe, byte-identical
+/// to `HELPER_SCRIPTS` in the capture script. Pinned so `ffmpeg_available` and
+/// the helper rows are the fixture's, not the machine's.
+/// The folders the Python server's startup creates before the first tool call
+/// (`credentials/`, `backups/`). Seeded so the readiness `directories` row is
+/// the same document on both engines.
+const SEED_DIRS: [&str; 2] = ["credentials", "backups"];
+
+const HELPER_SCRIPTS: [(&str, &str); 2] = [
+    (
+        "bin/ffmpeg",
+        "#!/bin/sh\necho \"ffmpeg version 9.9.9-test Copyright (c) the xPST parity fixture\"\n",
+    ),
+    ("bin/yt-dlp", "#!/bin/sh\necho \"2026.01.01\"\n"),
+];
+
 struct Server {
     child: Child,
     stdin: ChildStdin,
@@ -152,7 +168,41 @@ fn profile(name: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("scratch profile");
     std::fs::write(dir.join("state.json"), STATE).expect("seed state");
+    for name in SEED_DIRS {
+        std::fs::create_dir_all(dir.join(name)).expect("seed dir");
+    }
+    for (name, body) in HELPER_SCRIPTS {
+        let path = dir.join(name);
+        std::fs::create_dir_all(path.parent().expect("helper parent")).expect("helper dir");
+        std::fs::write(&path, body).expect("seed helper");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+        }
+    }
     dir
+}
+
+/// The readiness rows whose value is a property of the interpreter, not of the
+/// engine. Masked exactly the way `capture_mcp_stdio.py` masks them, so the
+/// comparison stays a byte comparison of the whole document.
+fn mask_checks(text: &str, ids: &[&str]) -> String {
+    let mut payload: Value = serde_json::from_str(text).expect("the body is JSON");
+    if let Some(checks) = payload
+        .get_mut("readiness")
+        .and_then(|readiness| readiness.get_mut("checks"))
+        .and_then(Value::as_array_mut)
+    {
+        for check in checks {
+            let id = check.get("id").and_then(Value::as_str).unwrap_or_default();
+            if ids.contains(&id) {
+                check["message"] = json!("<ENV>");
+                check["details"] = json!("<ENV>");
+            }
+        }
+    }
+    xpst_config::python_style_json_compact(&payload).expect("render the masked body")
 }
 
 /// FNV-1a 64-bit, the same digest `capture_mcp_stdio.py` records.
@@ -192,10 +242,19 @@ fn scenarios() -> Vec<Value> {
 fn the_rust_server_speaks_the_python_wire() {
     for scenario in scenarios() {
         let name = scenario["name"].as_str().expect("scenario name");
-        let env = scenario["env"].clone();
         let dir = profile(name);
-        let mut server = Server::start(binary(), &["mcp", "start"], &dir, &env);
         let root = dir.display().to_string();
+        // The fixture records the helper paths as `<PROFILE>/bin/...`; this
+        // run's profile is a different directory.
+        let mut env = scenario["env"].clone();
+        if let Some(map) = env.as_object_mut() {
+            for value in map.values_mut() {
+                if let Some(text) = value.as_str() {
+                    *value = json!(text.replace("<PROFILE>", &root));
+                }
+            }
+        }
+        let mut server = Server::start(binary(), &["mcp", "start"], &dir, &env);
 
         for step in scenario["steps"].as_array().expect("steps") {
             let id = step["id"].as_u64().expect("step id");
@@ -243,15 +302,7 @@ fn the_rust_server_speaks_the_python_wire() {
                 }
                 "tools/call" => {
                     let tool = step["tool"].as_str().expect("tool");
-                    let arguments = if tool == "xpst_post" {
-                        json!({
-                            "media_path": "/nonexistent/parity.mp4",
-                            "platforms": ["youtube"],
-                            "caption": "parity fixture",
-                        })
-                    } else {
-                        json!({})
-                    };
+                    let arguments = step["arguments"].clone();
                     let response = server.request(
                         id,
                         "tools/call",
@@ -263,10 +314,25 @@ fn the_rust_server_speaks_the_python_wire() {
                         step["is_error"].as_bool().expect("is_error"),
                         "scenario `{name}`: {tool} error verdict drifted"
                     );
-                    let text = result["content"][0]["text"]
+                    let mut text = result["content"][0]["text"]
                         .as_str()
                         .unwrap_or_default()
                         .replace(&root, "<PROFILE>");
+                    // The renderer is a property of the tool (`indent=2` vs
+                    // compact), and a masked body is re-rendered for the
+                    // comparison — so pin the shape on the raw text first.
+                    assert_eq!(
+                        text.contains('\n'),
+                        step["multiline"].as_bool().expect("multiline"),
+                        "scenario `{name}`: {tool} renderer drifted (multi-line vs compact)"
+                    );
+                    let mask: Vec<&str> = step["mask_checks"]
+                        .as_array()
+                        .map(|ids| ids.iter().filter_map(Value::as_str).collect())
+                        .unwrap_or_default();
+                    if !mask.is_empty() {
+                        text = mask_checks(&text, &mask);
+                    }
                     assert_eq!(
                         text,
                         step["text"].as_str().expect("text"),

@@ -7,6 +7,7 @@ members = [
     "crates/xpst-cli",
     "crates/xpst-core",
     "crates/xpst-config",
+    "crates/xpst-surface",
     "crates/xpst-state",
     "crates/xpst-auth",
     "crates/xpst-authflow",

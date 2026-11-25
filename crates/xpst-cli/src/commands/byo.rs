@@ -523,7 +523,7 @@ pub fn set(
         return exit::SUCCESS;
     }
 
-    let (dir, mut config) = match load(global, json_mode, out, err) {
+    let (dir, mut config) = match load(global, out, err) {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };

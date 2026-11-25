@@ -31,8 +31,14 @@ That is a structural property here, not a review checklist:
 | `xpst_rate_limit_status` | `rate_cooldowns.json` | `cooldown_report()`: idle records omitted, same duration strings, same fixed sentence. |
 | `xpst_schedule_list` | `schedule.json`, `schedule.paused.json`, `schedule.json.paused-*` | Sorted entries with `scheduled_time_local`, pause state, and the snapshot note that stops an empty queue reading as "deleted". |
 | `xpst_providers` | captured provider catalog | Provider metadata only — no credentials, no network, no per-install state. |
+| `xpst_readiness` | `config.yaml`, credential store, helper binaries | `build_readiness_report()`: the same checks, summary and role rows the CLI prints, wrapped in `{ok, contract_version, readiness}`. Compact render, as Python's handler does. |
+| `xpst_security_audit` | `config.yaml`, credential file modes, env | `run_security_checks()`: every check reports what was observed; `dashboard_localhost` is `unobserved` because a CLI process never binds the socket. |
+| `xpst_best_time` | `analytics.db` | `BestTimeAnalyzer`: `{platform, best_time}` for one platform, `{best_times}` for all. |
+| `kb_query` | `$XPST_HOME/knowledge/<workspace>/nuggets.json` | `query_nuggets()` on the substring path (no embedding stack), `k=8` as the handler defaults. |
+| `xpst_search` | `$XPST_HOME/knowledge/default/nuggets.json` | The top-level alias: `default` workspace, `k` from `limit` (default 10). |
+| `xpst_bio_get` | `config.yaml` | `collect_links()`: enabled accounts with a usable handle, then the http(s) custom links. |
 
-Five ported, forty-one stubbed. Nothing is half-implemented: a tool is either
+Eleven ported, thirty-five stubbed. Nothing is half-implemented: a tool is either
 answering from a real local store or saying `not_implemented` with the reason.
 
 ## Stubbed tools
@@ -49,12 +55,9 @@ ledger), or it writes through an engine service that does not exist in Rust yet.
 | `xpst_analytics` | reads analytics.db and can refresh from platform APIs |
 | `xpst_cross_post_analytics` | reads analytics.db, which is not ported |
 | `xpst_followers` | requires platform APIs |
-| `xpst_best_time` | reads engagement history from analytics.db, which is not ported |
-| `xpst_security_audit` | runs the Python security scanner, which is not ported |
 | `xpst_suggest_caption` | calls the AI caption service |
 | `xpst_generate_ideas` | calls the AI content service |
 | `xpst_transcript` | reads the knowledge store, which is not ported |
-| `xpst_search` | reads the knowledge vector store, which is not ported |
 | `xpst_activity` | reads the activity ledger, which is not ported |
 | `xpst_schedule_add` | writes the schedule store through Python services, which are not ported |
 | `xpst_schedule_cancel` | mutates the schedule store through Python services, which are not ported |
@@ -65,10 +68,8 @@ ledger), or it writes through an engine service that does not exist in Rust yet.
 | `xpst_backfill` | re-posts through provider adapters, which are not ported |
 | `xpst_auth_status` | probes platform credentials, which needs the network |
 | `xpst_byo_app` | reads and decrypts the bring-your-own-app store, which is not ported |
-| `xpst_bio_get` | reads the link-in-bio configuration, which is not ported |
 | `xpst_capabilities` | provider state is credential-derived, which needs platform probes |
 | `xpst_preflight` | resolves destinations against live credentials and the content contract |
-| `xpst_readiness` | probes credentials, helper binaries and directories |
 | `xpst_auth_start` | builds the per-platform auth plan from the auth flow, which is not ported |
 | `xpst_disconnect` | removes stored credentials through Python services, which are not ported |
 | `xpst_delete` | deletes posts on the platform, which needs provider adapters |
@@ -76,7 +77,6 @@ ledger), or it writes through an engine service that does not exist in Rust yet.
 | `messenger_set_rules` | writes the Messenger rules through Python config services, which are not ported |
 | `xpst_messenger_check_comments` | reads and replies on the Meta Graph API |
 | `kb_add` | ingests into the knowledge store, which is not ported |
-| `kb_query` | reads the knowledge vector store, which is not ported |
 | `kb_organize` | writes the knowledge store, which is not ported |
 | `kb_areas` | reads the knowledge store, which is not ported |
 | `xpst_setup_start` | writes the setup transaction file through Python services, which are not ported |
@@ -146,6 +146,15 @@ of scope for this crate.
 - `xpst_config_show` reports `not_found` when there is no `config.yaml`. The
   Python tool renders its in-memory default config; those defaults are not
   ported, and inventing them would be a fake payload.
+- `xpst_readiness`'s `python` row reports the Rust engine instead of a Python
+  version (a Rust binary has no interpreter to version). The row keeps its id,
+  label, severity and `ok`, so the summary and the blocking list are unaffected;
+  the protocol fixture masks `message`/`details` for that one row, exactly as
+  `local_surface.json` does.
+- The Python server initializes its engine at startup, which creates
+  `credentials/` and `backups/` before the first tool call; the Rust server has
+  no engine. The protocol fixture seeds those two folders so the readiness
+  `directories` row is the same document on both engines.
 - `xpst_capabilities` stays a stub: its per-provider `state` is derived from
   credential probes, which is exactly the network/credential surface this slice
   excludes. `xpst_providers` (the static catalog) is ported.

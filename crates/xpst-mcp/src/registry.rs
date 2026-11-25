@@ -167,15 +167,17 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_best_time",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads engagement history from analytics.db, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::best_time::run,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_security_audit",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "runs the Python security scanner, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::security::run,
+            render: Render::Pretty,
         },
     ),
     (
@@ -202,8 +204,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_search",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads the knowledge vector store, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::kb::search,
+            render: Render::Pretty,
         },
     ),
     (
@@ -311,8 +314,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_bio_get",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads the link-in-bio configuration, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::bio::run,
+            render: Render::Pretty,
         },
     ),
     (
@@ -332,8 +336,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_readiness",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "probes credentials, helper binaries and directories",
+        Implementation::Ported {
+            handler: crate::tools::readiness::run,
+            render: Render::Compact,
         },
     ),
     (
@@ -397,8 +402,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "kb_query",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads the knowledge vector store, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::kb::query,
+            render: Render::Pretty,
         },
     ),
     (

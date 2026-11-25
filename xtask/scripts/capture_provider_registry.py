@@ -39,14 +39,18 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-RESOURCE = REPO / "crates/xpst-cli/src/resources/provider_registry.json"
+RESOURCE = REPO / "crates/xpst-surface/src/resources/provider_registry.json"
 
 #: The config fields the two ported commands read. Captured as the effective
 #: pre-file defaults so the Rust config view starts from the same numbers.
 ACCOUNT_FIELDS: dict[str, tuple[str, ...]] = {
-    "youtube": ("enabled", "token_file", "client_secrets", "video_mode"),
+    # `username` is what the link-in-bio page renders (`dashboard/bio.py`), so
+    # it is part of the config view even though the provider catalog never
+    # reads it.
+    "youtube": ("enabled", "username", "token_file", "client_secrets", "video_mode"),
     "x": (
         "enabled",
+        "username",
         "auth_mode",
         "cookies_file",
         "bearer_token",
@@ -58,6 +62,7 @@ ACCOUNT_FIELDS: dict[str, tuple[str, ...]] = {
     ),
     "instagram": (
         "enabled",
+        "username",
         "auth_mode",
         "session_file",
         "graph_access_token",

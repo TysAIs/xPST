@@ -89,7 +89,7 @@ pub fn run(
 
     let view = match config_view::resolve(global) {
         Ok(view) => view,
-        Err(error) => return bootstrap::report(err, json_mode, out, &error),
+        Err(error) => return bootstrap::report(out, err, &error),
     };
     let config_dir = view.config_dir().to_path_buf();
 

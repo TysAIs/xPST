@@ -140,7 +140,7 @@ pub fn verify_media(
 
     let config_path = match bootstrap::ensure_config(global) {
         Ok(path) => path,
-        Err(error) => return bootstrap::report(err, json_mode, out, &error),
+        Err(error) => return bootstrap::report(out, err, &error),
     };
     let document = match xpst_config::ConfigDocument::read(&config_path) {
         Ok(document) => document.raw().clone(),

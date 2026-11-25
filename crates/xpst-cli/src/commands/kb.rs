@@ -40,65 +40,15 @@ use std::path::{Path, PathBuf};
 use clap::ArgMatches;
 use xpst_config::Value;
 
-use crate::commands::config_view::{python_str, truthy};
-use crate::commands::kb_store::{self, Area, Nugget};
+use crate::commands::config_view::python_str;
+use crate::commands::kb_store::{Area, Nugget};
 use crate::output::{
     array, boolean, integer, null, object, python_pretty_json_cfg, string, write_python_json,
     write_text,
 };
 use crate::{exit, flag, leaf_string, GlobalOptions};
-
-/// `_SAFE_NAME_RE`: alphanumerics, dash, underscore, colon, dot.
-fn valid_workspace_name(name: &str) -> bool {
-    !name.is_empty()
-        && !name.contains("..")
-        && !name.starts_with('~')
-        && name.chars().all(|character| {
-            character.is_alphanumeric() || matches!(character, '-' | '_' | ':' | '.')
-        })
-}
-
-/// `_xpst_home()`: `XPST_HOME`, else `~/.xpst`.
-fn xpst_home() -> Option<PathBuf> {
-    if let Some(home) = std::env::var_os("XPST_HOME") {
-        if !home.is_empty() {
-            return Some(crate::commands::state::expanduser(&home.to_string_lossy()));
-        }
-    }
-    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".xpst"))
-}
-
-/// Why a workspace could not be resolved.
-enum WorkspaceError {
-    /// `Workspace.resolve()` raises an uncaught `ValueError`.
-    Invalid(String),
-    /// Neither `XPST_HOME` nor `HOME` is set.
-    NoHome,
-}
-
-/// `Workspace.resolve(name, create=...)` — the root directory, not the name.
-fn resolve_workspace(name: &str, create: bool) -> Result<PathBuf, WorkspaceError> {
-    if !valid_workspace_name(name) {
-        return Err(WorkspaceError::Invalid(format!(
-            "Invalid workspace name: must contain only alphanumeric, dash, underscore, \
-             colon, or dot characters (got: {})",
-            crate::output::python_repr(name)
-        )));
-    }
-    let Some(home) = xpst_home() else {
-        return Err(WorkspaceError::NoHome);
-    };
-    let root = home.join("knowledge").join(name);
-    if create {
-        if let Err(error) = std::fs::create_dir_all(&root) {
-            return Err(WorkspaceError::Invalid(format!(
-                "cannot create {}: {error}",
-                root.display()
-            )));
-        }
-    }
-    Ok(root)
-}
+use xpst_surface::kb::{citation, open_store, query_payload, resolve_workspace, WorkspaceError};
+use xpst_surface::kb_store;
 
 /// The `--json` decision: the global flag (which Click turns on for a piped
 /// stdout) or the leaf's own flag.
@@ -142,19 +92,6 @@ fn store_failure(line: &str, err: &mut dyn Write) -> i32 {
     exit::GENERAL
 }
 
-/// The two files `JsonKnowledgeStore.__init__` loads, in its order.
-struct Store {
-    nuggets: Vec<Nugget>,
-    areas: Vec<Area>,
-}
-
-fn open_store(root: &Path) -> Result<Store, String> {
-    let nuggets = kb_store::load_nuggets(&root.join("nuggets.json"))?;
-    let areas = kb_store::load_areas(&root.join("areas.json"))?;
-    Ok(Store { nuggets, areas })
-}
-
-// ---------------------------------------------------------------------------
 // kb areas
 // ---------------------------------------------------------------------------
 
@@ -173,7 +110,7 @@ pub fn areas(
     };
     let store = match open_store(&root) {
         Ok(store) => store,
-        Err(line) => return store_failure(&line, err),
+        Err(error) => return store_failure(&error, err),
     };
     let mut areas = store.areas;
     kb_store::order_areas(&mut areas);
@@ -291,15 +228,6 @@ fn assemble_course<'a>(
     assembled
 }
 
-/// `nugget.source_url or nugget.source_video_id`.
-fn citation(nugget: &Nugget) -> Value {
-    if truthy(&nugget.source_url) {
-        nugget.source_url.clone()
-    } else {
-        nugget.source_video_id.clone()
-    }
-}
-
 /// `f"{value:.1f}"` for a timestamp.
 fn one_decimal(value: &Value) -> String {
     format!("{:.1}", value.as_f64().unwrap_or_default())
@@ -321,7 +249,7 @@ pub fn course(
     };
     let store = match open_store(&root) {
         Ok(store) => store,
-        Err(line) => return store_failure(&line, err),
+        Err(error) => return store_failure(&error, err),
     };
     let assembled = assemble_course(&store.nuggets, store.areas, area_id.as_deref());
 
@@ -837,7 +765,7 @@ pub fn doctor(
     };
     let store = match open_store(&root) {
         Ok(store) => store,
-        Err(line) => return store_failure(&line, err),
+        Err(error) => return store_failure(&error, err),
     };
 
     let mut findings = vec![check_dependencies()];
@@ -849,13 +777,13 @@ pub fn doctor(
 
     let queue = match load_queue(&root.join("queue.json")) {
         Ok(queue) => queue,
-        Err(line) => return store_failure(&line, err),
+        Err(error) => return store_failure(&error, err),
     };
     findings.extend(check_queue(&queue));
 
     let sources = match manifest_source_count(&root.join("manifest.json")) {
         Ok(count) => count,
-        Err(line) => return store_failure(&line, err),
+        Err(error) => return store_failure(&error, err),
     };
     findings.push(Finding {
         check: "manifest",
@@ -919,56 +847,6 @@ pub fn doctor(
 // kb query / search
 // ---------------------------------------------------------------------------
 
-/// `query_nuggets(text, workspace, k)` — the substring path.
-///
-/// Python tries the embedder first and falls back to substring matching when it
-/// is unavailable *or* when the store holds no vectors. The Rust engine has no
-/// embedding stack, so it always takes the fallback — which is the same answer
-/// on a machine without the knowledge extra and on any store that has not been
-/// embedded.
-fn query_payload(workspace: &str, text: &str, k: i64) -> Result<Value, String> {
-    let root = match resolve_workspace(workspace, false) {
-        Ok(root) => root,
-        Err(WorkspaceError::Invalid(message)) => return Err(format!("ValueError: {message}")),
-        Err(WorkspaceError::NoHome) => {
-            return Err(
-                "cannot determine the xPST home: neither XPST_HOME nor HOME is set".to_string(),
-            )
-        }
-    };
-    let store = open_store(&root)?;
-    let limit = k.max(1) as usize;
-    let needle = text.to_lowercase();
-    let hits: Vec<&Nugget> = store
-        .nuggets
-        .iter()
-        .filter(|nugget| nugget.point.to_lowercase().contains(&needle))
-        .take(limit)
-        .collect();
-
-    let rows: Vec<Value> = hits
-        .iter()
-        .map(|nugget| {
-            object(vec![
-                ("point", Value::String(nugget.point.clone())),
-                ("citation", citation(nugget)),
-                ("source_url", nugget.source_url.clone()),
-                ("timestamp_start", nugget.timestamp_start.clone()),
-                ("timestamp_end", nugget.timestamp_end.clone()),
-                ("score", null()),
-                ("area_id", nugget.area_id.clone()),
-            ])
-        })
-        .collect();
-    Ok(object(vec![
-        ("workspace", string(workspace)),
-        ("query", string(text)),
-        ("mode", string("substring")),
-        ("count", integer(rows.len() as i64)),
-        ("nuggets", array(rows)),
-    ]))
-}
-
 /// The `--limit` value, defaulting the way Click does.
 fn limit_option(leaf: Option<&ArgMatches>, default: i64) -> i64 {
     leaf_string(leaf, "opt:limit")
@@ -989,7 +867,7 @@ pub fn query(
     let limit = limit_option(leaf, 8);
     let payload = match query_payload(&workspace, &text, limit) {
         Ok(payload) => payload,
-        Err(line) => return store_failure(&line, err),
+        Err(error) => return store_failure(&error.cli_line(), err),
     };
 
     if json {
@@ -1038,7 +916,7 @@ pub fn search(
     let limit = limit_option(leaf, 10);
     let payload = match query_payload("default", &text, limit) {
         Ok(payload) => payload,
-        Err(line) => return store_failure(&line, err),
+        Err(error) => return store_failure(&error.cli_line(), err),
     };
 
     if json {
@@ -1117,6 +995,7 @@ pub fn migrate_store(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use xpst_surface::kb::valid_workspace_name;
 
     fn nugget(id: &str, point: &str, difficulty: &str, start: f64) -> Nugget {
         Nugget {
