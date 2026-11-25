@@ -27,6 +27,7 @@ pub mod ledger;
 pub mod output;
 pub mod parity;
 pub mod paths;
+pub mod rich;
 
 use std::ffi::OsString;
 use std::io::{IsTerminal, Write};

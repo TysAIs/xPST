@@ -29,7 +29,18 @@ Notes on determinism (the fixture is checked in and runs on every OS):
   value is the wall clock — `paused_at`, `checked_at`), `allow_nonzero` (a
   recorded failure is behaviour, not a capture bug) and `files` (relative paths
   whose content after the run is part of the expectation, which is how the
-  config write path is held to the same bytes as the Python engine).
+  config write path is held to the same bytes as the Python engine);
+* `compare: "text"` records the exact stdout *and* stderr (the config-error path
+  is Rich text on stdout plus a RichHandler block on stderr, even under
+  `--json`), and `normalize_clock` replaces the two wall-clock values in it —
+  the `config.yaml.corrupt_<epoch>` backup name and the `[MM/DD/YY HH:MM:SS]`
+  log timestamp — so the row is reproducible;
+* `expect_backup` records the `backups/` files a run left behind (name with the
+  epoch normalised, content, mode), which is how the corrupt-config backup is
+  held to the Python engine's copy;
+* `COLUMNS` is pinned to 80 for every scenario: Rich wraps at the terminal width
+  when one is attached, so an interactive capture would otherwise record a
+  different fixture than CI.
 
 The script refuses to write a fixture with no scenarios, and asserts the
 recorded count, so an emptied fixture cannot silently turn the parity test into
@@ -39,6 +50,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -763,6 +775,128 @@ SCENARIOS = [
         "env": {"TZ": "Pacific/Kiritimati"},
         "compare": "json",
     },
+    # ── the config-load error path (t_5cb9e1e9) ───────────────────────────
+    #
+    # `XPSTConfig.load` copies a corrupt config to `backups/`, prints a
+    # Rich-wrapped `Configuration error:` line on **stdout** and logs the copy
+    # through a `RichHandler` on **stderr** — even under `--json`, because the
+    # print happens before any JSON exists. The loader is shared, so the same
+    # two shapes are pinned on every command that reports them: an empty file
+    # (backed up) and a document that parses but is not a mapping (not backed
+    # up, because nothing was lost).
+    #
+    # The config is named by a *relative* `--config` and the run happens from
+    # the scratch profile, so the message carries `cfg/config.yaml` rather than
+    # an absolute path. That is what makes the row byte-comparable: Rich wraps
+    # at 80 columns, so an absolute path of a different length would move every
+    # fold. Only the wall clock is normalised.
+    {
+        "name": "config_load_empty_file_byo_status",
+        "argv": ["--config", "cfg/config.yaml", "byo", "status", "--json"],
+        "seed": {"cfg/config.yaml": ""},
+        "cwd": "PROFILE",
+        "backup_dir": "cfg/backups",
+        "allow_nonzero": True,
+        "normalize_clock": True,
+        "expect_backup": True,
+        "compare": "text",
+    },
+    {
+        "name": "config_load_empty_file_providers",
+        "argv": ["--config", "cfg/config.yaml", "providers", "--json"],
+        "seed": {"cfg/config.yaml": ""},
+        "cwd": "PROFILE",
+        "backup_dir": "cfg/backups",
+        "allow_nonzero": True,
+        "normalize_clock": True,
+        "expect_backup": True,
+        "compare": "text",
+    },
+    {
+        "name": "config_load_empty_file_messenger_status",
+        "argv": ["--config", "cfg/config.yaml", "messenger", "status", "--json"],
+        "seed": {"cfg/config.yaml": ""},
+        "cwd": "PROFILE",
+        "backup_dir": "cfg/backups",
+        "allow_nonzero": True,
+        "normalize_clock": True,
+        "expect_backup": True,
+        "compare": "text",
+    },
+    {
+        "name": "config_load_empty_file_status",
+        "argv": ["--config", "cfg/config.yaml", "status", "--json"],
+        "seed": {"cfg/config.yaml": ""},
+        "cwd": "PROFILE",
+        "backup_dir": "cfg/backups",
+        "allow_nonzero": True,
+        "normalize_clock": True,
+        "expect_backup": True,
+        "compare": "text",
+    },
+    # `pathlib.Path(config_path)` normalises before the message, the backup
+    # directory and the existence check: `./cfg/config.yaml` (what shell
+    # completion hands you) prints `cfg/config.yaml`, and a trailing slash
+    # still reads the file instead of taking the "explicit path missing"
+    # branch (`Path::new("cfg/config.yaml/").exists()` is false on Linux).
+    {
+        "name": "config_load_dot_prefix_byo_status",
+        "argv": ["--config", "./cfg/config.yaml", "byo", "status", "--json"],
+        "seed": {"cfg/config.yaml": ""},
+        "cwd": "PROFILE",
+        "backup_dir": "cfg/backups",
+        "allow_nonzero": True,
+        "normalize_clock": True,
+        "expect_backup": True,
+        "compare": "text",
+    },
+    {
+        "name": "config_load_trailing_slash_byo_status",
+        "argv": ["--config", "cfg/config.yaml/", "byo", "status", "--json"],
+        "seed": {"cfg/config.yaml": ""},
+        "cwd": "PROFILE",
+        "backup_dir": "cfg/backups",
+        "allow_nonzero": True,
+        "normalize_clock": True,
+        "expect_backup": True,
+        "compare": "text",
+    },
+    {
+        "name": "config_load_non_mapping_byo_status",
+        "argv": ["--config", "cfg/config.yaml", "byo", "status", "--json"],
+        "seed": {"cfg/config.yaml": "- 1\\n"},
+        "cwd": "PROFILE",
+        "backup_dir": "cfg/backups",
+        "allow_nonzero": True,
+        "compare": "text",
+    },
+    {
+        "name": "config_load_non_mapping_providers",
+        "argv": ["--config", "cfg/config.yaml", "providers", "--json"],
+        "seed": {"cfg/config.yaml": "- 1\\n"},
+        "cwd": "PROFILE",
+        "backup_dir": "cfg/backups",
+        "allow_nonzero": True,
+        "compare": "text",
+    },
+    {
+        "name": "config_load_non_mapping_messenger_status",
+        "argv": ["--config", "cfg/config.yaml", "messenger", "status", "--json"],
+        "seed": {"cfg/config.yaml": "- 1\\n"},
+        "cwd": "PROFILE",
+        "backup_dir": "cfg/backups",
+        "allow_nonzero": True,
+        "compare": "text",
+    },
+    {
+        "name": "config_load_non_mapping_status",
+        "argv": ["--config", "cfg/config.yaml", "status", "--json"],
+        "seed": {"cfg/config.yaml": "- 1\\n"},
+        "cwd": "PROFILE",
+        "backup_dir": "cfg/backups",
+        "allow_nonzero": True,
+        "compare": "text",
+    },
 ]
 
 
@@ -816,6 +950,10 @@ def env_for(scenario: dict, profile: Path) -> dict[str, str]:
     env.update(PINNED_ENV)
     env["XPST_CONFIG_DIR"] = str(config_dir_for(scenario, profile))
     env["PYTHONPATH"] = str(REPO / "src")
+    # Rich wraps at the terminal width when one is attached (`Console.size`
+    # asks fds 0/1/2), so an interactive capture would record a different
+    # fixture than CI. Pinning COLUMNS makes both engines agree everywhere.
+    env["COLUMNS"] = "80"
     # A scenario's HOME is a *config* sandbox, not a Python environment. A
     # `pip install --user` puts the distribution metadata under
     # `~/.local/lib/...`, so re-pointing HOME hides it and the engine dies with
@@ -860,6 +998,26 @@ def normalize(payload, profile: Path, mask: list[str] | None = None):
     return payload
 
 
+CLOCK_PATTERNS = (
+    # `_backup_corrupt_config_file` names the copy with `int(time.time())`.
+    (re.compile(r"corrupt_\d+"), "corrupt_<EPOCH>"),
+    # `RichHandler`'s default `log_time_format` is `[%x %X]`.
+    (re.compile(r"\[\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}\]"), "[<TIME>]"),
+)
+
+
+def normalize_clock(text: str) -> str:
+    """Replace the two wall-clock values a config-error row carries.
+
+    The backup name embeds the epoch and the log block embeds the local time;
+    two runs never agree on either, so a `normalize_clock` scenario records the
+    text with both replaced.
+    """
+    for pattern, replacement in CLOCK_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
 def observe(scenario: dict, prefix: list[str]) -> dict:
     """Run one scenario against one engine and return what it answered."""
     profile = Path(tempfile.mkdtemp(prefix="xpst-observe-"))
@@ -868,12 +1026,19 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
         env = env_for(scenario, profile)
         proc = subprocess.run(
             [*prefix, *argv_for(scenario, profile)],
-            cwd=str(REPO),
+            # A `cwd` scenario runs from the scratch profile so the config path
+            # in the message is relative and therefore machine-independent.
+            cwd=str(profile) if scenario.get("cwd") == "PROFILE" else str(REPO),
             env=env,
             capture_output=True,
             text=True,
             timeout=180,
         )
+        stdout = proc.stdout
+        stderr = proc.stderr
+        if scenario.get("normalize_clock"):
+            stdout = normalize_clock(stdout)
+            stderr = normalize_clock(stderr)
         payload = None
         if scenario["compare"] in ("json", "digest"):
             try:
@@ -882,6 +1047,22 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
                 )
             except json.JSONDecodeError:
                 payload = None
+        backups = []
+        if scenario.get("expect_backup"):
+            backup_dir = profile / scenario.get("backup_dir", "backups")
+            if backup_dir.is_dir():
+                for entry in sorted(backup_dir.iterdir()):
+                    backups.append(
+                        {
+                            "name": normalize_clock(entry.name),
+                            "content": normalize(
+                                entry.read_text(encoding="utf-8", errors="replace"),
+                                profile,
+                                scenario.get("mask"),
+                            ),
+                            "mode": oct(entry.stat().st_mode & 0o777),
+                        }
+                    )
         files = {}
         for relative in scenario.get("files", []):
             path = profile / relative
@@ -893,9 +1074,11 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
             "exit_code": proc.returncode,
             "payload": payload,
             "files": files,
-            "stdout": proc.stdout,
-            "stdout_normalized": normalize(proc.stdout, profile, scenario.get("mask")),
-            "stderr": proc.stderr,
+            "backups": backups,
+            "stdout": stdout,
+            "stdout_normalized": normalize(stdout, profile, scenario.get("mask")),
+            "stderr": stderr,
+            "stderr_normalized": normalize(stderr, profile, scenario.get("mask")),
         }
     finally:
         shutil.rmtree(profile, ignore_errors=True)
@@ -953,6 +1136,10 @@ def run_scenario(scenario: dict, python: str) -> dict:
         record["env"] = scenario["env"]
     if scenario.get("config_dir"):
         record["config_dir"] = scenario["config_dir"]
+    if scenario.get("cwd"):
+        record["cwd"] = scenario["cwd"]
+    if scenario.get("backup_dir"):
+        record["backup_dir"] = scenario["backup_dir"]
     if scenario.get("mask"):
         record["mask"] = scenario["mask"]
     if scenario.get("allow_nonzero"):
@@ -967,6 +1154,16 @@ def run_scenario(scenario: dict, python: str) -> dict:
         return record
     if scenario["compare"] == "stdout":
         record["stdout"] = observed["stdout_normalized"]
+        return record
+    if scenario["compare"] == "text":
+        # The config-error path is Rich text on stdout plus a RichHandler block
+        # on stderr, even under `--json`; both are the expectation.
+        record["stdout"] = observed["stdout_normalized"]
+        record["stderr"] = observed["stderr_normalized"]
+        if scenario.get("normalize_clock"):
+            record["normalize_clock"] = True
+        if scenario.get("expect_backup"):
+            record["backups"] = observed["backups"]
         return record
     if scenario["compare"] == "digest":
         if observed["payload"] is None:
@@ -1053,6 +1250,27 @@ def compare_scenarios(python: str, binary: str) -> int:
                     f"{name}: stdout differs\n  python: {expected['stdout_normalized']!r}\n"
                     f"  rust:   {actual['stdout_normalized']!r}"
                 )
+        elif mode == "text":
+            if expected["exit_code"] != actual["exit_code"]:
+                mismatches.append(
+                    f"{name}: exit {expected['exit_code']} (python) != "
+                    f"{actual['exit_code']} (rust)"
+                )
+            if expected["stdout_normalized"] != actual["stdout_normalized"]:
+                mismatches.append(
+                    f"{name}: stdout differs\n  python: {expected['stdout_normalized']!r}\n"
+                    f"  rust:   {actual['stdout_normalized']!r}"
+                )
+            if expected["stderr_normalized"] != actual["stderr_normalized"]:
+                mismatches.append(
+                    f"{name}: stderr differs\n  python: {expected['stderr_normalized']!r}\n"
+                    f"  rust:   {actual['stderr_normalized']!r}"
+                )
+            if expected["backups"] != actual["backups"]:
+                mismatches.append(
+                    f"{name}: backups differ\n  python: {json.dumps(expected['backups'])}\n"
+                    f"  rust:   {json.dumps(actual['backups'])}"
+                )
         elif mode == "exit":
             if expected["exit_code"] != actual["exit_code"]:
                 mismatches.append(
@@ -1103,7 +1321,7 @@ def main() -> None:
         raise SystemExit("refusing to write an empty fixture")
     for record in records:
         if (
-            record["compare"] in ("json", "digest")
+            record["compare"] in ("json", "digest", "text")
             and record["exit_code"] != 0
             and not record.get("allow_nonzero")
         ):

@@ -26,7 +26,7 @@ pub fn run(
     let json_mode = global.json || leaf.is_some_and(|m| flag(m, "opt:json"));
     let config_path = match bootstrap::ensure_config(global) {
         Ok(path) => path,
-        Err(error) => return bootstrap::report(err, json_mode, out, &error),
+        Err(error) => return bootstrap::report(out, err, &error),
     };
     let dir = config_path.parent().unwrap_or_else(|| Path::new("."));
     let state = xpst_state::status::effective_state(dir);
