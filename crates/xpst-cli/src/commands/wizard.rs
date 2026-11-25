@@ -40,14 +40,14 @@ use crate::{exit, flag, leaf_string, GlobalOptions};
 const GUIDES: &str = include_str!("../resources/wizard_guides.json");
 
 /// The parsed guide table.
-struct Guides {
-    order: Vec<String>,
+pub struct Guides {
+    pub order: Vec<String>,
     opt_in: Vec<String>,
     guides: Map<String, Value>,
 }
 
 impl Guides {
-    fn load() -> Result<Self, String> {
+    pub fn load() -> Result<Self, String> {
         let document: Value =
             serde_json::from_str(GUIDES).map_err(|error| format!("wizard guides: {error}"))?;
         let order: Vec<String> = document
@@ -87,7 +87,7 @@ impl Guides {
         })
     }
 
-    fn guide(&self, key: &str) -> Option<&Value> {
+    pub fn guide(&self, key: &str) -> Option<&Value> {
         self.guides.get(key)
     }
 }

@@ -28,7 +28,7 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
 <<<<<<< HEAD
-const EXPECTED_SCENARIOS: usize = 230;
+const EXPECTED_SCENARIOS: usize = 249;
 
 /// The environment both engines are run under, whatever the caller inherited.
 ///
@@ -48,7 +48,7 @@ const PINNED_ENV: &[(&str, &str)] = &[
     ("PYTHONHASHSEED", "0"),
 ];
 =======
-const EXPECTED_SCENARIOS: usize = 230;
+const EXPECTED_SCENARIOS: usize = 249;
 >>>>>>> 2296155a80af7458abd3b0d3f8d119e1aa2a3fd6
 
 fn document() -> Value {

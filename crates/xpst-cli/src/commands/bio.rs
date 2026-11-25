@@ -24,7 +24,7 @@ use crate::output::{object, string, write_python_json, write_text};
 use crate::{exit, flag, leaf_flag, leaf_string, GlobalOptions};
 
 /// `API_TOKEN_KEY`.
-const API_TOKEN_KEY: &str = "dashboard_api_token";
+pub(crate) const API_TOKEN_KEY: &str = "dashboard_api_token";
 /// `_TOKEN_BYTES`.
 const TOKEN_BYTES: usize = 32;
 
@@ -77,7 +77,7 @@ fn mask_token(token: Option<&str>) -> Option<String> {
 /// A store that cannot be written falls back to a process-lifetime token in
 /// Python; here the failure is reported to the caller, which then prints the
 /// token-less URL — the same observable result.
-fn ensure_api_token(dir: &std::path::Path) -> Option<String> {
+pub(crate) fn ensure_api_token(dir: &std::path::Path) -> Option<String> {
     let store = CredentialStore::new(dir);
     if let Some(existing) = store.retrieve(API_TOKEN_KEY) {
         if !existing.is_empty() {
@@ -90,7 +90,7 @@ fn ensure_api_token(dir: &std::path::Path) -> Option<String> {
 }
 
 /// `secrets.token_urlsafe(32)`: 32 random bytes, base64url, no padding.
-fn generate_token() -> String {
+pub(crate) fn generate_token() -> String {
     use base64::Engine as _;
     let mut bytes = [0u8; TOKEN_BYTES];
     if getrandom::fill(&mut bytes).is_err() {

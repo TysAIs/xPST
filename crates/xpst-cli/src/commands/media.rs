@@ -113,6 +113,140 @@ pub fn status(
     exit::SUCCESS
 }
 
+/// Run `media fetch`.
+///
+/// Parity target: `media_fetch()` in `src/xpst/cli.py` (lines 8040-8075) →
+/// `ensure_media_binaries(names=…, fetch=True)`. A binary that already resolves
+/// is reported and never downloaded (`media/binaries.py:533-536`), which is the
+/// whole local half: on a host with ffmpeg/ffprobe the command downloads
+/// nothing and still does its job.
+///
+/// **Divergence, recorded in the ledger note:** the download path
+/// (`fetch_media_binary` → `urllib.request.urlopen`, `media/binaries.py:244`)
+/// is not ported. A missing binary reports Python's own
+/// `missing (fetch disabled)` error — the sentence the shipped engine uses when
+/// `XPST_MEDIA_AUTO_FETCH=0` — and exits 1, where Python would fetch a pinned
+/// static build. The fixture pins the missing branch with
+/// `XPST_MEDIA_AUTO_FETCH=0`, so both engines answer the same bytes there.
+pub fn fetch(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    _err: &mut dyn Write,
+) -> i32 {
+    let json_mode = global.json || leaf.is_some_and(|m| flag(m, "opt:json"));
+    let requested: Vec<String> = leaf
+        .and_then(|matches| matches.try_get_many::<String>("opt:binary").ok().flatten())
+        .map(|values| values.cloned().collect())
+        .unwrap_or_default();
+    // `names = binaries or MEDIA_BINARIES`: an empty `--binary` list means both.
+    let names: Vec<&str> = if requested.is_empty() {
+        vec!["ffmpeg", "ffprobe"]
+    } else {
+        requested.iter().map(String::as_str).collect()
+    };
+
+    let all = xpst_media::status();
+    let rows: Vec<&xpst_media::BinaryStatus> = names
+        .iter()
+        .filter_map(|name| all.iter().find(|row| row.name == *name))
+        .collect();
+    let bin_dir = xpst_media::media_bin_dir()
+        .map(|dir| dir.to_string_lossy().to_string())
+        .unwrap_or_default();
+    fetch_report(&rows, &bin_dir, json_mode, out)
+}
+
+/// The report half of `media fetch`, split out so the missing-binary branch —
+/// which cannot be captured on a host that has ffmpeg — is unit-testable.
+fn fetch_report(
+    rows: &[&xpst_media::BinaryStatus],
+    bin_dir: &str,
+    json_mode: bool,
+    out: &mut dyn Write,
+) -> i32 {
+    let ok = rows.iter().all(|row| row.ok);
+
+    // `ensure_media_binaries`'s `log` callback prints to stdout in BOTH modes
+    // (`console.print`, not the JSON writer), so the progress lines are part of
+    // the `--json` byte contract. A resolved binary is reported and skipped;
+    // a missing one gets the shipped "install it or run `xpst media fetch`"
+    // sentence, which is the branch the engine always takes because it never
+    // downloads.
+    for row in rows {
+        if row.ok {
+            let _ = writeln!(
+                out,
+                "media: {} -> {} ({})",
+                row.name,
+                row.path.as_deref().unwrap_or(""),
+                row.source
+            );
+        } else {
+            let _ = writeln!(
+                out,
+                "media: {} is missing. Install it (macOS: `brew install ffmpeg`) or run \
+                 `xpst media fetch` to download a verified static build, or set XPST_{}_PATH.",
+                row.name,
+                row.name.to_uppercase()
+            );
+        }
+    }
+
+    if json_mode {
+        let binaries = object(
+            rows.iter()
+                .map(|row| {
+                    let mut fields = vec![
+                        ("name", string(row.name)),
+                        ("ok", boolean(row.ok)),
+                        (
+                            "path",
+                            row.path.clone().map_or_else(crate::output::null, string),
+                        ),
+                        ("source", string(row.source)),
+                    ];
+                    if !row.ok {
+                        // `ensure_media_binaries` sets `error` only on the
+                        // failure branch; a resolved binary has no such key.
+                        fields.push(("error", string("missing (fetch disabled)")));
+                    }
+                    (row.name, object(fields))
+                })
+                .collect(),
+        );
+        let payload = object(vec![
+            ("bin_dir", string(bin_dir)),
+            ("binaries", binaries),
+            ("ok", boolean(ok)),
+        ]);
+        let _ = write_python_json(out, &payload);
+        return if ok { exit::SUCCESS } else { exit::GENERAL };
+    }
+
+    let mut text = String::new();
+    for row in rows {
+        if row.ok {
+            text.push_str(&format!(
+                "✓ {} ready: {}\n",
+                row.name,
+                row.path.as_deref().unwrap_or("")
+            ));
+        } else {
+            text.push_str(&format!(
+                "✗ {} unavailable: missing (fetch disabled)\n",
+                row.name
+            ));
+        }
+    }
+    let _ = write_text(out, text.trim_end());
+    if ok {
+        exit::SUCCESS
+    } else {
+        exit::GENERAL
+    }
+}
+
 /// Run `verify-media`.
 pub fn verify_media(
     global: &GlobalOptions,
@@ -536,5 +670,55 @@ mod tests {
             describe_plan(&passthrough),
             "x: PASSTHROUGH (upload source bytes as-is)"
         );
+    }
+
+    /// The missing-binary branch: a host with ffmpeg cannot produce it, so the
+    /// fixture cannot pin it. Python answers this exact document when
+    /// `XPST_MEDIA_AUTO_FETCH=0`; the Rust engine answers it always, because it
+    /// never downloads.
+    #[test]
+    fn a_missing_binary_reports_the_fetch_disabled_error() {
+        let rows = [xpst_media::BinaryStatus {
+            name: "ffmpeg",
+            ok: false,
+            path: None,
+            source: "missing",
+        }];
+        let mut out: Vec<u8> = Vec::new();
+        let code = fetch_report(&rows.iter().collect::<Vec<_>>(), "/tmp/bin", true, &mut out);
+        assert_eq!(code, exit::GENERAL, "a missing binary is a failure");
+        let text = String::from_utf8(out).expect("utf-8");
+        assert!(
+            text.starts_with("media: ffmpeg is missing. Install it (macOS: `brew install ffmpeg`)"),
+            "the progress line is part of stdout: {text}"
+        );
+        assert!(text.contains("or set XPST_FFMPEG_PATH."), "{text}");
+        assert!(
+            text.contains("\"error\": \"missing (fetch disabled)\""),
+            "the error key is Python's own sentence: {text}"
+        );
+        assert!(text.contains("\"ok\": false"), "{text}");
+        assert!(text.contains("\"bin_dir\": \"/tmp/bin\""), "{text}");
+    }
+
+    /// A resolved binary has no `error` key at all — `ensure_media_binaries`
+    /// only sets it on the failure branch.
+    #[test]
+    fn a_resolved_binary_has_no_error_key() {
+        let rows = [xpst_media::BinaryStatus {
+            name: "ffmpeg",
+            ok: true,
+            path: Some("/tmp/bin/ffmpeg".to_string()),
+            source: "env",
+        }];
+        let mut out: Vec<u8> = Vec::new();
+        let code = fetch_report(&rows.iter().collect::<Vec<_>>(), "/tmp/bin", true, &mut out);
+        assert_eq!(code, exit::SUCCESS);
+        let text = String::from_utf8(out).expect("utf-8");
+        assert!(
+            text.contains("media: ffmpeg -> /tmp/bin/ffmpeg (env)"),
+            "{text}"
+        );
+        assert!(!text.contains("\"error\""), "{text}");
     }
 }

@@ -56,7 +56,7 @@ pub fn run(
     // before the guard, exactly as Python does.
     let config_path = match bootstrap::ensure_config(global) {
         Ok(path) => path,
-        Err(error) => return bootstrap::report(err, json_mode, out, &error),
+        Err(error) => return bootstrap::report(out, err, &error),
     };
     let file = match xpst_config::ConfigDocument::read(&config_path) {
         Ok(document) => document.raw().clone(),

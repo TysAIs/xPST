@@ -407,7 +407,7 @@ pub const DEVIATIONS: &[&str] = &[
      Python installation rather than the engine: `system.python` is `null` (a Rust binary has no \
      interpreter to version) and `platform`/`machine` are the Rust engine's own; `dependencies` \
      lists every tracked Python package as `null` (none is installed — the engine is compiled in); \
-     and `updates` reports the app row with `update_mode: \"binary\"` and no package rows. The \
+     and `updates` reports the app row with `update_mode: \"binary\"` (so its ladder lands on `status: current` / `No action needed.`) and no package rows. The \
      other eight sections — the config snapshot with its path/secret redaction, the readiness \
      report, the credential key list, the state summary, the redacted log tail, the version, the \
      wall clock and `providers` — are byte-compared against the Python bundle, entry by entry. \
@@ -486,6 +486,40 @@ pub const DEVIATIONS: &[&str] = &[
      validation, so a config that fails validation reaches the confirmation guard here and \
      fails at save with Python's `Configuration errors:` sentence, where Python exits 2 from \
      `load_config()` before the guard is printed. A valid config is identical on both paths.",
+    "`setup`'s interactive executor (`run_setup()`, `cli.py:480` → `setup.py:403`, which pip-installs \
+     yt-dlp when it is missing and runs the live connectivity probes) is not ported. `--json` and a \
+     non-TTY stdin — the agent contract, and the only path the harness exercises — are byte-identical; \
+     an interactive terminal gets the transaction state plus a line naming `python -m xpst setup`.",
+    "`connect`'s `--test` (`test_connections`, which probes every configured platform) and the \
+     interactive `run_connect` flow are not ported: both answer `not implemented in the Rust engine \
+     yet`. `--guide`, `--dry-run` and the non-TTY `INTERACTIVE_REQUIRED` refusal are byte-compared. \
+     The `--guide is not available for '<key>'` branch is unreachable from the CLI in both engines \
+     (`platform` is a `Choice` over `GUIDE_PLATFORMS`), so it is reproduced for completeness rather \
+     than exercised by a fixture row.",
+    "`update`'s `--check`, `--self` and default paths reach PyPI (`updater.get_latest_version` → \
+     `urlopen`) and stay stubs; only `--components` without `--check` is ported. That document's \
+     `packages` section is empty here — `TRACKED_PACKAGES` are Python distributions a compiled engine \
+     does not ship, and Python reports their versions from `importlib.metadata`, which is a property \
+     of the interpreter rather than of the engine. The fixture masks that section (the key is still \
+     compared) and masks the engine's own version string by value; the app, helper and \
+     provider-metadata rows are otherwise byte-compared.",
+    "`followers` does not fetch live counts: the `get_followers()` loop is not ported, so `count` is \
+     the stored snapshot and `growth` is measured against the stored history. Python swallows every \
+     failure of that loop (`cli.py:7632-7644`) and each uploader returns `0` on error, so a \
+     credential-less profile gets the same numbers from both engines; a connected profile gets an \
+     upgraded count and a new snapshot from Python. Python also constructs `CrossPostEngine(config)` \
+     for the fetch, which rewrites `quotas.json` on a fresh profile and runs crash recovery — this \
+     engine reads the ledger directly, so the profile is untouched.",
+    "`media fetch` never downloads: the `fetch_media_binary` path (`urlopen`, `media/binaries.py:244`) \
+     is not ported, so a missing binary answers Python's own `missing (fetch disabled)` error and \
+     exits 1 where Python would fetch a pinned static build. A binary that already resolves is \
+     reported and never downloaded in both engines, which is the branch the fixture pins (the \
+     missing branch cannot be captured on a host that has ffmpeg, so it is covered by a unit test).",
+    "`auth` stays a `stub` row although two of its branches are ported: `auth api-token` (read or \
+     rotate the dashboard token in the credential store) and the unknown-platform refusal. The \
+     command's default invocation is `auth status`, which probes every platform \
+     (`collect_live_auth_status`), so the row cannot honestly say `implemented`; `dispatch` answers \
+     the local branches and falls through to `NOT_IMPLEMENTED` for the rest.",
     "`wizard`'s interactive executor (`run_wizard()`, which opens a browser and runs live health \
      checks) is not ported. `--json` and a non-TTY stdin — the agent contract, and the only path \
      the harness exercises — are byte-identical; an interactive terminal gets the transaction \

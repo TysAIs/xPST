@@ -120,7 +120,7 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "doctor",
         "xpst-cli",
-        "The live health report: canonical per-provider status with badge truth, per-role posting verdicts, quota rows, ban-risk advisories, rate-limit cooldowns and the environment checklist, assembled from `xpst-auth`/`xpst-limits` rather than re-derived. Payload byte-compared with the Python CLI on a seeded no-credential profile (`doctor_no_credentials`); a provider that holds a credential is reported `unverified` until the live transports land (see the deviations).",
+        "Local-only diagnostics; live probes are P1 (the report says so), so the payload differs from Python's live report by design (see the deviations).",
         doctor,
     ),
     implemented(
@@ -384,14 +384,8 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "disconnect",
         "xpst-auth",
-        "`disconnect_platform()` (the encrypted store's keys, the library-native plaintext files, `sessions/*<platform>*`, then `enabled: false` and the config save) behind the CLI's own destructive-action guard: a non-interactive or `--json` call without `--yes` answers `CONFIRMATION_REQUIRED` and exits 1 before anything is touched. Payload and the resulting `config.yaml` byte-compared with the Python CLI, and the per-install Fernet material Python's `CredentialStore.__init__` writes on a fresh profile is pinned by presence, length and mode (its bytes are random by design). The human view is plain text (standing divergence).",
+        "`disconnect_platform()` (the encrypted store's keys, the library-native plaintext files, `sessions/*<platform>*`, then `enabled: false` and the config save) behind the CLI's own destructive-action guard: a non-interactive or `--json` call without `--yes` answers `CONFIRMATION_REQUIRED` and exits 1 before anything is touched. Payload and the resulting `config.yaml` byte-compared with the Python CLI; the human view is plain text (standing divergence).",
         disconnect,
-    ),
-    implemented(
-        "suggest-caption",
-        "xpst-core",
-        "The caption generator seeded from the video's filename stem (`Path(video_path).stem.replace(\"_\", \" \").replace(\"-\", \" \")`, captured as a 43-row grid from the shipped interpreter and replayed for both path flavours), the `{video_path, platform, char_limit, suggestions}` payload and Click's `exists=True` usage error; payload byte-compared with the Python CLI. The KB transcriber is not ported — the Rust engine always takes the stem fallback, which is Python's answer on a machine without the `knowledge` extra (named divergence, and the fixture pins the fallback branch by making the transcriber unavailable to Python too). The LLM path is the same divergence `generate caption` carries.",
-        suggest_caption,
     ),
     implemented(
         "transcript",
@@ -400,16 +394,40 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         transcript,
     ),
     implemented(
+        "wizard",
+        "xpst-auth",
+        "The deprecated alias of `setup`: the same resumable transaction (`start`/`status`/`resume`/`reset` with `alias: wizard`), the agent-mode envelope (`mode`, `interactive`, `all_pass`, `completed`, `next_action`), the `INTERACTIVE_REQUIRED` document with exit 3, the legacy checklist built from a captured `PLATFORM_GUIDES` table, and `--export-md`'s markdown (byte-compared with the shipped `export_markdown()`). Payload byte-compared with the Python CLI (transaction id and timestamps masked). The interactive executor (`run_wizard`, browser + live checks) is not ported — named divergence.",
+        wizard,
+    ),
+    implemented(
         "setup",
         "xpst-auth",
-        "The canonical setup transaction: `start`/`status`/`resume`/`reset` with `alias: setup`, `--finish-later`, the `INTERACTIVE_REQUIRED` document with exit 2 (`EXIT_CONFIG_ERROR`, where the `wizard` alias uses 3) and the terse human view. Payload byte-compared with the Python CLI (transaction id and timestamps masked), and `--resume --finish-later` together is pinned to Python's `elif` precedence (`--resume` wins, so the transaction stays `in_progress`) with the persisted `setup_transaction.json` byte-compared too. The interactive executor (`run_setup`, prompts + connect flows) is not ported — named divergence.",
+        "The canonical setup transaction: `start`/`status`/`resume`/`reset`/`--finish-later` over `xpst_surface::setup_transaction` (the service the four `xpst_setup_*` MCP tools serve), the `alias: setup` envelope, and the `INTERACTIVE_REQUIRED` document with exit 2. Payload byte-compared with the Python CLI (transaction id and timestamps masked). The interactive executor (`run_setup`, which pip-installs yt-dlp and runs the live connectivity probes) is not ported — named divergence.",
         setup,
     ),
     implemented(
-        "wizard",
+        "connect",
         "xpst-auth",
-        "The deprecated alias of `setup`: the same resumable transaction (`start`/`status`/`resume`/`reset` with `alias: wizard`), the agent-mode envelope (`mode`, `interactive`, `all_pass`, `completed`, `next_action`), the `INTERACTIVE_REQUIRED` document with exit 3, the legacy checklist built from a captured `PLATFORM_GUIDES` table, and `--export-md`'s markdown (byte-compared with the shipped `export_markdown()`). Payload byte-compared with the Python CLI (transaction id and timestamps masked), and `--resume --finish-later` together is pinned to Python's `elif` precedence (`--resume` wins, so the transaction stays `in_progress`) with the persisted `setup_transaction.json` byte-compared too. The interactive executor (`run_wizard`, browser + live checks) is not ported — named divergence.",
-        wizard,
+        "The two local halves: `--guide` renders the captured `PLATFORM_GUIDES` table (the same `resources/wizard_guides.json` the `wizard` port uses, including YouTube's richer payload) and `--dry-run` builds the plan document from it; a non-TTY invocation without `--test` answers the shipped `INTERACTIVE_REQUIRED` refusal with exit 3. Payloads byte-compared with the Python CLI. `--test` (`test_connections`) and the interactive `run_connect` flow are not ported — named divergence.",
+        connect,
+    ),
+    implemented(
+        "update",
+        "xpst-cli",
+        "`--components` without `--check`: `check_update_components(include_network=False)` — the app row, the helper rows (yt-dlp's version from the binary xPST would invoke, FFmpeg's from `-version`), and the bundled provider-metadata row, in the shipped key order. Payload byte-compared with the Python CLI (the engine's own version string and the `packages` section masked: those describe the installation, not the engine). `--check`, `--self` and the default path reach PyPI and stay stubs — named divergence.",
+        update,
+    ),
+    implemented(
+        "followers",
+        "xpst-provider",
+        "The stored-snapshot report: `latest_followers()` and `follower_history(limit=7)` from `analytics.db`, the sorted platform list, `count`/`growth`/`history` rows and the `total_followers` sum, rendered as `json.dumps(indent=2)`. Payload byte-compared with the Python CLI. The live `get_followers()` fetch is not ported (Python swallows every failure and falls back to the same stored numbers) — named divergence.",
+        followers,
+    ),
+    implemented(
+        "media fetch",
+        "xpst-media",
+        "The resolve-and-report half of `ensure_media_binaries`: a binary that already resolves is reported with its `source` and never downloaded, `--binary` selects and orders the rows, and a missing binary answers Python's own `missing (fetch disabled)` error with exit 1. Payload byte-compared with the Python CLI (the missing branch pinned with `XPST_MEDIA_AUTO_FETCH=0`). The download path (`fetch_media_binary` → `urlopen`) is not ported — named divergence.",
+        media_fetch,
     ),
 ];
 
@@ -975,15 +993,6 @@ fn disconnect(
     commands::disconnect::run(global, leaf, out, err)
 }
 
-fn suggest_caption(
-    global: &GlobalOptions,
-    leaf: Option<&ArgMatches>,
-    out: &mut dyn Write,
-    err: &mut dyn Write,
-) -> i32 {
-    commands::generate::suggest_caption(global, leaf, out, err)
-}
-
 fn transcript(
     global: &GlobalOptions,
     leaf: Option<&ArgMatches>,
@@ -1009,6 +1018,42 @@ fn setup(
     err: &mut dyn Write,
 ) -> i32 {
     commands::setup::run(global, leaf, out, err)
+}
+
+fn connect(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::connect::run(global, leaf, out, err)
+}
+
+fn update(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::update::run(global, leaf, out, err)
+}
+
+fn followers(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::followers::run(global, leaf, out, err)
+}
+
+fn media_fetch(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::media::fetch(global, leaf, out, err)
 }
 
 #[cfg(test)]

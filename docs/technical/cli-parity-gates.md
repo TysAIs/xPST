@@ -1,6 +1,15 @@
 # CLI parity gates — why the 27 remaining stubs are not mechanical ports
 
 Snapshot taken 2026-11-25T10:55Z at `83727ec` (`feat/rust-cli-tranche-10-2026-11-25`, PR #46).
+
+> **Status after tranche 11.** The six local halves recommended at the bottom of this
+> document are ported (`feat/rust-cli-tranche-11-2026-11-25`): `setup`, `connect`,
+> `update --components`, `followers` and `media fetch` moved their ledger rows, and
+> `auth api-token` is ported as a branch while the `auth` row stays a stub — its default
+> invocation is the network probe. The ledger now reads **66 of 88**, and the three
+> `Python network` corrections this document argued for (`setup`, `followers`,
+> `media fetch` → `possible`) are applied. The map below is left as the snapshot it is;
+> the generated ledger is the current count.
 This is a hand-written map, not a generated file: the generated source of truth for *which*
 commands are implemented is `docs/technical/rust-parity-ledger.md` (from
 `crates/xpst-cli/src/implemented.rs`). This document answers the next question — *why* each
