@@ -27,7 +27,25 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 19;
+const EXPECTED_SCENARIOS: usize = 47;
+
+/// The environment both engines are run under, whatever the caller inherited.
+///
+/// The capture script pins the same block (`PINNED_ENV` in
+/// `xtask/scripts/capture_local_surface.py`) and records it in the fixture, so
+/// a capture and a replay cannot disagree about the environment. A scenario's
+/// own `env` is applied after these and therefore overrides them.
+const PINNED_ENV: &[(&str, &str)] = &[
+    // `ScheduleManager._tz` is `local_zone()`, which reads TZ first, so an
+    // entry with no `timezone` field renders in the machine zone.
+    ("TZ", "UTC"),
+    // rich's log stamp is `[%x %X]`; a locale that Python adopted would change
+    // it, and stderr is part of a mismatch report.
+    ("LC_ALL", "C"),
+    ("LANG", "C"),
+    // A payload that serialises a set would otherwise vary between runs.
+    ("PYTHONHASHSEED", "0"),
+];
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -94,17 +112,110 @@ impl Drop for Profile {
     }
 }
 
-fn run(binary: &str, profile: &Profile, argv: &[String]) -> (i32, String, String) {
-    let output = Command::new(binary)
-        .args(argv)
-        .env("XPST_CONFIG_DIR", profile.path())
-        .output()
-        .expect("the rust binary runs");
+/// The profile directory both engines are pointed at.
+///
+/// A scenario may pin it to a subdirectory (`config_dir`): the config write
+/// commands need that, because Python resolves `~/.xpst/config.yaml` from HOME
+/// (and `config import` hardcodes it) while the Rust engine resolves
+/// `XPST_CONFIG_DIR`. HOME=profile + XPST_CONFIG_DIR=profile/.xpst makes both
+/// engines touch the same file.
+fn config_dir_for(row: &Value, profile: &Profile) -> std::path::PathBuf {
+    match row.get("config_dir").and_then(Value::as_str) {
+        Some(suffix) if !suffix.is_empty() => profile.path().join(suffix),
+        _ => profile.path().to_path_buf(),
+    }
+}
+
+fn run(
+    binary: &str,
+    profile: &Profile,
+    argv: &[String],
+    env: &[(String, String)],
+    config_dir: &std::path::Path,
+) -> (i32, String, String) {
+    let mut command = Command::new(binary);
+    command.args(argv).env("XPST_CONFIG_DIR", config_dir);
+    // The pinned environment first; the scenario's own `env` is applied after
+    // and therefore wins.
+    for (name, value) in PINNED_ENV {
+        command.env(name, value);
+    }
+    for (name, value) in env {
+        command.env(
+            name,
+            value.replace("PROFILE", &profile.path().display().to_string()),
+        );
+    }
+    let output = command.output().expect("the rust binary runs");
     (
         output.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&output.stdout).to_string(),
         String::from_utf8_lossy(&output.stderr).to_string(),
     )
+}
+
+/// The scenario's extra environment, with `PROFILE` substituted.
+fn env_for(row: &Value, profile: &Profile) -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = row
+        .get("env")
+        .and_then(Value::as_object)
+        .map(|map| {
+            map.iter()
+                .map(|(name, value)| {
+                    (
+                        name.clone(),
+                        value
+                            .as_str()
+                            .unwrap_or_default()
+                            .replace("PROFILE", &profile.path().display().to_string()),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if row.get("config_dir").and_then(Value::as_str).is_some() {
+        env.push(("HOME".to_string(), profile.path().display().to_string()));
+    }
+    env
+}
+
+/// Replace the scratch profile's absolute path with `<PROFILE>` everywhere in a
+/// payload, and blank the wall-clock fields the fixture masks.
+fn normalize(value: &mut Value, profile: &Profile, mask: &[String]) {
+    let root = profile.path().display().to_string();
+    fn walk(value: &mut Value, root: &str) {
+        match value {
+            Value::String(text) => {
+                if text.contains(root) {
+                    *text = text.replace(root, "<PROFILE>");
+                }
+            }
+            Value::Array(items) => items.iter_mut().for_each(|item| walk(item, root)),
+            Value::Object(map) => map.values_mut().for_each(|item| walk(item, root)),
+            _ => {}
+        }
+    }
+    walk(value, &root);
+    if let Value::Object(map) = value {
+        for path in mask {
+            if map.contains_key(path) {
+                map.insert(path.clone(), Value::String("<TS>".to_string()));
+            }
+        }
+    }
+}
+
+fn mask_for(row: &Value) -> Vec<String> {
+    row.get("mask")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn argv_for(row: &Value, profile: &Profile) -> Vec<String> {
@@ -136,7 +247,12 @@ fn argv_for(row: &Value, profile: &Profile) -> Vec<String> {
                 .collect();
         }
     }
-    argv
+    // `PROFILE` is the scratch profile itself: a scenario that writes a file
+    // names it inside the profile so the run stays hermetic.
+    let root = profile.path().display().to_string();
+    argv.into_iter()
+        .map(|argument| argument.replace("PROFILE", &root))
+        .collect()
 }
 
 /// Compare the payload, allowing for the two values the fixture cannot pin:
@@ -187,6 +303,49 @@ fn assert_payload_matches(expected: &Value, actual: &Value, scenario: &str) {
     assert_eq!(actual, expected, "scenario `{scenario}` payload drifted");
 }
 
+/// Compare the files a scenario wrote, byte for byte (after the same
+/// `<PROFILE>` normalisation the payload gets).
+fn assert_files_match(row: &Value, profile: &Profile, scenario: &str) {
+    let Some(expected) = row.get("files").and_then(Value::as_object) else {
+        return;
+    };
+    assert!(
+        !expected.is_empty(),
+        "scenario `{scenario}` records an empty files map"
+    );
+    for (relative, want) in expected {
+        let path = profile.path().join(relative);
+        let actual = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("scenario `{scenario}`: {relative} unreadable: {error}"))
+            .replace(&profile.path().display().to_string(), "<PROFILE>");
+        assert_eq!(
+            actual,
+            want.as_str().unwrap_or_default(),
+            "scenario `{scenario}`: {relative} differs from the Python engine"
+        );
+    }
+}
+
+#[test]
+fn the_fixture_records_the_environment_this_test_pins() {
+    // The capture and the replay are two programs; if they pin different
+    // environments the fixture is a record of a run this test never repeats,
+    // and the difference shows up as a payload mismatch with no cause.
+    let document = document();
+    let recorded = document
+        .get("environment")
+        .and_then(Value::as_object)
+        .expect("the fixture records the pinned environment");
+    let expected: serde_json::Map<String, Value> = PINNED_ENV
+        .iter()
+        .map(|(name, value)| (name.to_string(), Value::String(value.to_string())))
+        .collect();
+    assert_eq!(
+        recorded, &expected,
+        "the fixture was captured under a different environment than this test replays"
+    );
+}
+
 #[test]
 fn every_recorded_scenario_matches_the_python_engine() {
     let document = document();
@@ -196,7 +355,9 @@ fn every_recorded_scenario_matches_the_python_engine() {
         let profile = Profile::new(name);
         profile.seed(&row["seed"]);
         let argv = argv_for(row, &profile);
-        let (code, stdout, stderr) = run(binary(), &profile, &argv);
+        let env = env_for(row, &profile);
+        let config_dir = config_dir_for(row, &profile);
+        let (code, stdout, stderr) = run(binary(), &profile, &argv, &env, &config_dir);
         let compare = row["compare"].as_str().expect("compare mode");
 
         match compare {
@@ -206,10 +367,27 @@ fn every_recorded_scenario_matches_the_python_engine() {
                     row["exit_code"].as_i64().unwrap_or(-1) as i32,
                     "scenario `{name}` exit code drifted: {stderr}"
                 );
-                let actual: Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
-                    panic!("scenario `{name}` did not print JSON ({error}):\n{stdout}\n{stderr}")
-                });
+                let mut actual: Value =
+                    serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
+                        panic!(
+                            "scenario `{name}` did not print JSON ({error}):\n{stdout}\n{stderr}"
+                        )
+                    });
+                normalize(&mut actual, &profile, &mask_for(row));
                 assert_payload_matches(&row["stdout_json"], &actual, name);
+                assert_files_match(row, &profile, name);
+            }
+            "stdout" => {
+                assert_eq!(
+                    code,
+                    row["exit_code"].as_i64().unwrap_or(-1) as i32,
+                    "scenario `{name}` exit code drifted: {stderr}"
+                );
+                let expected = row["stdout"]
+                    .as_str()
+                    .expect("stdout scenarios record the text");
+                let actual = stdout.replace(&profile.path().display().to_string(), "<PROFILE>");
+                assert_eq!(actual, expected, "scenario `{name}` stdout drifted");
             }
             "exit" => {
                 assert_eq!(
@@ -254,6 +432,8 @@ fn a_fresh_profile_is_created_with_the_same_config_the_python_engine_writes() {
         binary(),
         &profile,
         &["status".to_string(), "--json".to_string()],
+        &[],
+        profile.path(),
     );
     assert_eq!(code, 0, "status must not fail on a fresh profile: {stderr}");
     let written = std::fs::read_to_string(profile.path().join("config.yaml"))
@@ -300,6 +480,8 @@ fn schedule_list_never_writes_into_the_profile() {
             "list".to_string(),
             "--json".to_string(),
         ],
+        &[],
+        profile.path(),
     );
     assert_eq!(code, 0, "{stderr}");
     let after = std::fs::read_dir(profile.path())

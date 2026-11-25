@@ -436,37 +436,81 @@ fn config_validate_honours_file() {
 }
 
 #[test]
-fn config_leaves_that_document_file_either_honour_it_or_refuse() {
+fn config_write_leaves_honour_file_instead_of_the_profile() {
     // Every `config` leaf whose Click definition has `--file`. `show` and
-    // `validate` read it (tests above); the rest are still P0 stubs, and the
-    // one thing they must not do is accept the flag and act on another file —
-    // they refuse with the documented NOT_IMPLEMENTED payload.
+    // `validate` read it (tests above); `set`, `export` and `fix` now write
+    // through it, and the one thing they must never do is accept the flag and
+    // act on the profile instead — that is how `config show --file other.yaml`
+    // once printed somebody else's config with exit 0.
     let fixture = Fixture::new("config-file-leaves");
-    let other = fixture.write_external("other.yaml", "version: 4\nzzz_only_here: hello\n");
+    // `config fix` creates `$HOME/.xpst/credentials`; point HOME at the fixture
+    // so the test cannot touch the developer's real profile.
+    let saved_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", &fixture.dir);
 
-    let leaves: [&[&str]; 3] = [
-        &["config", "set", "a.b", "1"],
-        &["config", "export", "out.yaml"],
-        &["config", "fix"],
-    ];
-    for leaf in leaves {
-        let mut args: Vec<&str> = leaf.to_vec();
-        args.push("--file");
-        args.push(&other);
-        let (code, out, err) = run(&args, false);
-        assert_eq!(
-            code,
-            1,
-            "`{}` must exit 1 (not implemented), not act on a file: {out} {err}",
-            leaf.join(" ")
-        );
-        let payload: serde_json::Value = serde_json::from_str(out.trim()).expect("valid JSON");
-        assert_eq!(
-            payload["error"]["code"],
-            "NOT_IMPLEMENTED",
-            "`{}` must say it is unimplemented: {out}",
-            leaf.join(" ")
-        );
+    let other = fixture.write_external("other.yaml", "version: 4\nzzz_only_here: hello\n");
+    fixture.write("config.yaml", "version: 4\nprofile_only: yes\n");
+
+    // `config set --file` writes the named file and leaves the profile alone.
+    // `1` parses as a bool in both engines (`_parse_value`), so use a value
+    // that stays an integer.
+    let (code, out, err) = run(&["config", "set", "a.b", "2", "--file", &other], false);
+    assert_eq!(code, 0, "config set --file failed: {out} {err}");
+    let written = std::fs::read_to_string(&other).expect("named file is readable");
+    assert!(
+        written.contains("zzz_only_here: hello"),
+        "config set --file must edit the named file, got:\n{written}"
+    );
+    assert!(
+        written.contains("a:\n  b: 2"),
+        "config set --file must write the dotted key, got:\n{written}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.profile.join("config.yaml")).unwrap(),
+        "version: 4\nprofile_only: yes\n",
+        "config set --file must not touch the profile"
+    );
+
+    // `config export --file` exports the named file's content.
+    let exported = fixture.dir.join("exported.yaml");
+    let (code, out, err) = run(
+        &[
+            "config",
+            "export",
+            exported.to_str().unwrap(),
+            "--file",
+            &other,
+        ],
+        false,
+    );
+    assert_eq!(code, 0, "config export --file failed: {out} {err}");
+    let text = std::fs::read_to_string(&exported).expect("export wrote a file");
+    assert!(
+        text.contains("zzz_only_here: hello"),
+        "config export --file must export the named file, got:\n{text}"
+    );
+
+    // `config fix --file` repairs the named file, not the profile.
+    let stale = fixture.write_external(
+        "stale.yaml",
+        "version: 4\nvideo:\n  download_dir: ~/.crosspstr/downloads\n",
+    );
+    let (code, out, err) = run(&["config", "fix", "--file", &stale], false);
+    assert_eq!(code, 0, "config fix --file failed: {out} {err}");
+    let fixed = std::fs::read_to_string(&stale).expect("named file is readable");
+    assert!(
+        fixed.contains("~/.xpst/downloads") && !fixed.contains(".crosspstr"),
+        "config fix --file must repair the named file, got:\n{fixed}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.profile.join("config.yaml")).unwrap(),
+        "version: 4\nprofile_only: yes\n",
+        "config fix --file must not touch the profile"
+    );
+
+    match saved_home {
+        Some(home) => std::env::set_var("HOME", home),
+        None => std::env::remove_var("HOME"),
     }
 
     // The manifest is the authority for "documents --file": if a fourth leaf

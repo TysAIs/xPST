@@ -1,0 +1,557 @@
+{
+  "schema_version": 1,
+  "captured_from": {
+    "library": "PyYAML 6.0.3",
+    "call": "yaml.dump(value, default_flow_style=False, sort_keys=False)"
+  },
+  "row_count": 94,
+  "rows": [
+    {
+      "value": "",
+      "yaml": "''\n"
+    },
+    {
+      "value": "plain",
+      "yaml": "plain\n...\n"
+    },
+    {
+      "value": "with space",
+      "yaml": "with space\n...\n"
+    },
+    {
+      "value": " leading",
+      "yaml": "' leading'\n"
+    },
+    {
+      "value": "trailing ",
+      "yaml": "'trailing '\n"
+    },
+    {
+      "value": "10",
+      "yaml": "'10'\n"
+    },
+    {
+      "value": "1.5",
+      "yaml": "'1.5'\n"
+    },
+    {
+      "value": "1e5",
+      "yaml": "1e5\n...\n"
+    },
+    {
+      "value": "true",
+      "yaml": "'true'\n"
+    },
+    {
+      "value": "false",
+      "yaml": "'false'\n"
+    },
+    {
+      "value": "yes",
+      "yaml": "'yes'\n"
+    },
+    {
+      "value": "no",
+      "yaml": "'no'\n"
+    },
+    {
+      "value": "on",
+      "yaml": "'on'\n"
+    },
+    {
+      "value": "off",
+      "yaml": "'off'\n"
+    },
+    {
+      "value": "null",
+      "yaml": "'null'\n"
+    },
+    {
+      "value": "~",
+      "yaml": "'~'\n"
+    },
+    {
+      "value": "None",
+      "yaml": "None\n...\n"
+    },
+    {
+      "value": "2026-01-01",
+      "yaml": "'2026-01-01'\n"
+    },
+    {
+      "value": "12:30:00",
+      "yaml": "'12:30:00'\n"
+    },
+    {
+      "value": "a: b",
+      "yaml": "'a: b'\n"
+    },
+    {
+      "value": "a:b",
+      "yaml": "a:b\n...\n"
+    },
+    {
+      "value": "a #b",
+      "yaml": "'a #b'\n"
+    },
+    {
+      "value": "a#b",
+      "yaml": "a#b\n...\n"
+    },
+    {
+      "value": "#leading",
+      "yaml": "'#leading'\n"
+    },
+    {
+      "value": "- x",
+      "yaml": "'- x'\n"
+    },
+    {
+      "value": "-x",
+      "yaml": "-x\n...\n"
+    },
+    {
+      "value": "? x",
+      "yaml": "'? x'\n"
+    },
+    {
+      "value": ": x",
+      "yaml": "': x'\n"
+    },
+    {
+      "value": "@x",
+      "yaml": "'@x'\n"
+    },
+    {
+      "value": "`x",
+      "yaml": "'`x'\n"
+    },
+    {
+      "value": "%x",
+      "yaml": "'%x'\n"
+    },
+    {
+      "value": "&x",
+      "yaml": "'&x'\n"
+    },
+    {
+      "value": "*x",
+      "yaml": "'*x'\n"
+    },
+    {
+      "value": "!x",
+      "yaml": "'!x'\n"
+    },
+    {
+      "value": "|x",
+      "yaml": "'|x'\n"
+    },
+    {
+      "value": ">x",
+      "yaml": "'>x'\n"
+    },
+    {
+      "value": "'x",
+      "yaml": "'''x'\n"
+    },
+    {
+      "value": "\"x",
+      "yaml": "'\"x'\n"
+    },
+    {
+      "value": "{x}",
+      "yaml": "'{x}'\n"
+    },
+    {
+      "value": "[x]",
+      "yaml": "'[x]'\n"
+    },
+    {
+      "value": "a,b",
+      "yaml": "a,b\n...\n"
+    },
+    {
+      "value": "a[b]",
+      "yaml": "a[b]\n...\n"
+    },
+    {
+      "value": "a{b}",
+      "yaml": "a{b}\n...\n"
+    },
+    {
+      "value": "it's",
+      "yaml": "it's\n...\n"
+    },
+    {
+      "value": "say \"hi\"",
+      "yaml": "say \"hi\"\n...\n"
+    },
+    {
+      "value": "back\\slash",
+      "yaml": "back\\slash\n...\n"
+    },
+    {
+      "value": "tab\there",
+      "yaml": "\"tab\\there\"\n"
+    },
+    {
+      "value": "line\nbreak",
+      "yaml": "'line\n\n  break'\n"
+    },
+    {
+      "value": "two\n\nbreaks",
+      "yaml": "'two\n\n\n  breaks'\n"
+    },
+    {
+      "value": "café",
+      "yaml": "\"caf\\xE9\"\n"
+    },
+    {
+      "value": "日本語",
+      "yaml": "\"\\u65E5\\u672C\\u8A9E\"\n"
+    },
+    {
+      "value": "https://example.invalid/a?b=1&c=2",
+      "yaml": "https://example.invalid/a?b=1&c=2\n...\n"
+    },
+    {
+      "value": "~/.xpst/credentials/youtube_token.json",
+      "yaml": "~/.xpst/credentials/youtube_token.json\n...\n"
+    },
+    {
+      "value": "/abs/path/to/file.mp4",
+      "yaml": "/abs/path/to/file.mp4\n...\n"
+    },
+    {
+      "value": "C:\\Users\\tester\\file.mp4",
+      "yaml": "C:\\Users\\tester\\file.mp4\n...\n"
+    },
+    {
+      "value": "word word word word word word word word word word word word word word word word word word word word ",
+      "yaml": "'word word word word word word word word word word word word word word word word word\n  word word word '\n"
+    },
+    {
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "yaml": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n...\n"
+    },
+    {
+      "value": "x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x end",
+      "yaml": "x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x\n  x x x x end\n...\n"
+    },
+    {
+      "value": "  padded  ",
+      "yaml": "'  padded  '\n"
+    },
+    {
+      "value": "=",
+      "yaml": "'='\n"
+    },
+    {
+      "value": ".",
+      "yaml": ".\n...\n"
+    },
+    {
+      "value": "+x",
+      "yaml": "+x\n...\n"
+    },
+    {
+      "value": "0x1f",
+      "yaml": "'0x1f'\n"
+    },
+    {
+      "value": "007",
+      "yaml": "'007'\n"
+    },
+    {
+      "value": "1_000",
+      "yaml": "'1_000'\n"
+    },
+    {
+      "value": ".inf",
+      "yaml": "'.inf'\n"
+    },
+    {
+      "value": ".nan",
+      "yaml": "'.nan'\n"
+    },
+    {
+      "value": "a\tb\tc",
+      "yaml": "\"a\\tb\\tc\"\n"
+    },
+    {
+      "value": "emoji 🎬",
+      "yaml": "\"emoji \\U0001F3AC\"\n"
+    },
+    {
+      "value": {},
+      "yaml": "{}\n"
+    },
+    {
+      "value": {
+        "version": 4
+      },
+      "yaml": "version: 4\n"
+    },
+    {
+      "value": {
+        "a": null,
+        "b": true,
+        "c": false,
+        "d": 0,
+        "e": -1,
+        "f": 1.5,
+        "g": 2.0
+      },
+      "yaml": "a: null\nb: true\nc: false\nd: 0\ne: -1\nf: 1.5\ng: 2.0\n"
+    },
+    {
+      "value": {
+        "empty_map": {},
+        "empty_list": [],
+        "list": [
+          "a",
+          "b"
+        ],
+        "nested": {
+          "k": {
+            "j": 1
+          }
+        }
+      },
+      "yaml": "empty_map: {}\nempty_list: []\nlist:\n- a\n- b\nnested:\n  k:\n    j: 1\n"
+    },
+    {
+      "value": {
+        "list_of_maps": [
+          {
+            "a": 1
+          },
+          {
+            "b": 2
+          }
+        ]
+      },
+      "yaml": "list_of_maps:\n- a: 1\n- b: 2\n"
+    },
+    {
+      "value": {
+        "list_of_lists": [
+          [
+            1,
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      },
+      "yaml": "list_of_lists:\n- - 1\n  - 2\n- - 3\n"
+    },
+    {
+      "value": {
+        "mixed": [
+          1,
+          "two",
+          null,
+          true,
+          1.5
+        ]
+      },
+      "yaml": "mixed:\n- 1\n- two\n- null\n- true\n- 1.5\n"
+    },
+    {
+      "value": {
+        "deep": {
+          "a": {
+            "b": {
+              "c": {
+                "d": "e"
+              }
+            }
+          }
+        }
+      },
+      "yaml": "deep:\n  a:\n    b:\n      c:\n        d: e\n"
+    },
+    {
+      "value": {
+        "seq_of_seq_of_map": [
+          [
+            {
+              "a": 1
+            }
+          ]
+        ]
+      },
+      "yaml": "seq_of_seq_of_map:\n- - a: 1\n"
+    },
+    {
+      "value": {
+        "key with space": 1,
+        "key:colon": 2,
+        "key#hash": 3
+      },
+      "yaml": "key with space: 1\nkey:colon: 2\nkey#hash: 3\n"
+    },
+    {
+      "value": {
+        "accounts": {
+          "youtube": {
+            "enabled": true,
+            "token_file": "~/.xpst/credentials/youtube_token.json"
+          }
+        }
+      },
+      "yaml": "accounts:\n  youtube:\n    enabled: true\n    token_file: ~/.xpst/credentials/youtube_token.json\n"
+    },
+    {
+      "value": {
+        "rate_limits": {
+          "youtube": 10,
+          "instagram": 5,
+          "x": 20,
+          "tiktok": 5
+        }
+      },
+      "yaml": "rate_limits:\n  youtube: 10\n  instagram: 5\n  x: 20\n  tiktok: 5\n"
+    },
+    {
+      "value": {
+        "monitoring": {
+          "log_level": "INFO",
+          "log_file": "~/.xpst/logs/xpst.log",
+          "healthcheck_port": 8080
+        }
+      },
+      "yaml": "monitoring:\n  log_level: INFO\n  log_file: ~/.xpst/logs/xpst.log\n  healthcheck_port: 8080\n"
+    },
+    {
+      "value": {
+        "video": {
+          "download_dir": "~/.xpst/downloads",
+          "encoding": {
+            "youtube": {
+              "crf": 23,
+              "fps": 30
+            }
+          }
+        }
+      },
+      "yaml": "video:\n  download_dir: ~/.xpst/downloads\n  encoding:\n    youtube:\n      crf: 23\n      fps: 30\n"
+    },
+    {
+      "value": {
+        "schedule": {
+          "check_interval": 300,
+          "timezone": "America/New_York"
+        }
+      },
+      "yaml": "schedule:\n  check_interval: 300\n  timezone: America/New_York\n"
+    },
+    {
+      "value": {
+        "long_value": "word word word word word word word word word word word word word word word word word word word word "
+      },
+      "yaml": "long_value: 'word word word word word word word word word word word word word word\n  word word word word word word '\n"
+    },
+    {
+      "value": {
+        "nested_long": {
+          "key": "word word word word word word word word word word word word word word word word word word word word "
+        }
+      },
+      "yaml": "nested_long:\n  key: 'word word word word word word word word word word word word word word word\n    word word word word word '\n"
+    },
+    {
+      "value": {
+        "list_long": [
+          "word word word word word word word word word word word word word word word word word word word word "
+        ]
+      },
+      "yaml": "list_long:\n- 'word word word word word word word word word word word word word word word word\n  word word word word '\n"
+    },
+    {
+      "value": {
+        "unicode": "café",
+        "emoji": "🎬"
+      },
+      "yaml": "unicode: \"caf\\xE9\"\nemoji: \"\\U0001F3AC\"\n"
+    },
+    {
+      "value": {
+        "nulls": [
+          null,
+          null
+        ]
+      },
+      "yaml": "nulls:\n- null\n- null\n"
+    },
+    {
+      "value": {
+        "bools": [
+          true,
+          false
+        ]
+      },
+      "yaml": "bools:\n- true\n- false\n"
+    },
+    {
+      "value": {
+        "floats": [
+          1.5,
+          2.0,
+          -0.5,
+          1e+20,
+          1e-07
+        ]
+      },
+      "yaml": "floats:\n- 1.5\n- 2.0\n- -0.5\n- 1.0e+20\n- 1.0e-07\n"
+    },
+    {
+      "value": {
+        "ints": [
+          0,
+          1,
+          -1,
+          9223372036854775807
+        ]
+      },
+      "yaml": "ints:\n- 0\n- 1\n- -1\n- 9223372036854775807\n"
+    },
+    {
+      "value": {
+        "non_finite": {
+          "inf": {
+            "$non-finite": "inf"
+          },
+          "neg_inf": {
+            "$non-finite": "-inf"
+          },
+          "nan": {
+            "$non-finite": "nan"
+          }
+        }
+      },
+      "yaml": "non_finite:\n  inf: .inf\n  neg_inf: -.inf\n  nan: .nan\n"
+    },
+    {
+      "value": {
+        "stamps": {
+          "date": {
+            "$timestamp": "2026-01-01"
+          },
+          "utc": {
+            "$timestamp": "2026-01-01 00:00:00+00:00"
+          },
+          "offset": {
+            "$timestamp": "2026-01-01 00:00:00+02:00"
+          },
+          "fraction": {
+            "$timestamp": "2026-01-01 00:00:00.500000"
+          }
+        }
+      },
+      "yaml": "stamps:\n  date: 2026-01-01\n  utc: 2026-01-01 00:00:00+00:00\n  offset: 2026-01-01 00:00:00+02:00\n  fraction: 2026-01-01 00:00:00.500000\n"
+    }
+  ]
+}

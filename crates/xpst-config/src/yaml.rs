@@ -14,19 +14,25 @@
 //!   `xpst config show` renders the document back out and the Python engine
 //!   dumps it with `sort_keys=False`.
 //! * **Duplicate keys are an error.** The previous parser refused them and so
-//!   does this one (the deserializer is configured with `DuplicateKeyPolicy::
-//!   Error`). A config with two `enabled:` keys must not silently pick one.
+//!   does this one. A config with two `enabled:` keys must not silently pick
+//!   one. (PyYAML keeps the last; refusing is the deliberate divergence.)
 //! * **Non-string keys stay typed.** `443: https` keeps a numeric key; the JSON
 //!   renderer then applies serde_json's own rule for non-string keys exactly as
 //!   it did before, so the JSON output is unchanged.
 //!
-//! The scalar *inference* rules are pinned to the previous parser's YAML 1.2
-//! behaviour rather than to the new parser's defaults, which resolve `on`,
-//! `yes`, `off` and `no` as booleans and read `007` and `1_000` as numbers.
-//! Those spellings are strings in a config file that a YAML 1.1 reader (PyYAML)
-//! also writes, so the strict options below are the compatibility switch, not a
-//! preference. `crates/xpst-config/tests/yaml_compat.rs` holds the corpus that
-//! proves each of these rows.
+//! Scalar *inference* is PyYAML's, not the YAML 1.2 core schema's. The Python
+//! engine reads and writes `config.yaml` with `yaml.safe_load`/`yaml.dump`, and
+//! the four write commands (`config export`, `set`, `import`, `fix`) read the
+//! file and write it back — so a reader that types `yes` as a string, or `.inf`
+//! as null, corrupts the document on every save. [`crate::schema`] holds the
+//! resolver and `crates/xpst-config/tests/yaml_compat.rs` the corpus that pins
+//! it, row by row, against the real PyYAML.
+//!
+//! Two values PyYAML produces have no JSON representation and therefore get
+//! their own variants: a non-finite float ([`Value::NonFinite`]) and a
+//! timestamp ([`Value::Timestamp`]). Both round-trip through the writer
+//! byte-identically; the JSON renderer emits `Infinity`/`NaN` and the
+//! timestamp's text, which is what `json.dumps(..., default=str)` does.
 
 use std::fmt;
 
@@ -78,6 +84,17 @@ impl Mapping {
         self.get(key).is_some()
     }
 
+    /// The value stored under a string key, mutably.
+    ///
+    /// The config write path (`config set`, `config fix`) navigates a dotted
+    /// key in place; without this it would have to rebuild every level.
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut Value> {
+        self.0
+            .iter_mut()
+            .find(|(candidate, _)| candidate.as_str() == Some(key))
+            .map(|(_, value)| value)
+    }
+
     /// Insert an entry, replacing any existing entry with an equal key.
     ///
     /// Replacement preserves the original position, so a re-inserted key does
@@ -127,19 +144,75 @@ impl IntoIterator for Mapping {
     }
 }
 
+/// A non-finite float.
+///
+/// PyYAML reads `.inf`, `-.inf` and `.nan` as floats and writes them back in
+/// the same spelling. `serde_json::Number` cannot hold them, so they get their
+/// own variant rather than being flattened to `null` (which is silent data
+/// loss on the write path).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NonFinite {
+    /// `.inf`
+    Infinity,
+    /// `-.inf`
+    NegInfinity,
+    /// `.nan`
+    Nan,
+}
+
+impl NonFinite {
+    /// The float this stands for.
+    #[must_use]
+    pub fn as_f64(self) -> f64 {
+        match self {
+            NonFinite::Infinity => f64::INFINITY,
+            NonFinite::NegInfinity => f64::NEG_INFINITY,
+            NonFinite::Nan => f64::NAN,
+        }
+    }
+
+    /// The YAML spelling PyYAML writes.
+    #[must_use]
+    pub fn as_yaml(self) -> &'static str {
+        match self {
+            NonFinite::Infinity => ".inf",
+            NonFinite::NegInfinity => "-.inf",
+            NonFinite::Nan => ".nan",
+        }
+    }
+
+    /// The JSON spelling `json.dumps` writes (which is not strict JSON, but is
+    /// what the Python engine emits).
+    #[must_use]
+    pub fn as_json(self) -> &'static str {
+        match self {
+            NonFinite::Infinity => "Infinity",
+            NonFinite::NegInfinity => "-Infinity",
+            NonFinite::Nan => "NaN",
+        }
+    }
+}
+
 /// A YAML value.
 ///
 /// Same variant set the previous parser exposed, minus `Tagged`: no xPST config
-/// written by the engine carries a YAML tag, and the new parser resolves tags
-/// to their underlying scalar rather than surfacing them.
+/// written by the engine carries a YAML tag, and the reader resolves tags to
+/// their underlying scalar rather than surfacing them. Two variants are new,
+/// because PyYAML produces values `serde_json::Number` cannot carry: a
+/// non-finite float and a timestamp.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     /// `null`, `~`, or an empty node.
     Null,
     /// `true` / `false`.
     Bool(bool),
-    /// An integer or float.
+    /// An integer or a finite float.
     Number(Number),
+    /// `.inf`, `-.inf` or `.nan`.
+    NonFinite(NonFinite),
+    /// A date or datetime, held as the text PyYAML dumps it back as
+    /// (`2026-01-01`, `2026-01-01 00:00:00+00:00`).
+    Timestamp(String),
     /// A string scalar.
     String(String),
     /// A sequence.
@@ -217,6 +290,7 @@ impl Value {
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             Value::Number(number) => number.as_f64(),
+            Value::NonFinite(kind) => Some(kind.as_f64()),
             _ => None,
         }
     }
@@ -261,7 +335,7 @@ impl From<u64> for Value {
 /// A parse or render failure, as a one-line message fit for the
 /// `Invalid YAML in {path}: {message}` surface.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Error(String);
+pub struct Error(pub(crate) String);
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -271,49 +345,22 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-/// The scalar-inference and mapping rules, pinned to the previous parser.
-///
-/// Every field below is a compatibility switch, not a preference — see the
-/// module documentation and `tests/yaml_compat.rs`, which fails if one of them
-/// stops being applied.
-fn parse_options() -> serde_saphyr::Options {
-    serde_saphyr::options! {
-        // Two `enabled:` keys in one mapping is a broken document, not a
-        // last-write-wins.
-        duplicate_keys: serde_saphyr::DuplicateKeyPolicy::Error,
-        // `<<: *defaults` stays a literal `<<` entry, as before.
-        merge_keys: serde_saphyr::MergeKeyPolicy::AsOrdinary,
-        // `on`/`yes`/`off`/`no` are strings unless quoted.
-        strict_booleans: true,
-        // `key:` stays an empty string when read as text, `null` otherwise.
-        null_as_string: true,
-        // `007` and `1_000` are strings; `0x1f` and `0o17` stay numbers.
-        leading_zero_numbers_as_strings: true,
-        underscored_numbers_as_strings: true,
-        // `.inf`/`.nan` reach the visitor instead of failing the parse.
-        non_finite_float_policy: serde_saphyr::NonFiniteFloatPolicy::PassThrough,
-        // Errors are embedded in a one-line CLI message; a source snippet would
-        // break that surface.
-        with_snippet: false,
-    }
-}
-
 /// Parse one YAML document.
 ///
 /// A multi-document stream is an error, as it was before: a config file is one
 /// document, and silently reading the first of several would hide a corrupted
-/// file.
+/// file. The reader is PyYAML-compatible — see [`crate::pyyaml_read`].
 pub fn from_str(text: &str) -> Result<Value, Error> {
-    serde_saphyr::from_str_with_options(text, parse_options())
-        .map_err(|err| Error(err.to_string().trim().to_string()))
+    crate::pyyaml_read::from_str(text)
 }
 
 /// Render a value as block-style YAML.
 ///
 /// The emitted style is not byte-identical to the deprecated parser's: this one
 /// double-quotes scalars a YAML 1.1 reader could mistype and folds long lines.
-/// Both are still valid YAML that re-parses to the same value, and the quoting
-/// is the safer direction — `yes` stays a string for PyYAML as well.
+/// Both are still valid YAML that re-parses to the same value. The *file* write
+/// path does not use this — it uses [`crate::pyyaml::dump`], which is
+/// byte-identical to `yaml.dump`.
 pub fn to_string(value: &Value) -> Result<String, Error> {
     serde_saphyr::to_string(value).map_err(|err| Error(err.to_string().trim().to_string()))
 }
@@ -330,6 +377,11 @@ impl serde::Serialize for Value {
             Value::Null => serializer.serialize_unit(),
             Value::Bool(flag) => serializer.serialize_bool(*flag),
             Value::Number(number) => number.serialize(serializer),
+            // `serde_json` has no non-finite float; the JSON formatter in
+            // `lib.rs` turns these back into `Infinity`/`NaN`, which is what
+            // Python's `json.dumps` writes.
+            Value::NonFinite(kind) => serializer.serialize_f64(kind.as_f64()),
+            Value::Timestamp(text) => serializer.serialize_str(text),
             Value::String(text) => serializer.serialize_str(text),
             Value::Sequence(items) => {
                 let mut seq = serializer.serialize_seq(Some(items.len()))?;
@@ -349,6 +401,12 @@ impl serde::Serialize for Value {
     }
 }
 
+/// Deserialize a `Value` from a serde data format.
+///
+/// Used for the JSON fixtures (`serde_json::from_str::<Value>`), not for YAML:
+/// the YAML read path is [`crate::pyyaml_read`], which needs the scalar style
+/// and the raw text to apply PyYAML's resolver. A YAML deserializer that goes
+/// through this impl would type `yes` and `1_000` by its own rules instead.
 impl<'de> serde::Deserialize<'de> for Value {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::{self, MapAccess, SeqAccess, Visitor};
@@ -387,10 +445,8 @@ impl<'de> serde::Deserialize<'de> for Value {
             }
 
             fn visit_f64<E: de::Error>(self, value: f64) -> Result<Value, E> {
-                // A non-finite float has no JSON representation; the previous
-                // parser kept `Number(inf)` and failed only when that document
-                // was rendered as JSON. `null` is the concrete-JSON shape both
-                // JSON and the config surface can carry.
+                // Only reachable from a JSON fixture: JSON has no non-finite
+                // float, and the YAML reader builds `Value::NonFinite` itself.
                 Ok(match Number::from_f64(value) {
                     Some(number) => Value::Number(number),
                     None => Value::Null,

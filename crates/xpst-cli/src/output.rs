@@ -46,3 +46,93 @@ pub fn write_text(out: &mut dyn Write, text: &str) -> std::io::Result<()> {
         writeln!(out, "{text}")
     }
 }
+
+// ---------------------------------------------------------------------------
+// Byte-exact JSON for the commands ported after P0
+// ---------------------------------------------------------------------------
+//
+// `serde_json::json!` builds a `BTreeMap`, so it emits keys in alphabetical
+// order with compact separators. Python's `json.dumps` emits insertion order
+// with `", "` / `": "`. Both are valid JSON and the P0 parity fixture compares
+// parsed payloads, so the difference was invisible — but it means `cmp` on the
+// two engines' stdout fails, which is exactly the check a script (or a
+// reviewer) reaches for first.
+//
+// The commands in this tranche therefore build their payload from
+// [`xpst_config::Value`], whose `Mapping` preserves insertion order, and render
+// it with [`xpst_config::python_style_json`] — the same pair `config show`
+// already uses to be byte-identical.
+
+/// An insertion-ordered JSON object.
+pub fn object(entries: Vec<(&str, xpst_config::Value)>) -> xpst_config::Value {
+    let mut map = xpst_config::Mapping::new();
+    for (key, value) in entries {
+        map.insert(xpst_config::Value::from(key), value);
+    }
+    xpst_config::Value::Mapping(map)
+}
+
+/// An insertion-ordered JSON array.
+pub fn array(items: Vec<xpst_config::Value>) -> xpst_config::Value {
+    xpst_config::Value::Sequence(items)
+}
+
+/// A JSON string.
+pub fn string(text: impl Into<String>) -> xpst_config::Value {
+    xpst_config::Value::String(text.into())
+}
+
+/// A JSON boolean.
+pub fn boolean(flag: bool) -> xpst_config::Value {
+    xpst_config::Value::Bool(flag)
+}
+
+/// A JSON integer.
+pub fn integer(number: i64) -> xpst_config::Value {
+    xpst_config::Value::Number(number.into())
+}
+
+/// A JSON `null`.
+pub fn null() -> xpst_config::Value {
+    xpst_config::Value::Null
+}
+
+/// Greedy word wrap at `width` columns, the way Rich wraps a plain message.
+///
+/// Only used where the Python command prints through `console.print` and the
+/// console is not a TTY (so Rich uses its default 80-column width). A message
+/// that fits stays on one line; a longer one breaks at a space and keeps the
+/// trailing space, which is what Rich emits.
+pub fn wrap_at(text: &str, width: usize) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for word in text.split(' ') {
+        let candidate_len = if current.is_empty() {
+            word.chars().count()
+        } else {
+            current.chars().count() + 1 + word.chars().count()
+        };
+        if candidate_len > width && !current.is_empty() {
+            current.push(' ');
+            lines.push(std::mem::take(&mut current));
+            current.push_str(word);
+        } else {
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(word);
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines.join("\n")
+}
+
+/// Write a payload the way `json_output()` does: one line, Python separators,
+/// insertion order, trailing newline.
+pub fn write_python_json(out: &mut dyn Write, value: &xpst_config::Value) -> std::io::Result<()> {
+    let text = xpst_config::python_style_json(value)
+        .map_err(|err| std::io::Error::other(format!("cannot render JSON: {err}")))?;
+    writeln!(out, "{text}")
+}

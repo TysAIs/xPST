@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "captured_from": "src/xpst/chat/registry.py::CHAT_READ_PATHS",
+  "known_platforms": [
+    "twitch",
+    "youtube",
+    "kick"
+  ],
+  "paths": {
+    "twitch": {
+      "platform": "twitch",
+      "display_name": "Twitch",
+      "transport": "irc_tls",
+      "endpoint": "irc://irc.chat.twitch.tv:6697 (TLS; wss://irc-ws.chat.twitch.tv:443 is the same protocol)",
+      "requires": "nothing \u2014 an anonymous justinfan connection reads public chat",
+      "operator_action": "name a channel: `--twitch-channel <login>` or chat.twitch_channels in config",
+      "source_url": "https://dev.twitch.tv/docs/chat/irc/",
+      "verified": true,
+      "read_only": true,
+      "note": "Anonymous connections cannot send, moderate or whisper; xPST never asks for a chat token, so the connection is read-only by construction rather than by policy."
+    },
+    "youtube": {
+      "platform": "youtube",
+      "display_name": "YouTube Live",
+      "transport": "http_api",
+      "endpoint": "GET https://www.googleapis.com/youtube/v3/liveChatMessages?liveChatId=<id>",
+      "requires": "OAuth token with youtube.readonly or youtube.force-ssl, and a broadcast that is live now (the activeLiveChatId only exists while a video is live)",
+      "operator_action": "connect the channel with `xpst auth youtube`, then go live once",
+      "source_url": "https://developers.google.com/youtube/v3/live/docs/liveChatMessages/list",
+      "verified": false,
+      "read_only": true,
+      "note": "5 quota units per poll against a 10,000-unit daily default, so 2,000 polls is the whole day. Never exercised live from this repository: the connected channel answers 403 'not enabled for live streaming', which is why a read refuses with live_not_enabled rather than an empty feed."
+    },
+    "kick": {
+      "platform": "kick",
+      "display_name": "Kick",
+      "transport": "realtime_ws",
+      "endpoint": "wss://realtime.<region>.platform.kick.com/connection/websocket (channel chatrooms.<id>.v2)",
+      "requires": "nothing \u2014 an anonymous guest token and a public channel subscription",
+      "operator_action": "name a channel: `--kick-channel <slug>` or chat.kick_channels in config",
+      "source_url": "https://docs.kick.com/apis/chat",
+      "verified": false,
+      "read_only": true,
+      "note": "UNDOCUMENTED PATH. Kick publishes no chat read endpoint: /public/v1/chat is send and delete only, and the documented alternative is the chat.message.sent webhook event, which needs a registered app and a public callback. Community libraries still point at a public Pusher app key that Kick has retired (Pusher answers 4001 on every cluster); kick.com's own page now mints an anonymous guest token at web.kick.com/api/v1/realtime/auth/connection and connects to its own Centrifugo service. Connection, subscription and heartbeat are proven from this repository; no chat publication has been observed yet, so the row stays unverified."
+    }
+  },
+  "registry": [
+    {
+      "platform": "twitch",
+      "display_name": "Twitch",
+      "transport": "irc_tls",
+      "endpoint": "irc://irc.chat.twitch.tv:6697 (TLS; wss://irc-ws.chat.twitch.tv:443 is the same protocol)",
+      "requires": "nothing \u2014 an anonymous justinfan connection reads public chat",
+      "operator_action": "name a channel: `--twitch-channel <login>` or chat.twitch_channels in config",
+      "source_url": "https://dev.twitch.tv/docs/chat/irc/",
+      "verified": true,
+      "read_only": true,
+      "note": "Anonymous connections cannot send, moderate or whisper; xPST never asks for a chat token, so the connection is read-only by construction rather than by policy."
+    },
+    {
+      "platform": "youtube",
+      "display_name": "YouTube Live",
+      "transport": "http_api",
+      "endpoint": "GET https://www.googleapis.com/youtube/v3/liveChatMessages?liveChatId=<id>",
+      "requires": "OAuth token with youtube.readonly or youtube.force-ssl, and a broadcast that is live now (the activeLiveChatId only exists while a video is live)",
+      "operator_action": "connect the channel with `xpst auth youtube`, then go live once",
+      "source_url": "https://developers.google.com/youtube/v3/live/docs/liveChatMessages/list",
+      "verified": false,
+      "read_only": true,
+      "note": "5 quota units per poll against a 10,000-unit daily default, so 2,000 polls is the whole day. Never exercised live from this repository: the connected channel answers 403 'not enabled for live streaming', which is why a read refuses with live_not_enabled rather than an empty feed."
+    },
+    {
+      "platform": "kick",
+      "display_name": "Kick",
+      "transport": "realtime_ws",
+      "endpoint": "wss://realtime.<region>.platform.kick.com/connection/websocket (channel chatrooms.<id>.v2)",
+      "requires": "nothing \u2014 an anonymous guest token and a public channel subscription",
+      "operator_action": "name a channel: `--kick-channel <slug>` or chat.kick_channels in config",
+      "source_url": "https://docs.kick.com/apis/chat",
+      "verified": false,
+      "read_only": true,
+      "note": "UNDOCUMENTED PATH. Kick publishes no chat read endpoint: /public/v1/chat is send and delete only, and the documented alternative is the chat.message.sent webhook event, which needs a registered app and a public callback. Community libraries still point at a public Pusher app key that Kick has retired (Pusher answers 4001 on every cluster); kick.com's own page now mints an anonymous guest token at web.kick.com/api/v1/realtime/auth/connection and connects to its own Centrifugo service. Connection, subscription and heartbeat are proven from this repository; no chat publication has been observed yet, so the row stays unverified."
+    }
+  ],
+  "codes": {
+    "credentials_missing": "credentials_missing",
+    "no_channel": "no_channel",
+    "not_supported": "not_supported"
+  },
+  "youtube_action": "Connect the destination channel with `xpst auth youtube` (OAuth scopes youtube.upload, youtube.readonly, youtube.force-ssl)."
+}

@@ -18,9 +18,13 @@ use serde_json::Value as JsonValue;
 use thiserror::Error;
 
 pub mod accounts;
+pub mod pyyaml;
 pub mod yaml;
 
-pub use yaml::{Mapping, Value};
+mod pyyaml_read;
+mod schema;
+
+pub use yaml::{Mapping, NonFinite, Value};
 
 pub use accounts::{
     AccountError, Accounts, BlueskyAccount, MastodonAccount, BLUESKY_APP_PASSWORD_URL,
@@ -193,16 +197,18 @@ impl ConfigDocument {
     }
 
     /// Block-style YAML, matching `yaml.dump(..., sort_keys=False)`.
+    ///
+    /// This is the same emitter the write path uses: `config show` prints the
+    /// document with `yaml.dump` in the Python engine, so the two engines must
+    /// produce the same bytes here too (the Python side then hands them to Rich
+    /// for highlighting, which is the only remaining difference).
     pub fn to_yaml_string(&self, mask: bool) -> Result<String, ConfigError> {
         let value = if mask {
             self.masked()
         } else {
             self.value.clone()
         };
-        yaml::to_string(&value).map_err(|err| ConfigError::Io {
-            path: self.path.clone(),
-            message: format!("cannot render as YAML: {err}"),
-        })
+        Ok(pyyaml::dump(&value))
     }
 
     /// Read-only validation. Reports checks; never repairs.
@@ -360,53 +366,102 @@ impl ValidationReport {
     }
 }
 
-/// Serialize a YAML value as a single-line JSON document using Python's
-/// `json.dumps` separators (`", "` / `": "`) and raw UTF-8 output
-/// (`ensure_ascii=False`).
-pub fn python_style_json(value: &Value) -> Result<String, serde_json::Error> {
-    use serde::Serialize;
-
-    let mut buffer = Vec::new();
-    let mut serializer = serde_json::Serializer::with_formatter(&mut buffer, PythonSeparators);
-    value.serialize(&mut serializer)?;
-    // serde_json only emits valid UTF-8 here; a lossy fallback would hide a
-    // real encoding bug, so a failed conversion is surfaced as an error.
-    String::from_utf8(buffer)
-        .map_err(|err| serde::ser::Error::custom(format!("config produced non-UTF-8 JSON: {err}")))
+/// JSON in the exact shape `json_output()` emits.
+///
+/// The Python engine calls `json.dumps(data, default=str, ensure_ascii=False)`
+/// with the default separators, which are `", "` and `": "` — not the compact
+/// form most serializers produce. Matching them byte-for-byte is what lets the
+/// two engines be diffed with `cmp` instead of a structural comparison.
+///
+/// Hand-rolled rather than delegated to `serde_json` for two reasons: a
+/// non-finite float is `Infinity`/`NaN` in Python and `null` in `serde_json`,
+/// and a timestamp has no `serde_json` representation at all (`default=str`
+/// renders it as its text). The float rendering is Python's `repr`, so `1e+20`
+/// stays `1e+20` rather than becoming `1e20`.
+pub fn python_style_json(value: &Value) -> Result<String, String> {
+    let mut out = String::new();
+    write_json(value, &mut out)?;
+    Ok(out)
 }
 
-/// `json.dumps`'s default separators.
-struct PythonSeparators;
-
-impl serde_json::ser::Formatter for PythonSeparators {
-    fn begin_array_value<W>(&mut self, writer: &mut W, first: bool) -> std::io::Result<()>
-    where
-        W: ?Sized + std::io::Write,
-    {
-        if first {
-            Ok(())
-        } else {
-            writer.write_all(b", ")
+fn write_json(value: &Value, out: &mut String) -> Result<(), String> {
+    match value {
+        Value::Null => out.push_str("null"),
+        Value::Bool(true) => out.push_str("true"),
+        Value::Bool(false) => out.push_str("false"),
+        Value::Number(number) => {
+            if let Some(integer) = number.as_i64() {
+                out.push_str(&integer.to_string());
+            } else if let Some(integer) = number.as_u64() {
+                out.push_str(&integer.to_string());
+            } else {
+                out.push_str(&pyyaml::python_json_float(
+                    number.as_f64().unwrap_or_default(),
+                ));
+            }
+        }
+        Value::NonFinite(kind) => out.push_str(kind.as_json()),
+        Value::Timestamp(text) | Value::String(text) => write_json_string(text, out),
+        Value::Sequence(items) => {
+            out.push('[');
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                write_json(item, out)?;
+            }
+            out.push(']');
+        }
+        Value::Mapping(map) => {
+            out.push('{');
+            for (index, (key, item)) in map.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                write_json_key(key, out)?;
+                out.push_str(": ");
+                write_json(item, out)?;
+            }
+            out.push('}');
         }
     }
+    Ok(())
+}
 
-    fn begin_object_key<W>(&mut self, writer: &mut W, first: bool) -> std::io::Result<()>
-    where
-        W: ?Sized + std::io::Write,
-    {
-        if first {
-            Ok(())
-        } else {
-            writer.write_all(b", ")
+/// `json.dumps` stringifies a scalar key (`1` -> `"1"`, `true` -> `"true"`) and
+/// raises for anything else, which is the behaviour `serde_json` had here.
+fn write_json_key(key: &Value, out: &mut String) -> Result<(), String> {
+    match key {
+        Value::String(text) | Value::Timestamp(text) => write_json_string(text, out),
+        Value::Number(number) => write_json_string(&number.to_string(), out),
+        Value::Bool(flag) => write_json_string(if *flag { "true" } else { "false" }, out),
+        Value::Null => write_json_string("null", out),
+        Value::NonFinite(kind) => write_json_string(kind.as_json(), out),
+        Value::Sequence(_) | Value::Mapping(_) => {
+            return Err("a collection cannot be a JSON object key".to_string());
         }
     }
+    Ok(())
+}
 
-    fn begin_object_value<W>(&mut self, writer: &mut W) -> std::io::Result<()>
-    where
-        W: ?Sized + std::io::Write,
-    {
-        writer.write_all(b": ")
+/// `json.dumps(..., ensure_ascii=False)` escaping: the two quote characters,
+/// the five short control escapes, and `\u00XX` for the rest of C0.
+fn write_json_string(text: &str, out: &mut String) {
+    out.push('"');
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0c}' => out.push_str("\\f"),
+            ch if (ch as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => out.push(ch),
+        }
     }
+    out.push('"');
 }
 
 /// Replace secret-looking string values with `***`.

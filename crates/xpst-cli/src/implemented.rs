@@ -40,10 +40,64 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         config_show,
     ),
     implemented(
+        "byo clear",
+        "xpst-auth",
+        "Deletes the stored app pair and clears the config mirror; payload byte-compared with the Python CLI (the config file is edited in place, not rewritten from the model).",
+        byo_clear,
+    ),
+    implemented(
+        "byo status",
+        "xpst-auth",
+        "Reads the Fernet credential store the Python engine writes (scrypt + AES-128-CBC + HMAC-SHA256) and the config/env fallbacks; payload byte-compared with the Python CLI.",
+        byo_status,
+    ),
+    implemented(
+        "capabilities",
+        "xpst-provider",
+        "Serves the capability document captured from `xpst.content.capability_document()`; the payload is diffed against a live `python -m xpst capabilities --json` by the local-surface check.",
+        capabilities,
+    ),
+    implemented(
+        "chat platforms",
+        "xpst-provider",
+        "Readiness rows from the captured chat read-path registry plus the config channels and the YouTube token check; payload byte-compared with the Python CLI (checked_at masked).",
+        chat_platforms,
+    ),
+    implemented(
+        "config export",
+        "xpst-config",
+        "Writes the masked (or `--raw`) document with a PyYAML-identical emitter; payload and file byte-compared with the Python CLI.",
+        config_export,
+    ),
+    implemented(
+        "config fix",
+        "xpst-config",
+        "Detects the same five defects and reports `fixes_applied`/`details`; payload byte-compared with the Python CLI.",
+        config_fix,
+    ),
+    implemented(
+        "config import",
+        "xpst-config",
+        "Merge/replace with the same deep-merge, diff and validation rules; payload byte-compared with the Python CLI.",
+        config_import,
+    ),
+    implemented(
+        "config set",
+        "xpst-config",
+        "Dotted-key set with Python's bool/int/float/str parsing; payload and file byte-compared with the Python CLI.",
+        config_set,
+    ),
+    implemented(
         "config validate",
         "xpst-config",
         "`{valid, checks}` payload; exit 2 on a blocker.",
         config_validate,
+    ),
+    implemented(
+        "media status",
+        "xpst-media",
+        "Resolution order (env → PATH → system dirs → fetched) and the `env`/`system`/`fetched`/`missing` vocabulary of `media_binary_status()`; payload byte-compared with the Python CLI.",
+        media_status,
     ),
     implemented(
         "doctor",
@@ -68,6 +122,18 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         "xpst-state",
         "Entries, pause marker and paused snapshots, as `schedule_list --json` reports them.",
         schedule_list,
+    ),
+    implemented(
+        "schedule pause",
+        "xpst-state",
+        "Writes the same `schedule.paused.json` marker (0600, `json.dumps(indent=2)`) under the same `.schedule.lock`; payload byte-compared with the Python CLI.",
+        schedule_pause,
+    ),
+    implemented(
+        "schedule resume",
+        "xpst-state",
+        "Removes only the pause marker (snapshots survive) and reports `was_paused`; payload byte-compared with the Python CLI.",
+        schedule_resume,
     ),
     implemented(
         "failures list",
@@ -122,6 +188,87 @@ fn config_validate(
     commands::config::validate(global, leaf, &mut out_ref, &mut err_ref)
 }
 
+fn media_status(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::media::status(global, leaf, out, err)
+}
+
+fn byo_clear(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::byo::clear(global, leaf, out, err)
+}
+
+fn byo_status(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::byo::status(global, leaf, out, err)
+}
+
+fn capabilities(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::capabilities::run(global, leaf, out, err)
+}
+
+fn chat_platforms(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::chat::platforms(global, leaf, out, err)
+}
+
+fn config_export(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::config::export(global, leaf, out, err)
+}
+
+fn config_fix(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::config::fix(global, leaf, out, err)
+}
+
+fn config_import(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::config::import(global, leaf, out, err)
+}
+
+fn config_set(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::config::set(global, leaf, out, err)
+}
+
 fn doctor(
     global: &GlobalOptions,
     leaf: Option<&ArgMatches>,
@@ -160,6 +307,24 @@ fn schedule_list(
     err: &mut dyn Write,
 ) -> i32 {
     commands::schedule::run(global, leaf, out, err)
+}
+
+fn schedule_pause(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::schedule::pause(global, leaf, out, err)
+}
+
+fn schedule_resume(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::schedule::resume(global, leaf, out, err)
 }
 
 fn failures_list(

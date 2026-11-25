@@ -17,6 +17,10 @@
 #     literal secret (keys are derived at runtime from a passphrase or a
 #     per-install secret file), so the match is allowlisted by exact text and
 #     only inside that path — a real secret in the same file still fires.
+#   * the local-surface capture fixture — two synthetic seed values from the
+#     first captures (commits 1ee4e5ca and e6c0057a) that generic-api-key
+#     flagged. The generator now seeds `synthetic-*` values, but gitleaks scans
+#     history, so the old literals are allowlisted by their exact matched text.
 
 [extend]
 useDefault = true
@@ -69,4 +73,29 @@ description = """Prose false positive: the XChaCha20-Poly1305 cipher suite name.
 regexTarget = "match"
 regexes = [
   '''keys,\s*XChaCha20-Poly1305''',
+]
+
+[[allowlists]]
+description = """Historical synthetic credentials in the local-surface capture fixture.
+
+  `xtask/scripts/capture_local_surface.py` seeds a scratch profile with a fake
+  Instagram app secret and a fake dashboard API token so the captured payloads
+  exercise masking. The first captures (commits 1ee4e5ca and e6c0057a) used
+  random-looking literals that generic-api-key flags; the generator now seeds
+  `synthetic-*` values and the current tree no longer contains either literal,
+  but gitleaks scans history (`fetch-depth: 0`), so the old ones still report.
+
+  Both are verifiably fake: they exist only as seed strings for a test fixture,
+  were never written to a credential store, and were replaced by the
+  `synthetic-*` values in d56eef2 and bc770e0.
+
+  Scoped by matched text (`regexTarget = "match"`) so the exemption covers only
+  these literals in their key context — a real secret in the same files, or the
+  same value under a different key, still fires.
+"""
+regexTarget = "match"
+regexes = [
+  '''XPST_INSTAGRAM_APP_SECRET": "abcdefgh12345678"''',
+  '''dashboard_api_token": "yaF492IK4gZE95x5WpxLeu53JSp2n3PK8s7EjfvkGso"''',
+  '''token=yaF492IK4gZE95x5WpxLeu53JSp2n3PK8s7EjfvkGso"''',
 ]

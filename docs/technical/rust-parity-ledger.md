@@ -4,7 +4,7 @@
 
 One row per leaf command of the shipped CLI. `status` is `implemented` when the Rust engine runs the command and `stub` when it answers `not implemented in the Rust engine yet`. The two columns either side are the questions a reader actually has: which crate owns the behaviour, and whether the Python implementation they are comparing against makes an outbound network call.
 
-**7 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
+**18 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
 
 ## Columns
 
@@ -21,16 +21,16 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `backfill` | stub | xpst-core | yes |
 | `best-time` | stub | xpst-store | none |
 | `bio` | stub | xpst-cli | none |
-| `byo clear` | stub | xpst-auth | none |
+| `byo clear` | implemented | xpst-auth | none |
 | `byo set` | stub | xpst-auth | possible |
-| `byo status` | stub | xpst-auth | none |
-| `capabilities` | stub | xpst-provider | none |
-| `chat platforms` | stub | xpst-provider | none |
+| `byo status` | implemented | xpst-auth | none |
+| `capabilities` | implemented | xpst-provider | none |
+| `chat platforms` | implemented | xpst-provider | none |
 | `chat timeline` | stub | xpst-provider | yes |
-| `config export` | stub | xpst-config | none |
-| `config fix` | stub | xpst-config | none |
-| `config import` | stub | xpst-config | none |
-| `config set` | stub | xpst-config | none |
+| `config export` | implemented | xpst-config | none |
+| `config fix` | implemented | xpst-config | none |
+| `config import` | implemented | xpst-config | none |
+| `config set` | implemented | xpst-config | none |
 | `config show` | implemented | xpst-config | none |
 | `config validate` | implemented | xpst-config | none |
 | `connect` | stub | xpst-auth | yes |
@@ -59,7 +59,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `mcp list` | stub | xpst-mcp | none |
 | `mcp start` | stub | xpst-mcp | none |
 | `media fetch` | stub | xpst-media | yes |
-| `media status` | stub | xpst-media | none |
+| `media status` | implemented | xpst-media | none |
 | `messenger check-comments` | stub | xpst-provider | yes |
 | `messenger status` | stub | xpst-provider | none |
 | `onboard` | stub | xpst-auth | yes |
@@ -76,9 +76,9 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `schedule add` | stub | xpst-state | none |
 | `schedule install` | stub | xpst-state | none |
 | `schedule list` | implemented | xpst-state | none |
-| `schedule pause` | stub | xpst-state | none |
+| `schedule pause` | implemented | xpst-state | none |
 | `schedule remove` | stub | xpst-state | none |
-| `schedule resume` | stub | xpst-state | none |
+| `schedule resume` | implemented | xpst-state | none |
 | `schedule run` | stub | xpst-core | yes |
 | `search` | stub | xpst-store | none |
 | `security-audit` | stub | xpst-cli | none |
@@ -109,11 +109,22 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | Command | Owner crate | What was verified |
 |---|---|---|
 | `config show` | xpst-config | Masked YAML/JSON document; byte-compared with the Python output. |
+| `byo clear` | xpst-auth | Deletes the stored app pair and clears the config mirror; payload byte-compared with the Python CLI (the config file is edited in place, not rewritten from the model). |
+| `byo status` | xpst-auth | Reads the Fernet credential store the Python engine writes (scrypt + AES-128-CBC + HMAC-SHA256) and the config/env fallbacks; payload byte-compared with the Python CLI. |
+| `capabilities` | xpst-provider | Serves the capability document captured from `xpst.content.capability_document()`; the payload is diffed against a live `python -m xpst capabilities --json` by the local-surface check. |
+| `chat platforms` | xpst-provider | Readiness rows from the captured chat read-path registry plus the config channels and the YouTube token check; payload byte-compared with the Python CLI (checked_at masked). |
+| `config export` | xpst-config | Writes the masked (or `--raw`) document with a PyYAML-identical emitter; payload and file byte-compared with the Python CLI. |
+| `config fix` | xpst-config | Detects the same five defects and reports `fixes_applied`/`details`; payload byte-compared with the Python CLI. |
+| `config import` | xpst-config | Merge/replace with the same deep-merge, diff and validation rules; payload byte-compared with the Python CLI. |
+| `config set` | xpst-config | Dotted-key set with Python's bool/int/float/str parsing; payload and file byte-compared with the Python CLI. |
 | `config validate` | xpst-config | `{valid, checks}` payload; exit 2 on a blocker. |
+| `media status` | xpst-media | Resolution order (env → PATH → system dirs → fetched) and the `env`/`system`/`fetched`/`missing` vocabulary of `media_binary_status()`; payload byte-compared with the Python CLI. |
 | `doctor` | xpst-cli | Local-only diagnostics; live probes are P1 (the report says so). |
 | `version` | xpst-cli | Version and dependency report; `--version` matches Click's shape. |
 | `status` | xpst-state | Statistics payload field-for-field with `get_statistics()` on captured fixtures. |
 | `schedule list` | xpst-state | Entries, pause marker and paused snapshots, as `schedule_list --json` reports them. |
+| `schedule pause` | xpst-state | Writes the same `schedule.paused.json` marker (0600, `json.dumps(indent=2)`) under the same `.schedule.lock`; payload byte-compared with the Python CLI. |
+| `schedule resume` | xpst-state | Removes only the pause marker (snapshots survive) and reports `was_paused`; payload byte-compared with the Python CLI. |
 | `failures list` | xpst-state | Dead-letter rows with status/resolved/age_hours, as `failures_list --json` reports them. |
 
 ## Known deviations from the Python engine
