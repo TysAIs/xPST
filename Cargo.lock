@@ -4117,10 +4117,12 @@ dependencies = [
 name = "xpst-surface"
 version = "1.3.0"
 dependencies = [
+ "jiff",
  "serde_json",
  "xpst-auth",
  "xpst-authflow",
  "xpst-config",
+ "xpst-core",
  "xpst-media",
  "xpst-state",
  "xpst-store",

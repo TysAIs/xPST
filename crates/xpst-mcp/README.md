@@ -42,8 +42,12 @@ That is a structural property here, not a review checklist:
 | `xpst_activity` | `state.json` | `posted_videos.<id>.errors.<platform>` flattened to one row per (video, platform) with the `retry`/`review` action. Compact render, as Python's handler does. |
 | `kb_areas` | `$XPST_HOME/knowledge/<workspace>/areas.json` | `kb_areas()`: areas in course order with `order` (1-based) and `nugget_count`. |
 | `xpst_transcript` | `$XPST_HOME/knowledge/default/transcripts/` | `get_transcript()`: direct id, then `content:<id>`, then a filename substring match. A miss is a payload, an invalid id is an error result. |
+| `xpst_byo_app` | credential store, `config.yaml` | `byo_status()` / `byo_status_for_platform()`, plus the two writers (`store_byo_app` / `clear_byo_app`). The secret goes only to the encrypted store; the payload carries a 4-char id tail. Not consent-gated, exactly as in Python. |
+| `xpst_chat` | captured chat read-path registry, `config.yaml`, credential store | `chat_readiness()`: per-platform transport, channels, missing credentials and the next step. `read: true` is the network half and answers `not_implemented`. |
+| `xpst_stream` | captured stream registry, credential store, `config.yaml` | `stream_report()`: every platform's ingest class, `key_present`, and whether xPST could fetch a key itself. An unknown `platform` is the payload with `code: unknown_platform` and `isError: true`. `include_live: true` answers `not_implemented`. |
+| `xpst_preflight` | `config.yaml`, credential store, quota ledger, ffprobe | The composite: `resolve_targets`, `content_verdict`, `PostPreflightService.plan` and `build_route_plan` in one document. Never uploads, never touches the network. |
 
-Sixteen ported, thirty stubbed. Nothing is half-implemented: a tool is either
+Twenty ported, twenty-six stubbed. Nothing is half-implemented: a tool is either
 answering from a real local store or saying `not_implemented` with the reason.
 
 ## Stubbed tools
@@ -69,8 +73,6 @@ ledger), or it writes through an engine service that does not exist in Rust yet.
 | `xpst_health` | probes every platform over the network |
 | `xpst_backfill` | re-posts through provider adapters, which are not ported |
 | `xpst_auth_status` | probes platform credentials, which needs the network |
-| `xpst_byo_app` | reads and decrypts the bring-your-own-app store, which is not ported |
-| `xpst_preflight` | resolves destinations against live credentials and the content contract |
 | `xpst_auth_start` | builds the per-platform auth plan from the auth flow, which is not ported |
 | `xpst_disconnect` | removes stored credentials through Python services, which are not ported |
 | `xpst_delete` | deletes posts on the platform, which needs provider adapters |
@@ -83,8 +85,6 @@ ledger), or it writes through an engine service that does not exist in Rust yet.
 | `xpst_setup_status` | reads the setup transaction service, which is not ported |
 | `xpst_setup_resume` | writes the setup transaction file through Python services, which are not ported |
 | `xpst_setup_reset` | removes the setup transaction file through Python services, which are not ported |
-| `xpst_stream` | reads the stream registry and can probe live channels |
-| `xpst_chat` | opens live chat transports over the network |
 
 That list is not a promise that they will be ported in that order. It is the
 current truth, and the parity test fails if this document and the registry
@@ -165,6 +165,17 @@ of scope for this crate.
 - `xpst_activity` renders a non-string `last_attempt` as its JSON text when
   sorting. Python compares the raw value and raises `TypeError` on a mixed-type
   ledger, which no shipped writer produces.
+- `xpst_chat`'s `read: true` and `xpst_stream`'s `include_live: true` are the
+  network halves (live chat transports; Twitch/Kick live status). Both answer a
+  typed `not_implemented` naming the reason instead of a payload with the key
+  silently missing — an empty `messages` list would read as a quiet chat.
+- The argument-shape guard ports the **path** half of `_argument_shape_block`
+  (`path_guard.confine_media_path`): a `media_path`/`media_paths`/`video_path`/
+  `carousel_paths`/`file_path`/`path`/`output_path` argument outside the config
+  dir, the user's media folders, the system temp dir or `XPST_MEDIA_ROOTS` is
+  refused before dispatch. The **URL** half (`net_guard.validate_public_url`,
+  which resolves DNS and blocks private addresses) is not ported yet, so a
+  URL-shaped argument is accepted here where Python may refuse it.
 - The served schemas come from the captured fixture, so they track Python by
   regeneration rather than by parallel hand-editing.
 

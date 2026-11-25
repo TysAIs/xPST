@@ -25,10 +25,10 @@ use std::path::Path;
 
 use clap::ArgMatches;
 use xpst_auth::credentials::CredentialStore;
-use xpst_config::{Mapping, Value as YamlValue};
+use xpst_config::Value as YamlValue;
 
 use crate::commands::bootstrap;
-use crate::output::{array, boolean, object, string, write_python_json, write_text};
+use crate::output::{boolean, object, string, write_python_json, write_text};
 use crate::{exit, flag, leaf_string, GlobalOptions};
 
 // The registry, the credential resolution and the masked status payload are
@@ -158,56 +158,26 @@ pub fn clear(
         Err(code) => return code,
     };
     let store = CredentialStore::new(&dir);
-    let mut removed: Vec<YamlValue> = Vec::new();
-    for store_key in [&spec.store_id_key, &spec.store_secret_key] {
-        if store.delete(store_key) {
-            removed.push(string(store_key.clone()));
+    let (cleared, changed) = xpst_surface::byo::clear(&mut config, spec, &store);
+    if changed {
+        let path = dir.join("config.yaml");
+        if let Err(message) = xpst_surface::byo::write_config(&path, &config) {
+            let _ = writeln!(err, "{message}");
+            return exit::GENERAL;
         }
     }
 
-    // Clear the config mirror, as `clear_byo_app` does. Python rewrites the
-    // whole document from the Pydantic model here; the Rust engine edits the
-    // two fields in place (documented divergence).
-    if !spec.config_id_field.is_empty() {
-        if let YamlValue::Mapping(root) = &mut config {
-            let section = root
-                .get_mut("accounts")
-                .and_then(|accounts| match accounts {
-                    YamlValue::Mapping(map) => map.get_mut(&spec.platform),
-                    _ => None,
-                });
-            if let Some(YamlValue::Mapping(section)) = section {
-                section.insert(YamlValue::from(spec.config_id_field.as_str()), string(""));
-                if !spec.config_secret_field.is_empty() {
-                    section.insert(
-                        YamlValue::from(spec.config_secret_field.as_str()),
-                        string(""),
-                    );
-                }
-                let path = dir.join("config.yaml");
-                if let Err(message) = write_config(&path, &config) {
-                    let _ = writeln!(err, "{message}");
-                    return exit::GENERAL;
+    let note = xpst_surface::byo::clear_note(spec);
+    if json_mode {
+        let mut payload = vec![("ok", boolean(true))];
+        if let YamlValue::Mapping(map) = &cleared {
+            for (key, value) in map {
+                if let YamlValue::String(key) = key {
+                    payload.push((key.as_str(), value.clone()));
                 }
             }
         }
-    }
-
-    let note = format!(
-        "{} no longer has an app on this machine; sign-in is off until one is added.",
-        spec.display_name
-    );
-    if json_mode {
-        let payload = object(vec![
-            ("ok", boolean(true)),
-            ("platform", string(spec.platform.clone())),
-            ("configured", boolean(false)),
-            ("removed", array(removed)),
-            ("sign_in_available", boolean(false)),
-            ("docs_url", string(spec.docs_url.clone())),
-            ("note", string(note)),
-        ]);
-        let _ = write_python_json(out, &payload);
+        let _ = write_python_json(out, &object(payload));
     } else {
         let _ = write_text(out, &format!("✅ {note}"));
     }
@@ -312,111 +282,46 @@ pub fn set(
 
     let app_id = app_id.trim().to_string();
     let app_secret = app_secret.trim().to_string();
-    let mut errors: Vec<(&str, String)> = Vec::new();
-    let id_ok = if spec.platform == "tiktok" {
-        valid_tiktok_key(&app_id)
-    } else {
-        valid_meta_app_id(&app_id)
-    };
-    if app_id.is_empty() {
-        errors.push(("app_id", format!("{} is required.", spec.id_label)));
-    } else if !id_ok {
-        let expected = if spec.platform == "tiktok" {
-            "starts with 'aw' followed by letters/digits"
-        } else {
-            "must be digits"
-        };
-        errors.push((
-            "app_id",
-            format!("{} looks wrong ({expected}).", spec.id_label),
-        ));
-    }
-    if app_secret.is_empty() {
-        errors.push(("app_secret", format!("{} is required.", spec.secret_label)));
-    } else if !valid_secret(&app_secret) {
-        errors.push((
-            "app_secret",
-            format!(
-                "{} looks wrong (8–256 chars, no spaces).",
-                spec.secret_label
-            ),
-        ));
-    }
-    if !errors.is_empty() {
-        if json_mode {
-            let mut fields = xpst_config::Mapping::new();
-            for (field, message) in &errors {
-                fields.insert(YamlValue::from(*field), string(message.clone()));
-            }
-            let payload = object(vec![
-                ("ok", boolean(false)),
-                ("error", string("Those app credentials were not accepted.")),
-                ("errors", YamlValue::Mapping(fields)),
-            ]);
-            let _ = write_python_json(out, &payload);
-        } else {
-            let _ = write_text(out, "Those app credentials were not accepted.");
-            for (field, message) in &errors {
-                let _ = write_text(out, &format!("  {field}: {message}"));
-            }
-            let _ = write_text(out, &format!("How to create one: {}", spec.create_url));
-        }
-        return exit::CONFIG_ERROR;
-    }
-
     let store = CredentialStore::new(&dir);
-    if let Err(message) = store
-        .store(&spec.store_id_key, &app_id)
-        .and_then(|()| store.store(&spec.store_secret_key, &app_secret))
-    {
-        let message = format!("Could not store the app credential encrypted: {message}");
-        if json_mode {
-            let payload = object(vec![
-                ("ok", boolean(false)),
-                ("error", string(message)),
-                ("errors", object(Vec::new())),
-            ]);
-            let _ = write_python_json(out, &payload);
-        } else {
-            let _ = write_text(out, &message);
+    let status = match xpst_surface::byo::store(&mut config, spec, &store, &app_id, &app_secret) {
+        Ok(status) => status,
+        Err(error) => {
+            // A validation refusal is CONFIG_ERROR; a store failure is too —
+            // the CLI has always answered both with the same code.
+            if json_mode {
+                let mut fields = xpst_config::Mapping::new();
+                for (field, message) in &error.errors {
+                    fields.insert(YamlValue::from(field.as_str()), string(message.clone()));
+                }
+                let payload = object(vec![
+                    ("ok", boolean(false)),
+                    ("error", string(error.message.clone())),
+                    ("errors", YamlValue::Mapping(fields)),
+                ]);
+                let _ = write_python_json(out, &payload);
+            } else {
+                let _ = write_text(out, &error.message);
+                for (field, message) in &error.errors {
+                    let _ = write_text(out, &format!("  {field}: {message}"));
+                }
+                if !error.errors.is_empty() {
+                    let _ = write_text(out, &format!("How to create one: {}", spec.create_url));
+                }
+            }
+            return exit::CONFIG_ERROR;
         }
-        return exit::CONFIG_ERROR;
-    }
+    };
 
     // Mirror the (non-secret) app id into the config document, as
     // `store_byo_app` does. Python rewrites the whole file from the model; this
     // edits the field in place (documented divergence).
     if !spec.config_id_field.is_empty() {
-        if let YamlValue::Mapping(root) = &mut config {
-            if !root.contains_key("accounts") {
-                root.insert(
-                    YamlValue::from("accounts"),
-                    YamlValue::Mapping(Mapping::new()),
-                );
-            }
-            if let Some(YamlValue::Mapping(accounts)) = root.get_mut("accounts") {
-                if !accounts.contains_key(&spec.platform) {
-                    accounts.insert(
-                        YamlValue::from(spec.platform.as_str()),
-                        YamlValue::Mapping(Mapping::new()),
-                    );
-                }
-                if let Some(YamlValue::Mapping(section)) = accounts.get_mut(&spec.platform) {
-                    section.insert(
-                        YamlValue::from(spec.config_id_field.as_str()),
-                        string(app_id.clone()),
-                    );
-                }
-            }
-        }
         let path = dir.join("config.yaml");
-        if let Err(message) = write_config(&path, &config) {
+        if let Err(message) = xpst_surface::byo::write_config(&path, &config) {
             let _ = writeln!(err, "{message}");
             return exit::GENERAL;
         }
     }
-
-    let status = status_for(spec, &config, &store);
     if json_mode {
         let mut payload = vec![("ok", boolean(true))];
         if let YamlValue::Mapping(map) = &status {
@@ -456,41 +361,4 @@ fn read_line() -> Option<String> {
         Ok(_) => Some(line),
         Err(_) => None,
     }
-}
-
-/// `_APP_ID_RE = ^[0-9]{4,24}$`.
-fn valid_meta_app_id(text: &str) -> bool {
-    (4..=24).contains(&text.len()) && text.chars().all(|character| character.is_ascii_digit())
-}
-
-/// `_TIKTOK_KEY_RE = ^aw[0-9a-z]{6,32}$` (case-insensitive).
-fn valid_tiktok_key(text: &str) -> bool {
-    let lowered = text.to_lowercase();
-    let Some(rest) = lowered.strip_prefix("aw") else {
-        return false;
-    };
-    (6..=32).contains(&rest.len())
-        && rest
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric())
-}
-
-/// `_SECRET_RE = ^[A-Za-z0-9_\-\.]{8,256}$`.
-fn valid_secret(text: &str) -> bool {
-    (8..=256).contains(&text.len())
-        && text.chars().all(|character| {
-            character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.')
-        })
-}
-
-/// Write the config document with the PyYAML-identical emitter, owner-only.
-fn write_config(path: &Path, document: &YamlValue) -> Result<(), String> {
-    std::fs::write(path, xpst_config::pyyaml::dump(document))
-        .map_err(|err| format!("cannot write {}: {err}", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
 }

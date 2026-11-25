@@ -61,13 +61,28 @@ const STATE: &str = r#"{"version": 2, "posted_videos": {"vid-parity": {"source_u
 /// the same document on both engines.
 const SEED_DIRS: [&str; 2] = ["credentials", "backups"];
 
-const HELPER_SCRIPTS: [(&str, &str); 2] = [
+/// `bin/ffmpeg` answers BOTH questions the fixture asks of it: `readiness` reads
+/// the version banner off stdout, and `xpst_preflight`'s loudness pass reads the
+/// `loudnorm` JSON block off stderr. `bin/ffprobe` prints a fixed probe document
+/// so every media row is a property of the fixture, not of the host's codecs.
+const HELPER_SCRIPTS: [(&str, &str); 3] = [
     (
         "bin/ffmpeg",
-        "#!/bin/sh\necho \"ffmpeg version 9.9.9-test Copyright (c) the xPST parity fixture\"\n",
+        "#!/bin/sh\necho \"ffmpeg version 9.9.9-test Copyright (c) the xPST parity fixture\"\ncat >&2 <<'JSON'\n[Parsed_loudnorm_0 @ 0x1]\n{\n\t\"input_i\" : \"-13.50\",\n\t\"input_tp\" : \"-1.20\",\n\t\"input_lra\" : \"3.10\",\n\t\"input_thresh\" : \"-24.00\",\n\t\"output_i\" : \"-14.00\"\n}\nJSON\nexit 0\n",
     ),
     ("bin/yt-dlp", "#!/bin/sh\necho \"2026.01.01\"\n"),
+    (
+        "bin/ffprobe",
+        "#!/bin/sh\ncat <<'JSON'\n{\"streams\":[{\"codec_type\":\"video\",\"codec_name\":\"h264\",\"pix_fmt\":\"yuv420p\",\"width\":1080,\"height\":1920,\"avg_frame_rate\":\"30/1\",\"r_frame_rate\":\"30/1\",\"bit_rate\":\"2000000\",\"disposition\":{\"attached_pic\":0}},{\"codec_type\":\"audio\",\"codec_name\":\"aac\",\"sample_rate\":\"44100\"}],\"format\":{\"duration\":\"12.5\",\"bit_rate\":\"2100000\",\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\"}}\nJSON\n",
+    ),
 ];
+
+/// Plain files the fixture seeds beside the profile. `clip.mp4` is not a real
+/// video: ffprobe is the stub above, so its bytes only have to exist.
+const SEED_FILES: [(&str, &str); 1] = [(
+    "clip.mp4",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+)];
 
 /// The knowledge workspace the KB tools read, byte-identical to
 /// `KNOWLEDGE_AREAS` in the capture script. `_xpst_home()` is `XPST_HOME`, else
@@ -206,6 +221,9 @@ fn profile(name: &str) -> PathBuf {
             let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
         }
     }
+    for (name, body) in SEED_FILES {
+        std::fs::write(dir.join(name), body).expect("seed file");
+    }
 
     // The knowledge workspace (`~/.xpst/knowledge/default`, since HOME is the
     // profile) and its transcripts.
@@ -249,6 +267,40 @@ fn mask_checks(text: &str, ids: &[&str]) -> String {
         }
     }
     xpst_config::python_style_json_compact(&payload).expect("render the masked body")
+}
+
+/// Top-level payload keys whose value is the wall clock, replaced with a fixed
+/// marker exactly the way `capture_mcp_stdio.py` replaces them. `xpst_chat`
+/// stamps `checked_at` on every call, so the key cannot be byte-compared.
+fn mask_fields(text: &str, fields: &[&str]) -> String {
+    let mut payload: Value = serde_json::from_str(text).expect("the body is JSON");
+    if let Some(map) = payload.as_object_mut() {
+        for field in fields {
+            if map.contains_key(*field) {
+                map.insert((*field).to_string(), json!("<CLOCK>"));
+            }
+        }
+    }
+    xpst_config::python_style_json_compact(&payload).expect("render the masked body")
+}
+
+/// Replace `<PROFILE>` in every string of a recorded value.
+///
+/// The fixture records a media path as `<PROFILE>/clip.mp4` so it is
+/// machine-independent; this run's profile is a different directory.
+fn substitute(value: &Value, root: &str) -> Value {
+    match value {
+        Value::String(text) => json!(text.replace("<PROFILE>", root)),
+        Value::Array(items) => {
+            Value::Array(items.iter().map(|item| substitute(item, root)).collect())
+        }
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, item)| (key.clone(), substitute(item, root)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
 }
 
 /// FNV-1a 64-bit, the same digest `capture_mcp_stdio.py` records.
@@ -348,7 +400,7 @@ fn the_rust_server_speaks_the_python_wire() {
                 }
                 "tools/call" => {
                     let tool = step["tool"].as_str().expect("tool");
-                    let arguments = step["arguments"].clone();
+                    let arguments = substitute(&step["arguments"], &root);
                     let response = server.request(
                         id,
                         "tools/call",
@@ -372,6 +424,13 @@ fn the_rust_server_speaks_the_python_wire() {
                         step["multiline"].as_bool().expect("multiline"),
                         "scenario `{name}`: {tool} renderer drifted (multi-line vs compact)"
                     );
+                    let clock: Vec<&str> = step["mask_fields"]
+                        .as_array()
+                        .map(|fields| fields.iter().filter_map(Value::as_str).collect())
+                        .unwrap_or_default();
+                    if !clock.is_empty() {
+                        text = mask_fields(&text, &clock);
+                    }
                     let mask: Vec<&str> = step["mask_checks"]
                         .as_array()
                         .map(|ids| ids.iter().filter_map(Value::as_str).collect())

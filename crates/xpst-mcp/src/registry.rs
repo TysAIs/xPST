@@ -310,8 +310,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_byo_app",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads and decrypts the bring-your-own-app store, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::byo_app::run,
+            render: Render::Pretty,
         },
     ),
     (
@@ -333,8 +334,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_preflight",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "resolves destinations against live credentials and the content contract",
+        Implementation::Ported {
+            handler: crate::tools::preflight::run,
+            render: Render::Pretty,
         },
     ),
     (
@@ -460,15 +462,17 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_stream",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads the stream registry and can probe live channels",
+        Implementation::Ported {
+            handler: crate::tools::stream::run,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_chat",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "opens live chat transports over the network",
+        Implementation::Ported {
+            handler: crate::tools::chat::run,
+            render: Render::Pretty,
         },
     ),
 ];

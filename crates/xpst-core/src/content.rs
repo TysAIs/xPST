@@ -97,6 +97,8 @@ pub enum ContentContractError {
     UnknownContentType(String),
     /// The video-mode spelling is not `shorts` or `long`.
     UnknownVideoMode(String),
+    /// A per-destination override is neither an object nor a bare string.
+    OverrideNotAnObject(String),
 }
 
 impl fmt::Display for ContentContractError {
@@ -116,6 +118,10 @@ impl fmt::Display for ContentContractError {
             Self::UnknownVideoMode(value) => write!(
                 formatter,
                 "Unknown video mode '{value}': choose one of shorts, long."
+            ),
+            Self::OverrideNotAnObject(kind) => write!(
+                formatter,
+                "per-destination override must be an object, got {kind}"
             ),
         }
     }
