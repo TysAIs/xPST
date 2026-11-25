@@ -638,6 +638,38 @@ SCHEDULE_WRITE_CALLS = [
     ("xpst_schedule_cancel", {}),
     # The queue after the writes: the added entries, no seeded one.
     ("xpst_schedule_list", {}),
+    # ── the SSRF case the URL guard exists for ──────────────────────────────
+    # The URL half of `_argument_shape_block` only ever sees a URL on the three
+    # tools whose schema DECLARES one — `xpst_run`, `xpst_backfill` and
+    # `kb_add`, all `source`. (An undeclared argument never reaches the guard:
+    # the Python SDK rejects it against `additionalProperties: false` first,
+    # with `Input validation error: Additional properties are not allowed`.)
+    #
+    # Only the BLOCKED rows are captured. An allowed `source` would make the
+    # Python handler really fetch it — `kb_add` through yt-dlp, `xpst_run`
+    # through the source service — and the capture must not touch the network.
+    # The allowed half is pinned by `an_allowed_url_reaches_the_handler` in
+    # `crates/xpst-cli/tests/mcp_stdio.rs`, which drives the Rust server only.
+    #
+    # Every URL here is a LITERAL address or a name-blocklisted host, so neither
+    # engine resolves anything.
+    ("kb_add", {"source": "http://127.0.0.1:8080/x"}),
+    ("kb_add", {"source": "http://169.254.169.254/latest/meta-data/"}),
+    ("kb_add", {"source": "http://[::ffff:127.0.0.1]/x"}),
+    # A reserved address rather than a CGNAT one: the fixture is JSON, which cannot
+    # carry the `public-safety: allow-private-ip` pragma, and CGNAT is already
+    # pinned by the 235-row net_guard capture.
+    ("kb_add", {"source": "http://240.0.0.1/x"}),
+    ("kb_add", {"source": "http://localhost/x"}),
+    ("kb_add", {"source": "http://user:pass@1.1.1.1/x"}),
+    ("kb_add", {"source": "ftp://1.1.1.1/x"}),
+    ("kb_add", {"source": "http://1.1.1.1:99999/x"}),
+    # `xpst_backfill` takes the same `source` with no enum, so the guard is
+    # per-argument rather than special-cased to `kb_add`. (`xpst_run` also
+    # declares `source`, but its schema pins an `enum` of platform names, so the
+    # SDK rejects a URL there before the guard ever sees it — which is why
+    # `_URL_ARG_NAMES` includes `source` at all.)
+    ("xpst_backfill", {"source": "http://169.254.169.254/latest/meta-data/"}),
 ]
 
 # The `analytics` scenario's state: publish records that exercise every outcome

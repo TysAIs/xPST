@@ -428,4 +428,38 @@ pub const DEVIATIONS: &[&str] = &[
      `sqlite3.InterfaceError`. This build answers the empty filtered document for both instead \
      of reproducing the exception. A falsy value (absent, `null`, `false`, `0`, `\"\"`, `[]`, \
      `{}`) means \"no filter\" in both engines.",
+    "`mcp start`'s URL guard bounds DNS where Python does not. `net_guard.validate_public_url` \
+     calls `socket.getaddrinfo`, which blocks with no timeout; \
+     `xpst-surface::net_guard::SystemResolver` runs `to_socket_addrs` on a worker thread with a \
+     5 s bound and an in-flight cap of 8, and a timeout answers Python's own `Could not resolve \
+     host: <host>` sentence. Every host that does not answer is refused by both engines; only \
+     the latency differs, and a hostile hostname can no longer park the stdio server.",
+    "`mcp start`'s URL guard passes a non-ASCII hostname to `getaddrinfo` as UTF-8 where Python \
+     IDNA-encodes it first. A name that only exists in its punycode form resolves under Python \
+     and not here — both refuse it, with the same `Could not resolve host:` sentence, because \
+     the Rust lookup fails too.",
+    "`mcp start`'s URL guard reproduces Python's `_checknetloc` with a table of the nineteen \
+     codepoints whose NFKC expansion contains `/`, `?`, `#`, `@` or `:` (captured by \
+     `capture_net_guard.py`, asserted against the fixture) rather than a full NFKC \
+     normalisation. A codepoint outside that table cannot introduce a delimiter, so the \
+     accept/reject set is identical; the table is what makes the check cheap enough to run per \
+     argument.",
+    "`mcp start`'s URL guard ALLOWS deprecated site-local IPv6 (`fec0::/10`), because Python \
+     does: it is in neither `ipaddress`'s `_private_networks` nor its `_reserved_networks`. \
+     Reproduced rather than fixed — the wire contract is the shipped one — and pinned by the \
+     `ipv6-fec0::1` row so a future Python fix shows up as a fixture diff. `192.88.99.1` (the \
+     6to4 relay anycast) is allowed for the same reason.",
+    "`mcp start`'s URL guard is only reachable on the tools whose schema declares a URL argument \
+     — `kb_add` and `xpst_backfill` (`source`). `xpst_run` also declares `source` but pins an \
+     `enum` of platform names, so the SDK rejects a URL there before the guard runs; an \
+     argument the schema does not declare never reaches the guard at all, because the Python \
+     SDK answers `Input validation error: Additional properties are not allowed` first. The \
+     Rust server does not enforce `additionalProperties: false`, so it would run the guard on \
+     an undeclared argument Python rejects at the SDK layer — a pre-existing divergence in \
+     argument validation, not in the guard, and the reason the wire fixture carries the URL \
+     rows on `kb_add`/`xpst_backfill` rather than on a read-only tool.",
+    "`mcp start`'s URL guard resolves a hostname with `ToSocketAddrs` where Python uses \
+     `getaddrinfo(..., proto=IPPROTO_TCP)`. Both return every address the name maps to, which \
+     is what the guard needs: a name that resolves to both a public and a private address is \
+     refused by both engines (the DNS-rebinding case).",
 ];

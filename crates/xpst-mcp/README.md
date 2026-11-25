@@ -176,13 +176,28 @@ of scope for this crate.
   network halves (live chat transports; Twitch/Kick live status). Both answer a
   typed `not_implemented` naming the reason instead of a payload with the key
   silently missing — an empty `messages` list would read as a quiet chat.
-- The argument-shape guard ports the **path** half of `_argument_shape_block`
-  (`path_guard.confine_media_path`): a `media_path`/`media_paths`/`video_path`/
-  `carousel_paths`/`file_path`/`path`/`output_path` argument outside the config
-  dir, the user's media folders, the system temp dir or `XPST_MEDIA_ROOTS` is
-  refused before dispatch. The **URL** half (`net_guard.validate_public_url`,
-  which resolves DNS and blocks private addresses) is not ported yet, so a
-  URL-shaped argument is accepted here where Python may refuse it.
+- The argument-shape guard ports **both** halves of `_argument_shape_block`.
+  The path half (`path_guard.confine_media_path`): a `media_path`/`media_paths`/
+  `video_path`/`carousel_paths`/`file_path`/`path`/`output_path` argument outside
+  the config dir, the user's media folders, the system temp dir or
+  `XPST_MEDIA_ROOTS` is refused before dispatch. The URL half
+  (`net_guard.validate_public_url`, ported into `xpst-surface`): a `url`/
+  `webhook_url`/`callback_url`/`source_url`/`media_url`/`source` argument that
+  contains `://` is resolved and refused when it points at loopback, a private,
+  link-local, reserved, multicast or metadata address, or embeds credentials.
+  The two halves are independent — `XPST_MCP_ALLOW_ANY_PATH` scopes to paths
+  only, so loosening the media root cannot disarm SSRF protection.
+- The URL half's resolver is bounded. Python's `getaddrinfo` blocks with no
+  timeout, and so does `ToSocketAddrs`; a hostile hostname would park the stdio
+  server. `SystemResolver` runs the lookup on a worker thread with a 5 s bound
+  and an in-flight cap, and a timeout answers Python's own
+  `Could not resolve host: …` sentence — fail-closed, same wire document.
+- The URL half only ever sees a URL on the tools whose schema declares one:
+  `kb_add` and `xpst_backfill` (`source`). `xpst_run` also declares `source`,
+  but its schema pins an `enum` of platform names, so the SDK rejects a URL
+  there before the guard runs. An argument the schema does not declare never
+  reaches the guard at all — the Python SDK answers
+  `Input validation error: Additional properties are not allowed` first.
 - `xpst_setup_*` reproduces a Python quirk rather than fixing it: `_reconcile`
   reads `readiness.get(role)` with the *role* name (`source`,
   `video_destination`) while the document keys are the plural ones (`sources`,
