@@ -122,6 +122,25 @@ impl CredentialStore {
         keys
     }
 
+    /// `CredentialStore.__init__`'s eager key materialization.
+    ///
+    /// Python derives the fallback Fernet key in the constructor, so merely
+    /// *constructing* a store creates `credentials/` (0700) and, on first use,
+    /// the per-install secret and salt. The Rust store is lazy — `retrieve()`
+    /// reads the material and creates nothing — which is the right default for
+    /// a read-only command, but it means a command that mirrors Python's
+    /// constructor has to ask for the same side effect explicitly or leave a
+    /// different profile behind. `disconnect` is such a command: Python's
+    /// `disconnect_platform()` builds a `CredentialStore` before it looks at any
+    /// key, so a disconnect on a fresh profile still leaves the material.
+    pub fn ensure_material(&self) -> Result<(), String> {
+        std::fs::create_dir_all(&self.dir).map_err(|error| error.to_string())?;
+        restrict_dir(&self.dir);
+        self.load_or_create(".fallback_secret", SECRET_BYTES)?;
+        self.load_or_create(".fallback_salt", SALT_BYTES)?;
+        Ok(())
+    }
+
     /// `CredentialStore.store()` for the file half: encrypt and write `value`.
     ///
     /// The fallback secret and salt are created on first use, exactly as Python

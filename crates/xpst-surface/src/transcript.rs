@@ -51,7 +51,35 @@ pub fn payload(video_id: &str) -> Result<Value, TranscriptError> {
 
 /// [`payload`] against an explicit home directory.
 pub fn payload_in(home: &Path, video_id: &str) -> Result<Value, TranscriptError> {
-    kb::validate_name(video_id, "video_id").map_err(TranscriptError::Invalid)?;
+    Ok(match lookup_in(home, video_id)? {
+        Some(transcript) => transcript,
+        None => serde_json::json!({
+            "error": "Transcript not found",
+            "video_id": video_id,
+        }),
+    })
+}
+
+/// The three lookups, with a miss as `None`.
+///
+/// `xpst transcript` needs the miss as a distinct outcome (it prints the
+/// payload and exits 1), while the MCP tool serves the payload as a normal
+/// answer. Splitting the search out keeps one implementation of the order.
+pub fn lookup_in(home: &Path, video_id: &str) -> Result<Option<Value>, TranscriptError> {
+    lookup_in_named(home, video_id, "video_id")
+}
+
+/// [`lookup_in`] with the field name the validation sentence names.
+///
+/// The MCP handler validates `video_id`; the CLI goes through
+/// `Workspace.get_transcript()`, whose `_validate_content_hash()` names
+/// `content_hash`. Same rule, different sentence — so the caller picks.
+pub fn lookup_in_named(
+    home: &Path,
+    video_id: &str,
+    field: &str,
+) -> Result<Option<Value>, TranscriptError> {
+    kb::validate_name(video_id, field).map_err(TranscriptError::Invalid)?;
 
     let root = kb::resolve_workspace_in(home, "default", false).map_err(|error| match error {
         kb::WorkspaceError::Invalid(message) => TranscriptError::Workspace(message),
@@ -87,13 +115,7 @@ pub fn payload_in(home: &Path, video_id: &str) -> Result<Value, TranscriptError>
         }
     }
 
-    Ok(match found {
-        Some(transcript) => transcript,
-        None => serde_json::json!({
-            "error": "Transcript not found",
-            "video_id": video_id,
-        }),
-    })
+    Ok(found)
 }
 
 /// `Workspace.get_transcript()`: the parsed file, or `None` when it is absent

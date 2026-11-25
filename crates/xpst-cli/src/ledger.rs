@@ -467,4 +467,27 @@ pub const DEVIATIONS: &[&str] = &[
      `getaddrinfo(..., proto=IPPROTO_TCP)`. Both return every address the name maps to, which \
      is what the guard needs: a name that resolves to both a public and a private address is \
      refused by both engines (the DNS-rebinding case).",
+    "`transcript` with an id that fails `_validate_content_hash()` reproduces Python's uncaught \
+     `ValueError` contract — empty stdout, exit 1 — but prints the exception line \
+     (`ValueError: Invalid content_hash: …`) instead of the traceback frames, which name Python \
+     files and line numbers. The field name is `content_hash` here and `video_id` on the MCP \
+     tool, because the CLI goes through `Workspace.get_transcript()` and the tool validates its \
+     own argument.",
+    "`disconnect` reads the raw `config.yaml` instead of running `XPSTConfig.load()`'s \
+     validation, so a config that fails validation reaches the confirmation guard here and \
+     fails at save with Python's `Configuration errors:` sentence, where Python exits 2 from \
+     `load_config()` before the guard is printed. A valid config is identical on both paths.",
+    "`wizard`'s interactive executor (`run_wizard()`, which opens a browser and runs live health \
+     checks) is not ported. `--json` and a non-TTY stdin — the agent contract, and the only path \
+     the harness exercises — are byte-identical; an interactive terminal gets the transaction \
+     state plus a line naming `python -m xpst wizard` for the human actions. The guide table is \
+     a captured resource (`resources/wizard_guides.json`, written by \
+     `xtask/scripts/capture_wizard_guides.py`) rather than a hand transcription, and the \
+     `--export-md` bytes are held to `tests/fixtures/wizard_export.md`.",
+    "`setup`'s interactive executor (`run_setup()`, which prompts and runs the connect flows) is \
+     not ported, for the same reason and with the same shape as `wizard`'s: `--json` and a \
+     non-TTY stdin are byte-identical, and an interactive terminal gets the transaction state \
+     plus a line naming `python -m xpst setup`. The exit code is the one real difference between \
+     the two commands — `setup` answers `EXIT_CONFIG_ERROR` (2) where the `wizard` alias answers \
+     `EXIT_AUTH_FAILURE` (3) — and both are pinned by their own fixture rows.",
 ];

@@ -417,6 +417,33 @@ KB_STORE = {
 }
 
 
+#: The setup transaction's wall-clock fields, masked at any depth. Shared by the
+#: `wizard` and `setup` rows: both commands answer the same document.
+WIZARD_MASK = [
+    "transaction_id",
+    "created_at",
+    "updated_at",
+    "started_at",
+    "completed_at",
+    "verified_at",
+    "steps",
+    "why",
+]
+
+#: The line prefixes of `setup_transaction.json` that carry the wall clock or a
+#: fresh `uuid4`. `mask` blanks payload *keys* and does nothing to a written
+#: file, so the persisted transaction is pinned with `mask_lines` instead: the
+#: key survives and only its value is blanked, which keeps
+#: `completion.state`/`completion.reason` byte-compared. `started_at`,
+#: `completed_at` and `verified_at` are `null` on a fresh profile, so they are
+#: deliberately not masked — a non-null value there is a real difference.
+TRANSACTION_FILE_MASK_LINES = [
+    '  "created_at": ',
+    '  "transaction_id": ',
+    '  "updated_at": ',
+    '      "updated_at": ',
+]
+
 SCENARIOS = [
     {
         "name": "status_empty_profile",
@@ -2856,6 +2883,339 @@ SCENARIOS = [
         "mask": ["output"],
         "compare": "json",
     },
+    # ── transcript ──────────────────────────────────────────────────────────
+    # `Workspace.resolve("default")` reads `XPST_HOME`, which the harness does
+    # not pin for other rows; these scenarios pin it to the scratch profile so
+    # the transcripts directory is the fixture's, not the operator's.
+    {
+        "name": "transcript_direct_id",
+        "argv": ["transcript", "vid-a", "--json"],
+        "seed": {
+            "knowledge/default/transcripts/vid-a.json": json.dumps(
+                {
+                    "content_hash": "vid-a",
+                    "text": "hello wörld — a transcript",
+                    "segments": [
+                        {"start": 0.0, "end": 1.5, "text": "hello"},
+                        {"start": 1.5, "end": 3.0, "text": "wörld"},
+                    ],
+                },
+                ensure_ascii=False,
+            )
+        },
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
+    },
+    {
+        # The second lookup: `content:<id>.json`.
+        "name": "transcript_content_hash",
+        "argv": ["transcript", "hash-b", "--json"],
+        "seed": {
+            "knowledge/default/transcripts/content:hash-b.json": json.dumps(
+                {"content_hash": "content:hash-b", "text": "second", "segments": []}
+            )
+        },
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
+    },
+    {
+        # The third lookup: the first file whose NAME CONTAINS the id.
+        "name": "transcript_substring_match",
+        "argv": ["transcript", "zzz", "--json"],
+        "seed": {
+            "knowledge/default/transcripts/aaa-zzz-bbb.json": json.dumps(
+                {"content_hash": "aaa-zzz-bbb", "text": "found by substring", "segments": []}
+            )
+        },
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
+    },
+    {
+        # A miss is a payload plus exit 1, not an error result.
+        "name": "transcript_missing",
+        "argv": ["transcript", "nope", "--json"],
+        "seed": {},
+        "env": {"XPST_HOME": "PROFILE"},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # Python raises an uncaught ValueError out of `get_transcript()`: empty
+        # stdout, exit 1, traceback on stderr. The Rust engine reproduces the
+        # empty stdout and exit 1; the stderr text is the ledger's standing
+        # divergence (the exception line instead of the frames), so the row
+        # pins the observable contract and the note carries the difference.
+        "name": "transcript_invalid_id",
+        "argv": ["transcript", "bad/id", "--json"],
+        "seed": {},
+        "env": {"XPST_HOME": "PROFILE"},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    # ── disconnect ──────────────────────────────────────────────────────────
+    # `config_dir: ".xpst"` pins `HOME` to the scratch profile, so the config
+    # `save()` writes carries the profile as its `home` (normalized to
+    # `<PROFILE>`) instead of the operator's real home directory.
+    {
+        # The destructive-action guard: no `--yes` in a non-TTY answers
+        # CONFIRMATION_REQUIRED and touches nothing.
+        "name": "disconnect_refused_without_yes",
+        "argv": ["disconnect", "x", "--json"],
+        "seed": {".xpst/credentials/x_cookies.json": json.dumps({"guest_id": "1"})},
+        "config_dir": ".xpst",
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # `--yes` removes the library-native file and the `sessions/*` artifact,
+        # flips `enabled` and rewrites the whole config from the model.
+        "name": "disconnect_removes_credentials",
+        "argv": ["disconnect", "x", "--yes", "--json"],
+        "seed": {
+            ".xpst/credentials/x_cookies.json": json.dumps({"guest_id": "1"}),
+            ".xpst/sessions/x-parity.json": json.dumps({}),
+        },
+        "config_dir": ".xpst",
+        "files": [".xpst/config.yaml"],
+        # Python's `CredentialStore.__init__` derives the fallback Fernet key, so
+        # constructing the store writes the per-install material even when the
+        # platform has nothing in the encrypted store. The bytes are random by
+        # design; presence, length and mode are the contract.
+        "files_present": [
+            ".xpst/credentials/.fallback_secret",
+            ".xpst/credentials/.fallback_salt",
+        ],
+        "compare": "stdout",
+    },
+    {
+        # Nothing stored: the payload reports an empty `removed` list and the
+        # config is still written (Python calls `save()` unconditionally).
+        "name": "disconnect_nothing_stored",
+        "argv": ["disconnect", "youtube", "--yes", "--json"],
+        "seed": {},
+        "config_dir": ".xpst",
+        "files": [".xpst/config.yaml"],
+        "files_present": [
+            ".xpst/credentials/.fallback_secret",
+            ".xpst/credentials/.fallback_salt",
+        ],
+        "compare": "stdout",
+    },
+    # ── wizard ──────────────────────────────────────────────────────────────
+    # The transaction id and every stamp are the wall clock, so they are masked
+    # at any depth. `steps`/`why` are the guide prose: the export fixture
+    # (`tests/fixtures/wizard_export.md`) pins those bytes, and masking them here
+    # keeps the row about the checklist's verdicts instead of its paragraphs.
+    {
+        # A fresh profile: `start` runs, the transaction is incomplete, so the
+        # INTERACTIVE_REQUIRED document is appended and the exit is 3.
+        "name": "wizard_agent_start",
+        "argv": ["wizard", "--json"],
+        "seed": {},
+        "mask": [
+            "transaction_id",
+            "created_at",
+            "updated_at",
+            "started_at",
+            "completed_at",
+            "verified_at",
+            "steps",
+            "why",
+        ],
+        "allow_nonzero": True,
+        "compare": "json",
+    },
+    {
+        # No transaction yet: `status` answers `transaction: null` and no
+        # INTERACTIVE_REQUIRED document.
+        "name": "wizard_status_empty",
+        "argv": ["wizard", "--status", "--json"],
+        "seed": {},
+        "mask": [
+            "transaction_id",
+            "created_at",
+            "updated_at",
+            "started_at",
+            "completed_at",
+            "verified_at",
+            "steps",
+            "why",
+        ],
+        "compare": "json",
+    },
+    {
+        # A seeded transaction with one verified step plus a legacy
+        # `wizard_state.json`: the checklist's `health`, `action` and
+        # `last_wizard_status` columns are the contract.
+        "name": "wizard_checklist_seeded",
+        "argv": ["wizard", "--status", "--json"],
+        "seed": {
+            "setup_transaction.json": json.dumps(
+                {
+                    "schema_version": 1,
+                    "transaction_id": "11111111-2222-3333-4444-555555555555",
+                    "selected_role_capabilities": [
+                        {"role": "source", "capability": "tiktok"},
+                        {"role": "video_destination", "capability": "youtube"},
+                    ],
+                    "steps": [
+                        {
+                            "step_id": "verify_source_tiktok",
+                            "role": "source",
+                            "capability": "tiktok",
+                            "state": "pending",
+                            "human_action": None,
+                            "started_at": None,
+                            "completed_at": None,
+                            "updated_at": "2026-01-01T00:00:00.000Z",
+                            "error": None,
+                        },
+                        {
+                            "step_id": "verify_video_destination_youtube",
+                            "role": "video_destination",
+                            "capability": "youtube",
+                            "state": "verified",
+                            "human_action": None,
+                            "started_at": "2026-01-01T00:00:00.000Z",
+                            "completed_at": "2026-01-01T00:00:01.000Z",
+                            "updated_at": "2026-01-01T00:00:01.000Z",
+                            "error": None,
+                        },
+                    ],
+                    "created_at": "2026-01-01T00:00:00.000Z",
+                    "updated_at": "2026-01-01T00:00:01.000Z",
+                    "state": "in_progress",
+                    "readiness": {},
+                    "completion": {"complete": False, "state": "in_progress"},
+                    "errors": [],
+                    "pending_human_actions": [],
+                    "human_actions": [],
+                }
+            ),
+            "wizard_state.json": json.dumps(
+                {"platforms": {"youtube": {"status": "done"}, "x": {"status": "failed"}}}
+            ),
+        },
+        "mask": [
+            "transaction_id",
+            "created_at",
+            "updated_at",
+            "started_at",
+            "completed_at",
+            "verified_at",
+            "steps",
+            "why",
+        ],
+        "compare": "json",
+    },
+    {
+        # `--export-md` writes the guide and answers with the path.
+        "name": "wizard_export_md",
+        "argv": ["wizard", "--export-md", "PROFILE/guide.md", "--json"],
+        "seed": {},
+        "files": ["guide.md"],
+        "compare": "stdout",
+    },
+    {
+        # `--resume` on a fresh profile starts the transaction first, then
+        # resumes it; the agent envelope and the exit 3 are the contract.
+        "name": "wizard_resume_fresh",
+        "argv": ["wizard", "--resume", "--json"],
+        "seed": {},
+        "mask": WIZARD_MASK,
+        "allow_nonzero": True,
+        "compare": "json",
+    },
+    {
+        # `--finish-later` is an explicit resumable state, so no
+        # INTERACTIVE_REQUIRED document and exit 0.
+        "name": "wizard_finish_later",
+        "argv": ["wizard", "--finish-later", "--json"],
+        "seed": {},
+        "mask": WIZARD_MASK,
+        "compare": "json",
+    },
+    {
+        # `--reset` on a fresh profile answers a fresh transaction, exit 0.
+        "name": "wizard_reset",
+        "argv": ["wizard", "--reset", "--json"],
+        "seed": {},
+        "mask": WIZARD_MASK,
+        "compare": "json",
+    },
+    {
+        # Both transaction flags at once. They are independent Click booleans
+        # with no mutual exclusion, and Python's `elif` chain gives `--resume`
+        # precedence, so `--finish-later` is ignored: the answer is a plain
+        # resume (`completion.state` = `in_progress`, not `finish_later`) and
+        # the pending-payload envelope is still suppressed, because that
+        # condition reads the raw `finish_later` flag. The persisted
+        # transaction is pinned as well — that is where the precedence becomes
+        # durable — with only the wall clock and the transaction id blanked, so
+        # `completion.state` and `completion.reason` are byte-compared.
+        "name": "wizard_resume_and_finish_later",
+        "argv": ["wizard", "--resume", "--finish-later", "--json"],
+        "seed": {},
+        "config_dir": ".xpst",
+        "mask": WIZARD_MASK,
+        "mask_lines": TRANSACTION_FILE_MASK_LINES,
+        "files": [".xpst/setup_transaction.json"],
+        "compare": "json",
+    },
+    # ── setup ───────────────────────────────────────────────────────────────
+    # `setup` is the canonical command `wizard` aliases. Same transaction, same
+    # agent document — but no checklist, no envelope, and exit 2
+    # (`EXIT_CONFIG_ERROR`) instead of 3.
+    {
+        "name": "setup_agent_start",
+        "argv": ["setup", "--json"],
+        "seed": {},
+        "mask": WIZARD_MASK,
+        "allow_nonzero": True,
+        "compare": "json",
+    },
+    {
+        "name": "setup_status_empty",
+        "argv": ["setup", "--status", "--json"],
+        "seed": {},
+        "mask": WIZARD_MASK,
+        "compare": "json",
+    },
+    {
+        "name": "setup_resume_fresh",
+        "argv": ["setup", "--resume", "--json"],
+        "seed": {},
+        "mask": WIZARD_MASK,
+        "allow_nonzero": True,
+        "compare": "json",
+    },
+    {
+        "name": "setup_finish_later",
+        "argv": ["setup", "--finish-later", "--json"],
+        "seed": {},
+        "mask": WIZARD_MASK,
+        "compare": "json",
+    },
+    {
+        "name": "setup_reset",
+        "argv": ["setup", "--reset", "--json"],
+        "seed": {},
+        "mask": WIZARD_MASK,
+        "compare": "json",
+    },
+    {
+        # The same combination on the canonical command: `--resume` wins, so
+        # the transaction stays `in_progress` and the state store is written
+        # with the resume reason. See `wizard_resume_and_finish_later`.
+        "name": "setup_resume_and_finish_later",
+        "argv": ["setup", "--resume", "--finish-later", "--json"],
+        "seed": {},
+        "config_dir": ".xpst",
+        "mask": WIZARD_MASK,
+        "mask_lines": TRANSACTION_FILE_MASK_LINES,
+        "files": [".xpst/setup_transaction.json"],
+        "compare": "json",
+    },
 ]
 
 
@@ -3321,6 +3681,21 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
                     scenario.get("mask_lines"),
                 )
                 files[relative] = mask_file_keys(text, scenario.get("mask_file_keys"))
+        # Files whose content is random by design (the per-install Fernet
+        # material). Presence, length and mode are the contract; the bytes are
+        # not comparable between two runs of the *same* engine, let alone two
+        # engines.
+        present = {}
+        for relative in scenario.get("files_present", []):
+            path = profile / relative
+            if not path.exists():
+                present[relative] = None
+                continue
+            stat = path.stat()
+            present[relative] = {
+                "bytes": stat.st_size,
+                "mode": f"0o{stat.st_mode & 0o777:o}",
+            }
         return {
             "exit_code": proc.returncode,
             "payload": payload,
@@ -3330,6 +3705,7 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
             "stdout_normalized": normalize(stdout, profile, scenario.get("mask")),
             "stderr": stderr,
             "stderr_normalized": normalize(stderr, profile, scenario.get("mask")),
+            "present": present,
             "archives": archives,
             "stdout": proc.stdout,
             "stdout_normalized": normalize(
@@ -3429,7 +3805,21 @@ def run_scenario(scenario: dict, python: str) -> dict:
     if scenario.get("credential_json"):
         record["credential_json"] = scenario["credential_json"]
     if scenario.get("files"):
+        missing = [name for name in scenario["files"] if name not in observed["files"]]
+        if missing:
+            raise SystemExit(
+                f"scenario {scenario['name']}: declared file(s) {missing} were not written; "
+                "a row that records a state store must not silently drop it"
+            )
         record["files"] = observed["files"]
+    if scenario.get("files_present"):
+        missing = [name for name, value in observed["present"].items() if value is None]
+        if missing:
+            raise SystemExit(
+                f"scenario {scenario['name']}: {missing} were not written; the row pins "
+                "their presence, length and mode"
+            )
+        record["files_present"] = observed["present"]
     if scenario.get("files_zip"):
         record["files_zip"] = observed["archives"]
     if scenario.get("mask_sections"):
@@ -3519,6 +3909,29 @@ def compare_scenarios(python: str, binary: str) -> int:
         # missing a dependency. Carry the engine's own stderr into the report.
         python_failed = expected["exit_code"] != 0 and expected["stderr"].strip()
 
+        # Written files are behaviour for every mode that records them, not just
+        # for `json`. `divergence` rows are the exception: the engines are
+        # expected to differ there, so a file comparison would contradict the
+        # row's own reason.
+        if mode != "divergence":
+            if files_differ(expected["files"], actual["files"]):
+                mismatches.append(
+                    f"{name}: written files differ\n  python: {json.dumps(expected['files'])}\n"
+                    f"  rust:   {json.dumps(actual['files'])}"
+                )
+            if expected["archives"] != actual["archives"]:
+                mismatches.append(
+                    f"{name}: written archives differ\n"
+                    f"  python: {json.dumps(expected['archives'])}\n"
+                    f"  rust:   {json.dumps(actual['archives'])}"
+                )
+            if expected["present"] != actual["present"]:
+                mismatches.append(
+                    f"{name}: random-content files differ\n"
+                    f"  python: {json.dumps(expected['present'])}\n"
+                    f"  rust:   {json.dumps(actual['present'])}"
+                )
+
         if mode == "json":
             if actual["payload"] is None:
                 mismatches.append(
@@ -3529,11 +3942,6 @@ def compare_scenarios(python: str, binary: str) -> int:
                 mismatches.append(
                     f"{name}: exit {expected['exit_code']} (python) != "
                     f"{actual['exit_code']} (rust)"
-                )
-            if files_differ(expected["files"], actual["files"]):
-                mismatches.append(
-                    f"{name}: written files differ\n  python: {json.dumps(expected['files'])}\n"
-                    f"  rust:   {json.dumps(actual['files'])}"
                 )
             if expected["payload"] != actual["payload"]:
                 mismatches.append(

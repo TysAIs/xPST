@@ -148,12 +148,19 @@ pub fn disconnect(
 
     // `CredentialStore(config_dir)` creates `credentials/` and keeps it
     // owner-only, so a disconnect on a profile that never stored anything still
-    // leaves the directory behind.
+    // leaves the directory behind — and, because Python derives the fallback
+    // Fernet key in the constructor, the per-install secret and salt with it.
+    // The Rust store is lazy, so the surface asks for the same side effect
+    // explicitly; without it a fresh-profile disconnect leaves a different
+    // profile than the shipped engine.
     let credentials = request.config_dir.join("credentials");
     std::fs::create_dir_all(&credentials)
         .map_err(|error| format!("cannot create {}: {error}", credentials.display()))?;
     restrict_dir(&credentials);
     let store = CredentialStore::new(request.config_dir);
+    store
+        .ensure_material()
+        .map_err(|error| format!("cannot create the credential key material: {error}"))?;
     for key in keys {
         if store.retrieve(key).is_some() && store.delete(key) {
             removed.push((*key).to_string());
