@@ -21,6 +21,21 @@
 #     first captures (commits 1ee4e5ca and e6c0057a) that generic-api-key
 #     flagged. The generator now seeds `synthetic-*` values, but gitleaks scans
 #     history, so the old literals are allowlisted by their exact matched text.
+#   * four synthetic test fixtures under tests/ (a BYO-app client key, an RTMP
+#     stream key, a JWT-shaped string for the local scanner's own detection
+#     test, and a Facebook stream key). They were previously hidden by a
+#     `paths = ['^tests/']` alternative on the first entry; they are now
+#     allowlisted one literal at a time in the last entry.
+#
+# No entry scopes by `paths` or `commits`. gitleaks applies the conditions
+# inside one allowlist entry as ALTERNATIVES, not as a conjunction, so a path
+# or commit scope WIDENS the exemption instead of narrowing it. The first entry
+# used to carry `paths = ['^tests/']` next to its regexes, which allowlisted
+# every finding anywhere under tests/ — including generic-api-key's entropy
+# rule, the rule that catches real-shaped credentials. Measured 2026-11-25 with
+# the pinned 8.30.1 binary: a high-entropy `api_key` in tests/probe_secret.py
+# was not reported, while the same literal outside tests/ was. Exemptions here
+# are per matched text only, and every one is proven by a negative control.
 
 [extend]
 useDefault = true
@@ -34,6 +49,13 @@ description = """Synthetic fixtures, documentation placeholders and public key m
   * ${{ secrets.X }} — a GitHub Actions secret *reference*, not a value.
   * 13F290B1316626E2 — a minisign PUBLIC key id (public by definition; it is
     the identity of the update-signing key, published in tauri.conf.json).
+
+  Scoped by matched text only (the default `regexTarget` is the secret group).
+  This entry used to also carry `paths = ['^tests/']`, which gitleaks applies
+  as an alternative to the regexes — so it allowlisted every finding under
+  tests/ regardless of rule or value. That path alternative is gone; the four
+  synthetic test literals it was hiding are allowlisted individually in the
+  last entry, and a high-entropy value under tests/ now fires.
 """
 regexes = [
   '''(?i)SYNTHETIC''',
@@ -45,9 +67,6 @@ regexes = [
   '''13F290B1316626E2''',
   '''\*\*\*''',
   '''abc123456789abcdef''',
-]
-paths = [
-  '''^tests/''',
 ]
 
 [[allowlists]]
@@ -98,4 +117,38 @@ regexes = [
   '''XPST_INSTAGRAM_APP_SECRET": "abcdefgh12345678"''',
   '''dashboard_api_token": "yaF492IK4gZE95x5WpxLeu53JSp2n3PK8s7EjfvkGso"''',
   '''token=yaF492IK4gZE95x5WpxLeu53JSp2n3PK8s7EjfvkGso"''',
+]
+
+[[allowlists]]
+description = """Synthetic test fixtures under tests/ — allowlisted one literal at a time.
+
+  Four literals in the test suite (present since the initial public release,
+  bcb5b89) that generic-api-key's entropy rule flags:
+
+  * tests/test_byo_developer_app.py — `TIKTOK_KEY = "awcl9k2vgnmp1o6d"`, a
+    BYO-app client key fed to the validator.
+  * tests/test_stream_relay.py — `YT_KEY = "abcd-1234-efgh-5678"`, an RTMP
+    stream key for the relay destination tests.
+  * tests/test_secret_scanner.py — `auth = "eyJhbGciOiJIUzI1NiJ9'`, a
+    JWT-shaped string the local scanner's own detection test must flag.
+  * tests/test_stream_ingest.py — `FB_KEY = "FB-1234567890-abcdef"`, a
+    Facebook stream key for the ingest tests.
+
+  All four are placeholders by construction and were never live credentials.
+  They used to be covered by a `paths = ['^tests/']` alternative on the first
+  entry, which also blinded generic-api-key for the whole tests/ tree; that
+  path scope is gone and these are exempted by matched text instead.
+
+  Scoped by `regexTarget = "match"` with the key name AND the exact value, so a
+  real secret under the same key, or the same value under a different key,
+  still fires. The JWT fixture ends with a single quote (the Python string
+  literal's closing quote is part of the match), written as \\x27 so it does not
+  collide with the TOML literal-string delimiter.
+"""
+regexTarget = "match"
+regexes = [
+  '''TIKTOK_KEY\s*=\s*"awcl9k2vgnmp1o6d"''',
+  '''YT_KEY\s*=\s*"abcd-1234-efgh-5678"''',
+  '''FB_KEY\s*=\s*"FB-1234567890-abcdef"''',
+  '''auth\s*=\s*"eyJhbGciOiJIUzI1NiJ9\x27''',
 ]

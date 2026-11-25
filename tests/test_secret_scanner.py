@@ -17,6 +17,11 @@ from pathlib import Path
 
 import pytest
 
+try:  # stdlib 3.11+
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - py3.10 CI leg
+    import tomli as tomllib
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "scan_secrets.py"
 
@@ -172,3 +177,35 @@ class TestScannerIsWiredIntoTheWorkflow:
         workflow = (ROOT / ".github" / "workflows" / "security-scan.yml").read_text(encoding="utf-8")
         assert "GITLEAKS_SHA256=" in workflow
         assert "sha256sum -c -" in workflow
+
+
+class TestGitleaksAllowlistIsScopedByText:
+    """The allowlist must never exempt a whole directory.
+
+    gitleaks applies the conditions inside one allowlist entry as ALTERNATIVES,
+    not as a conjunction, so a `paths` scope next to a regex WIDENS the
+    exemption. The first entry used to carry `paths = ['^tests/']`, which
+    allowlisted every finding anywhere under tests/ — including
+    generic-api-key's entropy rule. Measured 2026-11-25 with the pinned 8.30.1
+    binary: a high-entropy `api_key` in tests/probe_secret.py went unreported
+    while the same literal outside tests/ was reported. Exemptions are per
+    matched text; this test keeps a directory-wide path scope from coming back.
+    """
+
+    def test_no_allowlist_entry_scopes_a_directory_by_path(self):
+        config = tomllib.loads((ROOT / ".gitleaks.toml").read_text(encoding="utf-8"))
+        offenders = []
+        for entry in config.get("allowlists", []):
+            for pattern in entry.get("paths", []):
+                if pattern.strip("^$").endswith("/"):
+                    offenders.append((entry.get("description", "")[:60], pattern))
+        assert offenders == [], f"directory-wide path allowlist(s): {offenders}"
+
+    def test_every_allowlist_entry_says_what_it_exempts(self):
+        config = tomllib.loads((ROOT / ".gitleaks.toml").read_text(encoding="utf-8"))
+        undocumented = [
+            index
+            for index, entry in enumerate(config.get("allowlists", []))
+            if not entry.get("description", "").strip()
+        ]
+        assert undocumented == [], f"allowlist entries without a description: {undocumented}"
