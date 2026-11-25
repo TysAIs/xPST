@@ -15,7 +15,7 @@ use rmcp::{ErrorData as McpError, RoleServer};
 use serde_json::Value;
 
 use crate::guard::ConsentPolicy;
-use crate::registry::{registry, Registry};
+use crate::registry::{registry, Registry, Render};
 use crate::tools::ToolContext;
 
 /// Server name reported in `initialize`, matching the Python server.
@@ -83,9 +83,19 @@ impl XpstMcp {
 
 impl ServerHandler for XpstMcp {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(
-            McpImplementation::new(SERVER_NAME, env!("CARGO_PKG_VERSION")),
-        )
+        // Python's SDK advertises `{"tools": {"listChanged": false}}`; rmcp's
+        // `enable_tools()` leaves the field out entirely, which is a different
+        // wire document for the same capability. The server never sends
+        // `notifications/tools/list_changed` (the surface is static), so `false`
+        // is the honest value and the one a Python-trained client already sees.
+        let mut capabilities = ServerCapabilities::builder().enable_tools().build();
+        if let Some(tools) = capabilities.tools.as_mut() {
+            tools.list_changed = Some(false);
+        }
+        ServerConfig::new(capabilities).with_server_info(McpImplementation::new(
+            SERVER_NAME,
+            env!("CARGO_PKG_VERSION"),
+        ))
     }
 
     fn supported_protocol_versions(&self) -> std::borrow::Cow<'static, [ProtocolVersion]> {
@@ -133,23 +143,37 @@ impl ServerHandler for XpstMcp {
         // it never asks for client input and never materializes a task, and the
         // wire form of `Complete` is exactly the `CallToolResult` Python serves.
         match self.registry.dispatch(&self.ctx, name, &arguments) {
-            Ok(value) => Ok(success_result(&value).into()),
+            Ok(value) => {
+                let render = entry.render().unwrap_or(Render::Pretty);
+                Ok(success_result(&value, render).into())
+            }
             Err(err) => Ok(error_result(&err).into()),
         }
     }
 }
 
-fn success_result(value: &Value) -> CallToolResult {
-    // Python serves `json.dumps(payload, indent=2, sort_keys=True)` as text
-    // content; keeping the same body means an agent's prompt does not change
-    // shape between servers. `preserve_order` keeps insertion order, so the
-    // sort is explicit.
-    let mut document = value.clone();
-    xpst_config::sort_keys_recursive(&mut document);
-    let text = serde_json::to_string_pretty(&document).unwrap_or_else(|_| "null".to_string());
+/// Render a ported tool's payload the way its Python handler renders it.
+///
+/// The body is the tool's own `json.dumps` call, not a server-wide policy: the
+/// shipped handlers disagree (`indent=2` for most, compact for
+/// `xpst_schedule_list`), and an agent that parses the text — rather than
+/// re-serialising it — sees the difference. [`Render`] is pinned per registry
+/// row for exactly that reason.
+fn success_result(value: &Value, render: Render) -> CallToolResult {
+    let text = match render {
+        Render::Pretty => xpst_config::python_style_json_pretty(value),
+        Render::Compact => xpst_config::python_style_json_compact(value),
+    }
+    .unwrap_or_else(|_| "null".to_string());
     CallToolResult::success(vec![ContentBlock::text(text)])
 }
 
+/// A failure is plain text, because that is what Python serves.
+///
+/// `_guardrail_block` returns the sentence itself, an unknown name answers
+/// `Unknown tool: <name>`, and a handler that raises answers `Error: <message>`
+/// — all with `isError: true` and no JSON envelope. An agent that already
+/// handles the Python server's refusals therefore handles these unchanged.
 fn error_result(err: &crate::error::ToolError) -> CallToolResult {
-    CallToolResult::error(vec![ContentBlock::text(err.to_payload().to_string())])
+    CallToolResult::error(vec![ContentBlock::text(err.to_string())])
 }

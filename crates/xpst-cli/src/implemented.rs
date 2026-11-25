@@ -220,6 +220,12 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         devices,
     ),
     implemented(
+        "diagnostics",
+        "xpst-cli",
+        "The redacted support bundle: `diagnostics.json` + `README.txt` in a ZIP, with the shipped path/secret redaction, the config snapshot, the readiness report, the credential key list, the state summary and the redacted log tail byte-compared against the Python bundle. `system`, `dependencies`, `updates` and `providers` are named divergences (a compiled engine has no Python runtime, no pip packages and no `posting_truth` projection).",
+        diagnostics,
+    ),
+    implemented(
         "pair",
         "xpst-auth",
         "Issues a one-time pairing code (or the `--code` one) with the same alphabet, hashing, TTL floor and `devices.json` shape; payload byte-compared with the Python CLI on a fixed code. `--ttl 0` is falsy in Python and means the 600 s default (not the 30 s floor), and a non-integer `--ttl` is a usage error (exit 2).",
@@ -272,6 +278,12 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         "xpst-mcp",
         "The captured Python tool registry in Python's order, rendered with `json.dumps(indent=2)`; payload byte-compared with the Python CLI.",
         mcp_list,
+    ),
+    implemented(
+        "mcp start",
+        "xpst-mcp",
+        "Serves the 46-tool surface over stdio in-process (`xpst_mcp::serve_stdio`, the same loop the `xpst-mcp` binary runs); a bare `xpst mcp` starts it too, as the shipped Click group does. Pinned by a protocol capture from the Python server (`tests/mcp_stdio.rs`) instead of a local-surface row, because the process never exits.",
+        mcp_start,
     ),
     implemented(
         "app",
@@ -663,6 +675,15 @@ fn devices(
     commands::devices::list(global, leaf, out, err)
 }
 
+fn diagnostics(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::diagnostics::run(global, leaf, out, err)
+}
+
 fn pair(
     global: &GlobalOptions,
     leaf: Option<&ArgMatches>,
@@ -742,6 +763,15 @@ fn mcp_list(
     err: &mut dyn Write,
 ) -> i32 {
     commands::mcp::list(global, leaf, out, err)
+}
+
+fn mcp_start(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::mcp::start(global, leaf, out, err)
 }
 
 fn app(

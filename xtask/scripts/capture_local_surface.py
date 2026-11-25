@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import base64
 import json
+import zipfile
 import os
 import re
 import shutil
@@ -2750,6 +2751,65 @@ SCENARIOS = [
         "env": {"HOME": "PROFILE"},
         "compare": "exit",
     },
+    {
+        # The support bundle. The ZIP is observed by entry, not by container
+        # bytes: the container is a property of the compressor (Python deflates,
+        # the Rust writer stores), while the entries are the document.
+        "name": "diagnostics_basic",
+        "argv": ["diagnostics", "--json", "--output", "PROFILE/bundle.zip"],
+        "seed": {
+            ".xpst/state.json": json.dumps(
+                {
+                    "version": 2,
+                    "posted_videos": {"vid-1": {"posted_to": {"youtube": {"id": "yt-1"}}}},
+                    "failed_posts": {},
+                    "dead_letter_queue": [],
+                    "health": {"total_processed": 1, "platforms": {}},
+                }
+            ),
+            ".xpst/logs/xpst.log": (
+                "2026-11-24 01:00:00 INFO starting with token=abc123\n"
+                "2026-11-24 01:00:01 INFO wrote /home/alice/.xpst/state.json\n"
+                "2026-11-24 01:00:02 WARNING session: 'xyz' expired\n"
+            ),
+        },
+        "config_dir": ".xpst",
+        "mask": ["generated_at"],
+        "mask_sections": ["system", "dependencies", "updates", "providers"],
+        "mask_checks": ["python"],
+        "files_zip": ["bundle.zip"],
+        "compare": "json",
+    },
+    {
+        # `--log-lines` bounds the redacted tail.
+        "name": "diagnostics_log_lines",
+        "argv": [
+            "diagnostics", "--json", "--output", "PROFILE/bundle.zip", "--log-lines", "1",
+        ],
+        "seed": {
+            ".xpst/state.json": json.dumps({"version": 2, "posted_videos": {}}),
+            ".xpst/logs/xpst.log": (
+                "2026-11-24 01:00:00 INFO first\n"
+                "2026-11-24 01:00:01 INFO second\n"
+            ),
+        },
+        "config_dir": ".xpst",
+        "mask": ["generated_at"],
+        "mask_sections": ["system", "dependencies", "updates", "providers"],
+        "mask_checks": ["python"],
+        "files_zip": ["bundle.zip"],
+        "compare": "json",
+    },
+    {
+        # No `--output`: the bundle lands in `<config_dir>/diagnostics/` with a
+        # wall-clock name, so only the payload shape is compared.
+        "name": "diagnostics_default_output",
+        "argv": ["diagnostics", "--json"],
+        "seed": {".xpst/state.json": json.dumps({"version": 2, "posted_videos": {}})},
+        "config_dir": ".xpst",
+        "mask": ["output"],
+        "compare": "json",
+    },
 ]
 
 
@@ -3079,6 +3139,44 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
                             "mode": oct(entry.stat().st_mode & 0o777),
                         }
                     )
+        archives = {}
+        for relative in scenario.get("files_zip", []):
+            path = profile / relative
+            if not path.exists():
+                continue
+            with zipfile.ZipFile(path) as archive:
+                entries = {}
+                for name in archive.namelist():
+                    text = archive.read(name).decode("utf-8")
+                    try:
+                        value = json.loads(text)
+                    except json.JSONDecodeError:
+                        entries[name] = normalize(
+                            text,
+                            profile,
+                            scenario.get("mask"),
+                            scenario.get("mask_findings"),
+                            scenario.get("mask_checks"),
+                            scenario.get("mask_lines"),
+                        )
+                        continue
+                    value = normalize(
+                        value,
+                        profile,
+                        scenario.get("mask"),
+                        scenario.get("mask_findings"),
+                        scenario.get("mask_checks"),
+                        scenario.get("mask_lines"),
+                    )
+                    # Sections whose content is a property of the Python
+                    # installation rather than of the engine (a compiled binary
+                    # has no interpreter, no pip packages and no posting-truth
+                    # projection). The key is still compared; the value is not.
+                    for key in scenario.get("mask_sections", []):
+                        if isinstance(value, dict) and key in value:
+                            value[key] = "<DIVERGENT>"
+                    entries[name] = value
+                archives[relative] = entries
         files = {}
         for relative in scenario.get("files", []):
             path = profile / relative
@@ -3104,6 +3202,7 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
             "stdout_normalized": normalize(stdout, profile, scenario.get("mask")),
             "stderr": stderr,
             "stderr_normalized": normalize(stderr, profile, scenario.get("mask")),
+            "archives": archives,
             "stdout": proc.stdout,
             "stdout_normalized": normalize(
                 proc.stdout,
@@ -3199,6 +3298,10 @@ def run_scenario(scenario: dict, python: str) -> dict:
         record["credential_json"] = scenario["credential_json"]
     if scenario.get("files"):
         record["files"] = observed["files"]
+    if scenario.get("files_zip"):
+        record["files_zip"] = observed["archives"]
+    if scenario.get("mask_sections"):
+        record["mask_sections"] = scenario["mask_sections"]
     if "snapshot_epoch" in scenario:
         record["snapshot_epoch"] = scenario["snapshot_epoch"]
     if scenario["compare"] == "divergence":

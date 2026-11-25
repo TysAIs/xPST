@@ -386,6 +386,238 @@ pub fn python_style_json(value: &Value) -> Result<String, String> {
     Ok(out)
 }
 
+/// The captured Python config model: every field of every section with its
+/// default, plus the class name and dataclass defaults of each nested
+/// dataclass. Regenerate with `scripts/capture_mcp_tool_registry.py`; never
+/// edit by hand.
+///
+/// Two surfaces read it — the MCP `xpst_config_show` tool and the `diagnostics`
+/// config snapshot — because both report the *model* (defaults included), not
+/// the file. A file-only projection reports a defaulted field as absent.
+pub const PYTHON_CONFIG_MODEL: &str = include_str!("resources/python_config_model.json");
+
+/// Merge an operator's `config.yaml` onto the captured model.
+///
+/// Objects merge per key and everything else is replaced by the file's value
+/// when the file has one. Nested dataclasses are the exception, and the reason
+/// `repr_defaults` is captured: Python constructs them as `ClassName(**block)`,
+/// so a partial block in `config.yaml` falls back to the *dataclass* defaults
+/// (usually `None`), not to the shipped preset. `video.encoding_<p>` is the
+/// model's flattened name for the file's `video.encoding.<p>` block.
+pub fn project_config_model(
+    model: &JsonValue,
+    file: Option<&JsonValue>,
+    classes: &JsonValue,
+    defaults: &JsonValue,
+) -> JsonValue {
+    let mut projection = merge_model(model, file);
+    let Some(classes) = classes.as_object() else {
+        return projection;
+    };
+    for path in classes.keys() {
+        let segments: Vec<&str> = path.split('.').collect();
+        if segments.len() < 2 || (segments.len() == 2 && segments[0] == "accounts") {
+            continue;
+        }
+        let Some(file_block) = lookup_model(file, &file_segments(&segments)) else {
+            continue;
+        };
+        // `repr_defaults` is keyed by the dotted path, not nested.
+        let base = defaults.get(path).cloned().unwrap_or(JsonValue::Null);
+        let merged = merge_model(&base, Some(file_block));
+        if let Some(slot) = navigate_model_mut(&mut projection, &segments) {
+            *slot = merged;
+        }
+    }
+    projection
+}
+
+/// `video.encoding_youtube` is `video.encoding.youtube` in `config.yaml`.
+fn file_segments<'a>(segments: &[&'a str]) -> Vec<&'a str> {
+    if segments.len() == 2 && segments[0] == "video" {
+        if let Some(platform) = segments[1].strip_prefix("encoding_") {
+            return vec!["video", "encoding", platform];
+        }
+    }
+    segments.to_vec()
+}
+
+fn lookup_model<'a>(root: Option<&'a JsonValue>, segments: &[&str]) -> Option<&'a JsonValue> {
+    let mut current = root?;
+    for segment in segments {
+        current = current.as_object()?.get(*segment)?;
+    }
+    Some(current)
+}
+
+fn navigate_model_mut<'a>(root: &'a mut JsonValue, segments: &[&str]) -> Option<&'a mut JsonValue> {
+    let mut current = root;
+    for segment in segments {
+        current = current.as_object_mut()?.get_mut(*segment)?;
+    }
+    Some(current)
+}
+
+fn merge_model(model: &JsonValue, file: Option<&JsonValue>) -> JsonValue {
+    match (model, file) {
+        (JsonValue::Object(model_map), Some(JsonValue::Object(file_map))) => {
+            let mut out = serde_json::Map::new();
+            for (key, value) in model_map {
+                out.insert(key.clone(), merge_model(value, file_map.get(key)));
+            }
+            JsonValue::Object(out)
+        }
+        (JsonValue::Object(_), _) => model.clone(),
+        (_, Some(value)) => value.clone(),
+        (_, None) => model.clone(),
+    }
+}
+
+/// `json.dumps(value, indent=2)` for a `serde_json` document.
+///
+/// Python's default `ensure_ascii=True` escapes every character outside
+/// printable ASCII as `\uXXXX` (a surrogate pair above the BMP), items are
+/// separated by `","` with no trailing space, a key is followed by `": "`, and
+/// the indent is two spaces. This is the renderer the MCP server serves as a
+/// tool result body, so it lives next to the compact one instead of being
+/// re-implemented per crate.
+pub fn python_style_json_pretty(value: &JsonValue) -> Result<String, String> {
+    let mut out = String::new();
+    write_json_serde(value, 0, true, true, &mut out);
+    Ok(out)
+}
+
+/// [`python_style_json_pretty`] with `ensure_ascii=False` (raw UTF-8).
+pub fn python_style_json_pretty_utf8(value: &JsonValue) -> Result<String, String> {
+    let mut out = String::new();
+    write_json_serde(value, 0, false, true, &mut out);
+    Ok(out)
+}
+
+/// `json.dumps(value)` — no indent, Python's default `", "` / `": "`
+/// separators and `ensure_ascii=True`.
+///
+/// Not `serde_json::to_string`, which emits `{"a":1}`: Python's default
+/// separators put a space after every comma and colon, and a tool result body
+/// is compared byte for byte.
+pub fn python_style_json_compact(value: &JsonValue) -> Result<String, String> {
+    let mut out = String::new();
+    write_json_serde(value, 0, true, false, &mut out);
+    Ok(out)
+}
+
+fn write_json_serde(
+    value: &JsonValue,
+    depth: usize,
+    ascii_only: bool,
+    indented: bool,
+    out: &mut String,
+) {
+    let item_separator = if indented { ",\n" } else { ", " };
+    match value {
+        JsonValue::Null => out.push_str("null"),
+        JsonValue::Bool(true) => out.push_str("true"),
+        JsonValue::Bool(false) => out.push_str("false"),
+        JsonValue::Number(number) => {
+            if let Some(integer) = number.as_i64() {
+                out.push_str(&integer.to_string());
+            } else if let Some(integer) = number.as_u64() {
+                out.push_str(&integer.to_string());
+            } else {
+                out.push_str(&pyyaml::python_json_float(
+                    number.as_f64().unwrap_or_default(),
+                ));
+            }
+        }
+        JsonValue::String(text) => write_json_pretty_string(text, ascii_only, out),
+        JsonValue::Array(items) => {
+            if items.is_empty() {
+                out.push_str("[]");
+                return;
+            }
+            out.push('[');
+            if indented {
+                out.push('\n');
+            }
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(item_separator);
+                }
+                if indented {
+                    write_json_indent(depth + 1, out);
+                }
+                write_json_serde(item, depth + 1, ascii_only, indented, out);
+            }
+            if indented {
+                out.push('\n');
+                write_json_indent(depth, out);
+            }
+            out.push(']');
+        }
+        JsonValue::Object(map) => {
+            if map.is_empty() {
+                out.push_str("{}");
+                return;
+            }
+            out.push('{');
+            if indented {
+                out.push('\n');
+            }
+            for (index, (key, item)) in map.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(item_separator);
+                }
+                if indented {
+                    write_json_indent(depth + 1, out);
+                }
+                write_json_pretty_string(key, ascii_only, out);
+                out.push_str(": ");
+                write_json_serde(item, depth + 1, ascii_only, indented, out);
+            }
+            if indented {
+                out.push('\n');
+                write_json_indent(depth, out);
+            }
+            out.push('}');
+        }
+    }
+}
+
+fn write_json_indent(depth: usize, out: &mut String) {
+    for _ in 0..depth {
+        out.push_str("  ");
+    }
+}
+
+/// `json.dumps` string escaping, with `ensure_ascii` as a switch.
+fn write_json_pretty_string(text: &str, ascii_only: bool, out: &mut String) {
+    out.push('"');
+    for character in text.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0c}' => out.push_str("\\f"),
+            c if (' '..='~').contains(&c) => out.push(c),
+            // Python's `py_encode_basestring` escapes `[\x00-\x1f]` whether or
+            // not `ensure_ascii` is set — only the *non-ASCII* range depends on
+            // the flag.
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c if !ascii_only => out.push(c),
+            c => {
+                let mut units = [0u16; 2];
+                for unit in c.encode_utf16(&mut units) {
+                    out.push_str(&format!("\\u{unit:04x}"));
+                }
+            }
+        }
+    }
+    out.push('"');
+}
+
 fn write_json(value: &Value, out: &mut String) -> Result<(), String> {
     match value {
         Value::Null => out.push_str("null"),
@@ -515,6 +747,45 @@ pub fn mask_sensitive(value: &Value) -> Value {
 
 /// Expand a leading `~` using `$HOME`. Small on purpose: P0 does not take a
 /// dependency on `dirs` for one substitution.
+/// Fields the Python model types as `Path`, so `XPSTConfig.load()` expands a
+/// leading `~` before any surface sees them. A string field that is not a path
+/// (`proxy`, `username`) is left exactly as written.
+pub const PATH_FIELDS: &[&str] = &[
+    "credentials_path",
+    "cookies_file",
+    "session_file",
+    "token_file",
+    "client_secrets",
+    "download_dir",
+    "log_file",
+    "path",
+];
+
+/// Expand every [`PATH_FIELDS`] value in a projected config model.
+///
+/// The captured model is the *default* profile, so its path fields read
+/// `~/.xpst/...`; `XPSTConfig.load()` runs `Path.expanduser()` on them, which is
+/// `HOME`-based even when `XPST_CONFIG_DIR` points somewhere else. Expanding
+/// against `HOME` is therefore the shipped behaviour, not an approximation.
+pub fn expand_config_paths(value: &mut JsonValue) {
+    match value {
+        JsonValue::Object(map) => {
+            for (key, child) in map.iter_mut() {
+                if PATH_FIELDS.contains(&key.as_str()) {
+                    if let JsonValue::String(text) = child {
+                        if text.starts_with("~/") {
+                            *text = expand_home(text);
+                        }
+                    }
+                }
+                expand_config_paths(child);
+            }
+        }
+        JsonValue::Array(items) => items.iter_mut().for_each(expand_config_paths),
+        _ => {}
+    }
+}
+
 pub fn expand_home(path: &str) -> String {
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = std::env::var_os("HOME") {

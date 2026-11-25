@@ -31,6 +31,7 @@ pub mod parity;
 pub mod paths;
 pub mod rich;
 pub mod pythonnum;
+pub mod zipwrite;
 
 use std::ffi::OsString;
 use std::io::{IsTerminal, Write};
@@ -127,6 +128,14 @@ fn dispatch<W: Write, E: Write>(
     err: &mut E,
 ) -> i32 {
     let key = path.join(" ");
+    // A bare `xpst mcp` starts the server: the shipped Click group is
+    // `invoke_without_command=True`, so `python -m xpst mcp` is the documented
+    // stdio entry point and the Rust engine has to answer the same way.
+    if key == "mcp" {
+        if let Some(command) = implemented::lookup("mcp start") {
+            return (command.handler)(global, leaf, out, err);
+        }
+    }
     if let Some(command) = implemented::lookup(&key) {
         let mut out_ref: &mut dyn Write = out;
         let mut err_ref: &mut dyn Write = err;

@@ -18,6 +18,7 @@ pub mod chat;
 pub mod config;
 pub mod config_view;
 pub mod devices;
+pub mod diagnostics;
 pub mod doctor;
 pub mod failures;
 pub mod generate;

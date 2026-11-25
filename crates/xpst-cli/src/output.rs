@@ -204,17 +204,15 @@ pub fn from_json(value: &serde_json::Value) -> xpst_config::Value {
 /// are separated by `","` with no trailing space, a key is followed by `": "`,
 /// and the indent is two spaces — exactly `json.dumps(indent=2)`.
 pub fn python_pretty_json(value: &serde_json::Value) -> String {
-    let mut out = String::new();
-    write_pretty(value, 0, true, &mut out);
-    out
+    // One renderer for the whole workspace: `xpst-config` owns the byte-exact
+    // `json.dumps` emulation, so the CLI and the MCP server cannot drift.
+    xpst_config::python_style_json_pretty(value).unwrap_or_default()
 }
 
 /// The same rendering with `ensure_ascii=False`: raw UTF-8, as
 /// `json.dump(..., ensure_ascii=False)` writes `schedule.json`.
 pub fn python_pretty_json_utf8(value: &serde_json::Value) -> String {
-    let mut out = String::new();
-    write_pretty(value, 0, false, &mut out);
-    out
+    xpst_config::python_style_json_pretty_utf8(value).unwrap_or_default()
 }
 
 /// `json.dumps(value, indent=2)` for the insertion-ordered value type.
@@ -304,63 +302,6 @@ fn write_pretty_cfg(value: &xpst_config::Value, depth: usize, ascii_only: bool, 
 fn indent(depth: usize, out: &mut String) {
     for _ in 0..depth {
         out.push_str("  ");
-    }
-}
-
-fn write_pretty(value: &serde_json::Value, depth: usize, ascii_only: bool, out: &mut String) {
-    use serde_json::Value as Json;
-    match value {
-        Json::Null => out.push_str("null"),
-        Json::Bool(true) => out.push_str("true"),
-        Json::Bool(false) => out.push_str("false"),
-        Json::Number(number) => {
-            if let Some(integer) = number.as_i64() {
-                out.push_str(&integer.to_string());
-            } else if let Some(integer) = number.as_u64() {
-                out.push_str(&integer.to_string());
-            } else {
-                out.push_str(&xpst_config::pyyaml::python_json_float(
-                    number.as_f64().unwrap_or_default(),
-                ));
-            }
-        }
-        Json::String(text) => write_pretty_string(text, ascii_only, out),
-        Json::Array(items) => {
-            if items.is_empty() {
-                out.push_str("[]");
-                return;
-            }
-            out.push_str("[\n");
-            for (index, item) in items.iter().enumerate() {
-                if index > 0 {
-                    out.push_str(",\n");
-                }
-                indent(depth + 1, out);
-                write_pretty(item, depth + 1, ascii_only, out);
-            }
-            out.push('\n');
-            indent(depth, out);
-            out.push(']');
-        }
-        Json::Object(map) => {
-            if map.is_empty() {
-                out.push_str("{}");
-                return;
-            }
-            out.push_str("{\n");
-            for (index, (key, item)) in map.iter().enumerate() {
-                if index > 0 {
-                    out.push_str(",\n");
-                }
-                indent(depth + 1, out);
-                write_pretty_string(key, ascii_only, out);
-                out.push_str(": ");
-                write_pretty(item, depth + 1, ascii_only, out);
-            }
-            out.push('\n');
-            indent(depth, out);
-            out.push('}');
-        }
     }
 }
 

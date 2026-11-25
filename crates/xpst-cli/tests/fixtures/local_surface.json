@@ -11,7 +11,7 @@
     "PYTHONHASHSEED": "0"
   },
   "note": "Captured by running the shipped Python CLI against scratch profiles. `environment` is the block both engines are run under (a scenario's `env` overrides it); scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent, and an entry without one renders in the pinned TZ; snapshot modified_at is stripped and its epoch recorded instead.",
-  "scenario_count": 198,
+  "scenario_count": 201,
   "scenarios": [
     {
       "name": "status_empty_profile",
@@ -3957,7 +3957,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616797.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616836.\n",
       "stderr": null,
       "normalize_clock": true,
       "backups": [
@@ -3984,7 +3984,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616798.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616836.\n",
       "stderr": null,
       "normalize_clock": true,
       "backups": [
@@ -4012,7 +4012,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616798.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616836.\n",
       "stderr": null,
       "normalize_clock": true,
       "backups": [
@@ -4039,7 +4039,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616798.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616837.\n",
       "stderr": null,
       "normalize_clock": true,
       "backups": [
@@ -4067,7 +4067,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616798.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616837.\n",
       "stderr": null,
       "normalize_clock": true,
       "backups": [
@@ -4095,7 +4095,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616798.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616837.\n",
       "stderr": null,
       "normalize_clock": true,
       "backups": [
@@ -12460,6 +12460,1383 @@
       "exit_code": 0,
       "env": {
         "HOME": "PROFILE"
+      }
+    },
+    {
+      "name": "diagnostics_basic",
+      "argv": [
+        "diagnostics",
+        "--json",
+        "--output",
+        "PROFILE/bundle.zip"
+      ],
+      "seed": {
+        ".xpst/state.json": "{\"version\": 2, \"posted_videos\": {\"vid-1\": {\"posted_to\": {\"youtube\": {\"id\": \"yt-1\"}}}}, \"failed_posts\": {}, \"dead_letter_queue\": [], \"health\": {\"total_processed\": 1, \"platforms\": {}}}",
+        ".xpst/logs/xpst.log": "2026-11-24 01:00:00 INFO starting with token=abc123\n2026-11-24 01:00:01 INFO wrote /home/alice/.xpst/state.json\n2026-11-24 01:00:02 WARNING session: 'xyz' expired\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "mask": [
+        "generated_at"
+      ],
+      "mask_checks": [
+        "python"
+      ],
+      "files_zip": {
+        "bundle.zip": {
+          "diagnostics.json": {
+            "config": {
+              "accounts": {
+                "instagram": {
+                  "enabled": true,
+                  "session_file": "<redacted>",
+                  "username_configured": false
+                },
+                "local": {
+                  "configured": false,
+                  "path": ""
+                },
+                "tiktok": {
+                  "cookies_file": "",
+                  "cookies_from_browser": "",
+                  "username_configured": false
+                },
+                "x": {
+                  "cookies_file": "<redacted>",
+                  "enabled": true,
+                  "username_configured": false
+                },
+                "youtube": {
+                  "channel_id_configured": false,
+                  "client_secrets": "<redacted>",
+                  "enabled": true,
+                  "token_file": "<redacted>",
+                  "username_configured": false
+                }
+              },
+              "config_dir": "<redacted>/.xpst",
+              "monitoring": {
+                "dashboard_password_configured": "",
+                "dashboard_username_configured": false,
+                "enable_metrics": true,
+                "healthcheck_port": 8080,
+                "log_file": "<redacted>/xpst.log",
+                "log_level": "INFO",
+                "log_rotation": "10 MB"
+              },
+              "notifications": {
+                "discord_webhook_configured": "",
+                "enabled": false,
+                "on_failure": true,
+                "on_success": true,
+                "telegram_bot_configured": false,
+                "telegram_chat_configured": false
+              },
+              "rate_limits": {
+                "facebook": 5,
+                "instagram": 5,
+                "tiktok": 5,
+                "x": 5,
+                "youtube": 5
+              },
+              "reliability": {
+                "circuit_breaker_reset": 3600,
+                "circuit_breaker_threshold": 5,
+                "max_retries": 3,
+                "retry_backoff": 2
+              },
+              "schedule": {
+                "catchup_times_per_day": 3,
+                "catchup_window": 172800,
+                "check_interval": 900
+              },
+              "video": {
+                "cleanup_after_post": false,
+                "download_dir": "<redacted>/downloads"
+              }
+            },
+            "credentials": "<redacted>",
+            "dependencies": "<DIVERGENT>",
+            "generated_at": "<TS>",
+            "logs": [
+              "2026-11-24 01:00:00 INFO starting with token=<redacted>",
+              "2026-11-24 01:00:01 INFO wrote /home/<user>/.xpst/state.json",
+              "2026-11-24 01:00:02 WARNING session: '<redacted>' expired"
+            ],
+            "providers": "<DIVERGENT>",
+            "readiness": {
+              "blocking": [
+                {
+                  "action": "Run xpst setup or create the missing folders.",
+                  "details": {
+                    "config_dir": "<redacted>/.xpst",
+                    "missing": [
+                      "credentials",
+                      "downloads",
+                      "backups"
+                    ]
+                  },
+                  "id": "directories",
+                  "label": "Local folders",
+                  "message": "Some local folders are missing.",
+                  "ok": false,
+                  "severity": "error"
+                },
+                {
+                  "action": "Add a TikTok username or choose an existing local source folder.",
+                  "details": {
+                    "local_path": "",
+                    "local_path_exists": false,
+                    "ready_sources": [],
+                    "tiktok_username": false
+                  },
+                  "id": "source",
+                  "label": "Content source",
+                  "message": "No usable content source is configured.",
+                  "ok": false,
+                  "severity": "error"
+                },
+                {
+                  "action": "Enable and connect at least one destination platform.",
+                  "details": {
+                    "destinations": [
+                      "youtube",
+                      "x",
+                      "instagram",
+                      "bluesky",
+                      "tiktok",
+                      "threads",
+                      "facebook",
+                      "rumble"
+                    ],
+                    "ready_count": 0
+                  },
+                  "id": "destinations",
+                  "label": "Destinations",
+                  "message": "No posting destinations are ready.",
+                  "ok": false,
+                  "severity": "error"
+                }
+              ],
+              "checks": [
+                {
+                  "action": "",
+                  "details": "<ENV>",
+                  "id": "python",
+                  "label": "Python",
+                  "message": "<ENV>",
+                  "ok": true,
+                  "severity": "error"
+                },
+                {
+                  "action": "Run xpst setup or create the missing folders.",
+                  "details": {
+                    "config_dir": "<redacted>/.xpst",
+                    "missing": [
+                      "credentials",
+                      "downloads",
+                      "backups"
+                    ]
+                  },
+                  "id": "directories",
+                  "label": "Local folders",
+                  "message": "Some local folders are missing.",
+                  "ok": false,
+                  "severity": "error"
+                },
+                {
+                  "action": "",
+                  "details": {
+                    "binary": "ffmpeg",
+                    "path": "<redacted>/ffmpeg"
+                  },
+                  "id": "ffmpeg",
+                  "label": "FFmpeg",
+                  "message": "FFmpeg is available.",
+                  "ok": true,
+                  "severity": "error"
+                },
+                {
+                  "action": "",
+                  "details": {
+                    "version": "2026.10.26"
+                  },
+                  "id": "yt_dlp",
+                  "label": "yt-dlp",
+                  "message": "yt-dlp 2026.10.26 is available.",
+                  "ok": true,
+                  "severity": "error"
+                },
+                {
+                  "action": "Add a TikTok username or choose an existing local source folder.",
+                  "details": {
+                    "local_path": "",
+                    "local_path_exists": false,
+                    "ready_sources": [],
+                    "tiktok_username": false
+                  },
+                  "id": "source",
+                  "label": "Content source",
+                  "message": "No usable content source is configured.",
+                  "ok": false,
+                  "severity": "error"
+                },
+                {
+                  "action": "Enable and connect at least one destination platform.",
+                  "details": {
+                    "destinations": [
+                      "youtube",
+                      "x",
+                      "instagram",
+                      "bluesky",
+                      "tiktok",
+                      "threads",
+                      "facebook",
+                      "rumble"
+                    ],
+                    "ready_count": 0
+                  },
+                  "id": "destinations",
+                  "label": "Destinations",
+                  "message": "No posting destinations are ready.",
+                  "ok": false,
+                  "severity": "error"
+                },
+                {
+                  "action": "Connect Youtube or disable youtube.",
+                  "details": {
+                    "can_post": false,
+                    "enabled": true,
+                    "error": null,
+                    "live_checked": null,
+                    "posting_state": "unconfigured",
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "source_only": false,
+                    "state": "unconfigured"
+                  },
+                  "id": "youtube_connection",
+                  "label": "Youtube connection",
+                  "message": "Youtube is enabled but not configured.",
+                  "ok": false,
+                  "severity": "warning"
+                },
+                {
+                  "action": "Connect X or disable x.",
+                  "details": {
+                    "can_post": false,
+                    "enabled": true,
+                    "error": null,
+                    "live_checked": null,
+                    "posting_state": "unconfigured",
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "source_only": false,
+                    "state": "unconfigured"
+                  },
+                  "id": "x_connection",
+                  "label": "X connection",
+                  "message": "X is enabled but not configured.",
+                  "ok": false,
+                  "severity": "warning"
+                },
+                {
+                  "action": "Connect Instagram or disable instagram.",
+                  "details": {
+                    "can_post": false,
+                    "enabled": true,
+                    "error": null,
+                    "live_checked": null,
+                    "posting_state": "unconfigured",
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "source_only": false,
+                    "state": "unconfigured"
+                  },
+                  "id": "instagram_connection",
+                  "label": "Instagram connection",
+                  "message": "Instagram is enabled but not configured.",
+                  "ok": false,
+                  "severity": "warning"
+                },
+                {
+                  "action": "",
+                  "details": {
+                    "enabled": false,
+                    "error": null,
+                    "live_checked": null,
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "state": "disabled"
+                  },
+                  "id": "bluesky_connection",
+                  "label": "Bluesky connection",
+                  "message": "Bluesky is disabled.",
+                  "ok": true,
+                  "severity": "info"
+                },
+                {
+                  "action": "Posting to Tiktok requires an approved provider upload app. Keep using it as a source, or connect another destination.",
+                  "details": {
+                    "can_post": false,
+                    "enabled": true,
+                    "error": null,
+                    "live_checked": null,
+                    "posting_state": "unconfigured",
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "source_only": true,
+                    "state": "unconfigured"
+                  },
+                  "id": "tiktok_connection",
+                  "label": "Tiktok connection",
+                  "message": "TikTok is a source only: xPST downloads from it, and it cannot be used as a posting destination.",
+                  "ok": false,
+                  "severity": "info"
+                },
+                {
+                  "action": "",
+                  "details": {
+                    "enabled": false,
+                    "error": null,
+                    "live_checked": null,
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "state": "disabled"
+                  },
+                  "id": "threads_connection",
+                  "label": "Threads connection",
+                  "message": "Threads is disabled.",
+                  "ok": true,
+                  "severity": "info"
+                },
+                {
+                  "action": "",
+                  "details": {
+                    "enabled": false,
+                    "error": null,
+                    "live_checked": null,
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "state": "disabled"
+                  },
+                  "id": "facebook_connection",
+                  "label": "Facebook connection",
+                  "message": "Facebook is disabled.",
+                  "ok": true,
+                  "severity": "info"
+                },
+                {
+                  "action": "",
+                  "details": {
+                    "enabled": false,
+                    "error": null,
+                    "live_checked": null,
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "state": "disabled"
+                  },
+                  "id": "rumble_connection",
+                  "label": "Rumble connection",
+                  "message": "Rumble is disabled.",
+                  "ok": true,
+                  "severity": "info"
+                },
+                {
+                  "action": "Move to X API v2 with `xpst connect x` \u2014 it needs X API v2 access (free tier: 17 posts/day). Staying is allowed; the risk keeps being reported.",
+                  "details": {
+                    "acknowledged": false,
+                    "acknowledgement": null,
+                    "auth_mode": "cookies",
+                    "ban_risk": "unofficial_web_client",
+                    "docs_url": "docs/setup-x.md",
+                    "official_mode": "api_v2",
+                    "platform": "x",
+                    "role": "video_destination",
+                    "severity": "advisory",
+                    "switch_command": "xpst connect x"
+                  },
+                  "id": "x_ban_risk",
+                  "label": "X auth path",
+                  "message": "X uses its unofficial auth path (auth_mode 'cookies', ban_risk: unofficial_web_client; not acknowledged).",
+                  "ok": true,
+                  "severity": "info"
+                },
+                {
+                  "action": "",
+                  "details": {
+                    "helpers": [
+                      {
+                        "action": "Run xpst update --components --check to check latest versions.",
+                        "component_type": "helper",
+                        "current_version": "2026.10.26",
+                        "error": null,
+                        "installed": true,
+                        "latest_version": null,
+                        "name": "yt-dlp",
+                        "required": true,
+                        "status": "unknown",
+                        "updatable": false,
+                        "update_command": "xpst update --components --check",
+                        "update_mode": "pip"
+                      },
+                      {
+                        "action": "FFmpeg is installed; update it with your operating system package manager when needed.",
+                        "component_type": "helper",
+                        "current_version": "n9.0.1-11-ge47273f4d9-20260831",
+                        "error": null,
+                        "installed": true,
+                        "latest_version": null,
+                        "name": "FFmpeg",
+                        "required": true,
+                        "status": "manual",
+                        "updatable": false,
+                        "update_command": null,
+                        "update_mode": "external"
+                      }
+                    ],
+                    "missing": []
+                  },
+                  "id": "helper_tools",
+                  "label": "Helper tools",
+                  "message": "Required helper tools are installed.",
+                  "ok": true,
+                  "severity": "error"
+                }
+              ],
+              "ready": false,
+              "roles": [
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "youtube",
+                  "platform_label": "YouTube Shorts",
+                  "ready": false,
+                  "role": "source",
+                  "role_label": "Source",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "youtube",
+                  "platform_label": "YouTube Shorts",
+                  "ready": false,
+                  "role": "video_destination",
+                  "role_label": "Destination",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "youtube",
+                  "platform_label": "YouTube Shorts",
+                  "ready": false,
+                  "role": "analytics",
+                  "role_label": "Analytics",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "x",
+                  "platform_label": "X",
+                  "ready": false,
+                  "role": "source",
+                  "role_label": "Source",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "x",
+                  "platform_label": "X",
+                  "ready": false,
+                  "role": "video_destination",
+                  "role_label": "Destination",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "x",
+                  "platform_label": "X",
+                  "ready": false,
+                  "role": "analytics",
+                  "role_label": "Analytics",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "instagram",
+                  "platform_label": "Instagram Reels",
+                  "ready": false,
+                  "role": "source",
+                  "role_label": "Source",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "instagram",
+                  "platform_label": "Instagram Reels",
+                  "ready": false,
+                  "role": "video_destination",
+                  "role_label": "Destination",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "instagram",
+                  "platform_label": "Instagram Reels",
+                  "ready": false,
+                  "role": "analytics",
+                  "role_label": "Analytics",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "tiktok",
+                  "platform_label": "TikTok",
+                  "ready": false,
+                  "role": "source",
+                  "role_label": "Source",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "tiktok",
+                  "platform_label": "TikTok",
+                  "ready": false,
+                  "role": "video_destination",
+                  "role_label": "Destination",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "tiktok",
+                  "platform_label": "TikTok",
+                  "ready": false,
+                  "role": "analytics",
+                  "role_label": "Analytics",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "local",
+                  "platform_label": "Local files",
+                  "ready": false,
+                  "role": "source",
+                  "role_label": "Source",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                }
+              ],
+              "summary": "3 setup item(s) must be fixed before posting.",
+              "warnings": [
+                {
+                  "action": "Connect Youtube or disable youtube.",
+                  "details": {
+                    "can_post": false,
+                    "enabled": true,
+                    "error": null,
+                    "live_checked": null,
+                    "posting_state": "unconfigured",
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "source_only": false,
+                    "state": "unconfigured"
+                  },
+                  "id": "youtube_connection",
+                  "label": "Youtube connection",
+                  "message": "Youtube is enabled but not configured.",
+                  "ok": false,
+                  "severity": "warning"
+                },
+                {
+                  "action": "Connect X or disable x.",
+                  "details": {
+                    "can_post": false,
+                    "enabled": true,
+                    "error": null,
+                    "live_checked": null,
+                    "posting_state": "unconfigured",
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "source_only": false,
+                    "state": "unconfigured"
+                  },
+                  "id": "x_connection",
+                  "label": "X connection",
+                  "message": "X is enabled but not configured.",
+                  "ok": false,
+                  "severity": "warning"
+                },
+                {
+                  "action": "Connect Instagram or disable instagram.",
+                  "details": {
+                    "can_post": false,
+                    "enabled": true,
+                    "error": null,
+                    "live_checked": null,
+                    "posting_state": "unconfigured",
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "source_only": false,
+                    "state": "unconfigured"
+                  },
+                  "id": "instagram_connection",
+                  "label": "Instagram connection",
+                  "message": "Instagram is enabled but not configured.",
+                  "ok": false,
+                  "severity": "warning"
+                }
+              ]
+            },
+            "state": {
+              "dead_letter_queue": 0,
+              "failed_posts": 0,
+              "last_check": null,
+              "last_wake_check": null,
+              "posted_videos": 1
+            },
+            "system": "<DIVERGENT>",
+            "updates": "<DIVERGENT>",
+            "xpst": {
+              "version": "1.3.0"
+            }
+          },
+          "README.txt": "xPST diagnostics bundle\n\nThis bundle is generated locally and redacts known secret fields, credential values, and user home paths. Review diagnostics.json before sharing if your captions, paths, or logs may contain private information.\n"
+        }
+      },
+      "mask_sections": [
+        "system",
+        "dependencies",
+        "updates",
+        "providers"
+      ],
+      "stdout_json": {
+        "ok": true,
+        "output": "<PROFILE>/bundle.zip",
+        "redacted": true
+      }
+    },
+    {
+      "name": "diagnostics_log_lines",
+      "argv": [
+        "diagnostics",
+        "--json",
+        "--output",
+        "PROFILE/bundle.zip",
+        "--log-lines",
+        "1"
+      ],
+      "seed": {
+        ".xpst/state.json": "{\"version\": 2, \"posted_videos\": {}}",
+        ".xpst/logs/xpst.log": "2026-11-24 01:00:00 INFO first\n2026-11-24 01:00:01 INFO second\n"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "mask": [
+        "generated_at"
+      ],
+      "mask_checks": [
+        "python"
+      ],
+      "files_zip": {
+        "bundle.zip": {
+          "diagnostics.json": {
+            "config": {
+              "accounts": {
+                "instagram": {
+                  "enabled": true,
+                  "session_file": "<redacted>",
+                  "username_configured": false
+                },
+                "local": {
+                  "configured": false,
+                  "path": ""
+                },
+                "tiktok": {
+                  "cookies_file": "",
+                  "cookies_from_browser": "",
+                  "username_configured": false
+                },
+                "x": {
+                  "cookies_file": "<redacted>",
+                  "enabled": true,
+                  "username_configured": false
+                },
+                "youtube": {
+                  "channel_id_configured": false,
+                  "client_secrets": "<redacted>",
+                  "enabled": true,
+                  "token_file": "<redacted>",
+                  "username_configured": false
+                }
+              },
+              "config_dir": "<redacted>/.xpst",
+              "monitoring": {
+                "dashboard_password_configured": "",
+                "dashboard_username_configured": false,
+                "enable_metrics": true,
+                "healthcheck_port": 8080,
+                "log_file": "<redacted>/xpst.log",
+                "log_level": "INFO",
+                "log_rotation": "10 MB"
+              },
+              "notifications": {
+                "discord_webhook_configured": "",
+                "enabled": false,
+                "on_failure": true,
+                "on_success": true,
+                "telegram_bot_configured": false,
+                "telegram_chat_configured": false
+              },
+              "rate_limits": {
+                "facebook": 5,
+                "instagram": 5,
+                "tiktok": 5,
+                "x": 5,
+                "youtube": 5
+              },
+              "reliability": {
+                "circuit_breaker_reset": 3600,
+                "circuit_breaker_threshold": 5,
+                "max_retries": 3,
+                "retry_backoff": 2
+              },
+              "schedule": {
+                "catchup_times_per_day": 3,
+                "catchup_window": 172800,
+                "check_interval": 900
+              },
+              "video": {
+                "cleanup_after_post": false,
+                "download_dir": "<redacted>/downloads"
+              }
+            },
+            "credentials": "<redacted>",
+            "dependencies": "<DIVERGENT>",
+            "generated_at": "<TS>",
+            "logs": [
+              "2026-11-24 01:00:01 INFO second"
+            ],
+            "providers": "<DIVERGENT>",
+            "readiness": {
+              "blocking": [
+                {
+                  "action": "Run xpst setup or create the missing folders.",
+                  "details": {
+                    "config_dir": "<redacted>/.xpst",
+                    "missing": [
+                      "credentials",
+                      "downloads",
+                      "backups"
+                    ]
+                  },
+                  "id": "directories",
+                  "label": "Local folders",
+                  "message": "Some local folders are missing.",
+                  "ok": false,
+                  "severity": "error"
+                },
+                {
+                  "action": "Add a TikTok username or choose an existing local source folder.",
+                  "details": {
+                    "local_path": "",
+                    "local_path_exists": false,
+                    "ready_sources": [],
+                    "tiktok_username": false
+                  },
+                  "id": "source",
+                  "label": "Content source",
+                  "message": "No usable content source is configured.",
+                  "ok": false,
+                  "severity": "error"
+                },
+                {
+                  "action": "Enable and connect at least one destination platform.",
+                  "details": {
+                    "destinations": [
+                      "youtube",
+                      "x",
+                      "instagram",
+                      "bluesky",
+                      "tiktok",
+                      "threads",
+                      "facebook",
+                      "rumble"
+                    ],
+                    "ready_count": 0
+                  },
+                  "id": "destinations",
+                  "label": "Destinations",
+                  "message": "No posting destinations are ready.",
+                  "ok": false,
+                  "severity": "error"
+                }
+              ],
+              "checks": [
+                {
+                  "action": "",
+                  "details": "<ENV>",
+                  "id": "python",
+                  "label": "Python",
+                  "message": "<ENV>",
+                  "ok": true,
+                  "severity": "error"
+                },
+                {
+                  "action": "Run xpst setup or create the missing folders.",
+                  "details": {
+                    "config_dir": "<redacted>/.xpst",
+                    "missing": [
+                      "credentials",
+                      "downloads",
+                      "backups"
+                    ]
+                  },
+                  "id": "directories",
+                  "label": "Local folders",
+                  "message": "Some local folders are missing.",
+                  "ok": false,
+                  "severity": "error"
+                },
+                {
+                  "action": "",
+                  "details": {
+                    "binary": "ffmpeg",
+                    "path": "<redacted>/ffmpeg"
+                  },
+                  "id": "ffmpeg",
+                  "label": "FFmpeg",
+                  "message": "FFmpeg is available.",
+                  "ok": true,
+                  "severity": "error"
+                },
+                {
+                  "action": "",
+                  "details": {
+                    "version": "2026.10.26"
+                  },
+                  "id": "yt_dlp",
+                  "label": "yt-dlp",
+                  "message": "yt-dlp 2026.10.26 is available.",
+                  "ok": true,
+                  "severity": "error"
+                },
+                {
+                  "action": "Add a TikTok username or choose an existing local source folder.",
+                  "details": {
+                    "local_path": "",
+                    "local_path_exists": false,
+                    "ready_sources": [],
+                    "tiktok_username": false
+                  },
+                  "id": "source",
+                  "label": "Content source",
+                  "message": "No usable content source is configured.",
+                  "ok": false,
+                  "severity": "error"
+                },
+                {
+                  "action": "Enable and connect at least one destination platform.",
+                  "details": {
+                    "destinations": [
+                      "youtube",
+                      "x",
+                      "instagram",
+                      "bluesky",
+                      "tiktok",
+                      "threads",
+                      "facebook",
+                      "rumble"
+                    ],
+                    "ready_count": 0
+                  },
+                  "id": "destinations",
+                  "label": "Destinations",
+                  "message": "No posting destinations are ready.",
+                  "ok": false,
+                  "severity": "error"
+                },
+                {
+                  "action": "Connect Youtube or disable youtube.",
+                  "details": {
+                    "can_post": false,
+                    "enabled": true,
+                    "error": null,
+                    "live_checked": null,
+                    "posting_state": "unconfigured",
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "source_only": false,
+                    "state": "unconfigured"
+                  },
+                  "id": "youtube_connection",
+                  "label": "Youtube connection",
+                  "message": "Youtube is enabled but not configured.",
+                  "ok": false,
+                  "severity": "warning"
+                },
+                {
+                  "action": "Connect X or disable x.",
+                  "details": {
+                    "can_post": false,
+                    "enabled": true,
+                    "error": null,
+                    "live_checked": null,
+                    "posting_state": "unconfigured",
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "source_only": false,
+                    "state": "unconfigured"
+                  },
+                  "id": "x_connection",
+                  "label": "X connection",
+                  "message": "X is enabled but not configured.",
+                  "ok": false,
+                  "severity": "warning"
+                },
+                {
+                  "action": "Connect Instagram or disable instagram.",
+                  "details": {
+                    "can_post": false,
+                    "enabled": true,
+                    "error": null,
+                    "live_checked": null,
+                    "posting_state": "unconfigured",
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "source_only": false,
+                    "state": "unconfigured"
+                  },
+                  "id": "instagram_connection",
+                  "label": "Instagram connection",
+                  "message": "Instagram is enabled but not configured.",
+                  "ok": false,
+                  "severity": "warning"
+                },
+                {
+                  "action": "",
+                  "details": {
+                    "enabled": false,
+                    "error": null,
+                    "live_checked": null,
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "state": "disabled"
+                  },
+                  "id": "bluesky_connection",
+                  "label": "Bluesky connection",
+                  "message": "Bluesky is disabled.",
+                  "ok": true,
+                  "severity": "info"
+                },
+                {
+                  "action": "Posting to Tiktok requires an approved provider upload app. Keep using it as a source, or connect another destination.",
+                  "details": {
+                    "can_post": false,
+                    "enabled": true,
+                    "error": null,
+                    "live_checked": null,
+                    "posting_state": "unconfigured",
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "source_only": true,
+                    "state": "unconfigured"
+                  },
+                  "id": "tiktok_connection",
+                  "label": "Tiktok connection",
+                  "message": "TikTok is a source only: xPST downloads from it, and it cannot be used as a posting destination.",
+                  "ok": false,
+                  "severity": "info"
+                },
+                {
+                  "action": "",
+                  "details": {
+                    "enabled": false,
+                    "error": null,
+                    "live_checked": null,
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "state": "disabled"
+                  },
+                  "id": "threads_connection",
+                  "label": "Threads connection",
+                  "message": "Threads is disabled.",
+                  "ok": true,
+                  "severity": "info"
+                },
+                {
+                  "action": "",
+                  "details": {
+                    "enabled": false,
+                    "error": null,
+                    "live_checked": null,
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "state": "disabled"
+                  },
+                  "id": "facebook_connection",
+                  "label": "Facebook connection",
+                  "message": "Facebook is disabled.",
+                  "ok": true,
+                  "severity": "info"
+                },
+                {
+                  "action": "",
+                  "details": {
+                    "enabled": false,
+                    "error": null,
+                    "live_checked": null,
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "state": "disabled"
+                  },
+                  "id": "rumble_connection",
+                  "label": "Rumble connection",
+                  "message": "Rumble is disabled.",
+                  "ok": true,
+                  "severity": "info"
+                },
+                {
+                  "action": "Move to X API v2 with `xpst connect x` \u2014 it needs X API v2 access (free tier: 17 posts/day). Staying is allowed; the risk keeps being reported.",
+                  "details": {
+                    "acknowledged": false,
+                    "acknowledgement": null,
+                    "auth_mode": "cookies",
+                    "ban_risk": "unofficial_web_client",
+                    "docs_url": "docs/setup-x.md",
+                    "official_mode": "api_v2",
+                    "platform": "x",
+                    "role": "video_destination",
+                    "severity": "advisory",
+                    "switch_command": "xpst connect x"
+                  },
+                  "id": "x_ban_risk",
+                  "label": "X auth path",
+                  "message": "X uses its unofficial auth path (auth_mode 'cookies', ban_risk: unofficial_web_client; not acknowledged).",
+                  "ok": true,
+                  "severity": "info"
+                },
+                {
+                  "action": "",
+                  "details": {
+                    "helpers": [
+                      {
+                        "action": "Run xpst update --components --check to check latest versions.",
+                        "component_type": "helper",
+                        "current_version": "2026.10.26",
+                        "error": null,
+                        "installed": true,
+                        "latest_version": null,
+                        "name": "yt-dlp",
+                        "required": true,
+                        "status": "unknown",
+                        "updatable": false,
+                        "update_command": "xpst update --components --check",
+                        "update_mode": "pip"
+                      },
+                      {
+                        "action": "FFmpeg is installed; update it with your operating system package manager when needed.",
+                        "component_type": "helper",
+                        "current_version": "n9.0.1-11-ge47273f4d9-20260831",
+                        "error": null,
+                        "installed": true,
+                        "latest_version": null,
+                        "name": "FFmpeg",
+                        "required": true,
+                        "status": "manual",
+                        "updatable": false,
+                        "update_command": null,
+                        "update_mode": "external"
+                      }
+                    ],
+                    "missing": []
+                  },
+                  "id": "helper_tools",
+                  "label": "Helper tools",
+                  "message": "Required helper tools are installed.",
+                  "ok": true,
+                  "severity": "error"
+                }
+              ],
+              "ready": false,
+              "roles": [
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "youtube",
+                  "platform_label": "YouTube Shorts",
+                  "ready": false,
+                  "role": "source",
+                  "role_label": "Source",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "youtube",
+                  "platform_label": "YouTube Shorts",
+                  "ready": false,
+                  "role": "video_destination",
+                  "role_label": "Destination",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "youtube",
+                  "platform_label": "YouTube Shorts",
+                  "ready": false,
+                  "role": "analytics",
+                  "role_label": "Analytics",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "x",
+                  "platform_label": "X",
+                  "ready": false,
+                  "role": "source",
+                  "role_label": "Source",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "x",
+                  "platform_label": "X",
+                  "ready": false,
+                  "role": "video_destination",
+                  "role_label": "Destination",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "x",
+                  "platform_label": "X",
+                  "ready": false,
+                  "role": "analytics",
+                  "role_label": "Analytics",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "instagram",
+                  "platform_label": "Instagram Reels",
+                  "ready": false,
+                  "role": "source",
+                  "role_label": "Source",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "instagram",
+                  "platform_label": "Instagram Reels",
+                  "ready": false,
+                  "role": "video_destination",
+                  "role_label": "Destination",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "instagram",
+                  "platform_label": "Instagram Reels",
+                  "ready": false,
+                  "role": "analytics",
+                  "role_label": "Analytics",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "tiktok",
+                  "platform_label": "TikTok",
+                  "ready": false,
+                  "role": "source",
+                  "role_label": "Source",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "tiktok",
+                  "platform_label": "TikTok",
+                  "ready": false,
+                  "role": "video_destination",
+                  "role_label": "Destination",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "tiktok",
+                  "platform_label": "TikTok",
+                  "ready": false,
+                  "role": "analytics",
+                  "role_label": "Analytics",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                },
+                {
+                  "error": null,
+                  "live_checked": null,
+                  "platform": "local",
+                  "platform_label": "Local files",
+                  "ready": false,
+                  "role": "source",
+                  "role_label": "Source",
+                  "session_valid": "",
+                  "state": "unconfigured"
+                }
+              ],
+              "summary": "3 setup item(s) must be fixed before posting.",
+              "warnings": [
+                {
+                  "action": "Connect Youtube or disable youtube.",
+                  "details": {
+                    "can_post": false,
+                    "enabled": true,
+                    "error": null,
+                    "live_checked": null,
+                    "posting_state": "unconfigured",
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "source_only": false,
+                    "state": "unconfigured"
+                  },
+                  "id": "youtube_connection",
+                  "label": "Youtube connection",
+                  "message": "Youtube is enabled but not configured.",
+                  "ok": false,
+                  "severity": "warning"
+                },
+                {
+                  "action": "Connect X or disable x.",
+                  "details": {
+                    "can_post": false,
+                    "enabled": true,
+                    "error": null,
+                    "live_checked": null,
+                    "posting_state": "unconfigured",
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "source_only": false,
+                    "state": "unconfigured"
+                  },
+                  "id": "x_connection",
+                  "label": "X connection",
+                  "message": "X is enabled but not configured.",
+                  "ok": false,
+                  "severity": "warning"
+                },
+                {
+                  "action": "Connect Instagram or disable instagram.",
+                  "details": {
+                    "can_post": false,
+                    "enabled": true,
+                    "error": null,
+                    "live_checked": null,
+                    "posting_state": "unconfigured",
+                    "role": "video_destination",
+                    "session_valid": "",
+                    "source_only": false,
+                    "state": "unconfigured"
+                  },
+                  "id": "instagram_connection",
+                  "label": "Instagram connection",
+                  "message": "Instagram is enabled but not configured.",
+                  "ok": false,
+                  "severity": "warning"
+                }
+              ]
+            },
+            "state": {
+              "dead_letter_queue": 0,
+              "failed_posts": 0,
+              "last_check": null,
+              "last_wake_check": null,
+              "posted_videos": 0
+            },
+            "system": "<DIVERGENT>",
+            "updates": "<DIVERGENT>",
+            "xpst": {
+              "version": "1.3.0"
+            }
+          },
+          "README.txt": "xPST diagnostics bundle\n\nThis bundle is generated locally and redacts known secret fields, credential values, and user home paths. Review diagnostics.json before sharing if your captions, paths, or logs may contain private information.\n"
+        }
+      },
+      "mask_sections": [
+        "system",
+        "dependencies",
+        "updates",
+        "providers"
+      ],
+      "stdout_json": {
+        "ok": true,
+        "output": "<PROFILE>/bundle.zip",
+        "redacted": true
+      }
+    },
+    {
+      "name": "diagnostics_default_output",
+      "argv": [
+        "diagnostics",
+        "--json"
+      ],
+      "seed": {
+        ".xpst/state.json": "{\"version\": 2, \"posted_videos\": {}}"
+      },
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "mask": [
+        "output"
+      ],
+      "stdout_json": {
+        "ok": true,
+        "output": "<TS>",
+        "redacted": true
       }
     }
   ]

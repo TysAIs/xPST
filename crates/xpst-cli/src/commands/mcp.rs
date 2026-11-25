@@ -1,4 +1,10 @@
-//! `xpst mcp list` — the MCP tool surface.
+//! `xpst mcp list` and `xpst mcp start` — the MCP tool surface.
+//!
+//! `start` is the product's primary agent surface: it serves the 46-tool
+//! registry over stdio, in-process, through the same `xpst_mcp::serve_stdio`
+//! the `xpst-mcp` binary runs. A bare `xpst mcp` starts it too, because the
+//! shipped Click group is `invoke_without_command=True` and `python -m xpst mcp`
+//! is the documented way to start the server.
 //!
 //! Parity target: `src/xpst/cli.py::mcp_list`, which prints
 //! `json.dumps([{"name", "description"}], indent=2)` over `xpst.mcp.server.TOOLS`
@@ -14,10 +20,13 @@
 //! MCP server, so the registry is always available.
 
 use std::io::Write;
+use std::path::Path;
 
 use clap::ArgMatches;
 use serde_json::Value;
+use xpst_mcp::{serve_stdio, StorePaths, ToolContext};
 
+use crate::commands::bootstrap;
 use crate::output::{null, object, python_pretty_json_cfg, string, write_text};
 use crate::{exit, flag, GlobalOptions};
 
@@ -108,6 +117,39 @@ pub fn list(
     }
     let _ = write_text(out, &text);
     exit::SUCCESS
+}
+
+/// Run `mcp start` (and a bare `xpst mcp`): serve the tool surface on stdio.
+///
+/// stdout is the protocol stream, so nothing here writes to `out` — the banner
+/// and every diagnostic go to stderr. The profile is resolved the way
+/// `XPSTConfig.load(config_path)` resolves it in Python: `--config` names the
+/// file, and its directory is the store root.
+pub fn start(
+    global: &GlobalOptions,
+    _leaf: Option<&ArgMatches>,
+    _out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let config_path = match bootstrap::ensure_config(global) {
+        Ok(path) => path,
+        Err(error) => {
+            let _ = writeln!(err, "xpst mcp start: {}", error.message());
+            return exit::CONFIG_ERROR;
+        }
+    };
+    let config_dir = config_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| Path::new(".").to_path_buf());
+
+    match serve_stdio(ToolContext::new(StorePaths::at(config_dir))) {
+        Ok(()) => exit::SUCCESS,
+        Err(error) => {
+            let _ = writeln!(err, "xpst mcp start: {error}");
+            exit::GENERAL
+        }
+    }
 }
 
 #[cfg(test)]

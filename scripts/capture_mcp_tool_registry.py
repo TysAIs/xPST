@@ -12,10 +12,20 @@ Usage (from the repository root, with the runtime deps installed):
 Writes:
     crates/xpst-mcp/tests/fixtures/python_tool_registry.json
     crates/xpst-mcp/tests/fixtures/python_providers.json
+    crates/xpst-config/src/resources/python_config_model.json
+
+The third fixture is the *structured* model behind `xpst_config_show`: the
+Python tool projects `dict(section.__dict__)` for seven account sections plus
+`video`/`monitoring`/`schedule`, and renders nested dataclasses as `repr()`
+strings. Capturing the model (nested dicts, unmasked) plus the class name of
+every nested dataclass lets the Rust tool overlay the operator's `config.yaml`
+onto the same defaults and render the same reprs, instead of shipping a second
+hand-maintained copy of ~100 field defaults.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import sys
@@ -68,12 +78,97 @@ def main() -> int:
 
     providers_path = FIXTURES / "python_providers.json"
     providers_path.write_text(
-        json.dumps(catalog, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+        json.dumps(catalog, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
 
+    # The structured model behind `xpst_config_show` and the `diagnostics`
+    # config snapshot. `plain()` turns a
+    # dataclass into a dict (field order preserved) so the Rust side can merge
+    # the operator's config.yaml per field; `repr_classes` names the dataclasses
+    # the Python tool renders as `ClassName(field=value, ...)` strings.
+    from xpst.config import XPSTConfig
+
+    def plain(value):
+        if dataclasses.is_dataclass(value) and not isinstance(value, type):
+            return {
+                field.name: plain(getattr(value, field.name))
+                for field in dataclasses.fields(value)
+            }
+        if isinstance(value, dict):
+            return {key: plain(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [plain(item) for item in value]
+        return value
+
+    def repr_classes(value, path, out, defaults):
+        if dataclasses.is_dataclass(value) and not isinstance(value, type):
+            out[path] = type(value).__name__
+            # The *dataclass* defaults, which are not the config defaults: a
+            # partial `video.encoding.youtube` block in config.yaml is
+            # constructed as `EncodingConfig(**block)`, so every field the block
+            # omits falls back to the dataclass default (usually None), not to
+            # the shipped youtube preset.
+            defaults[path] = plain(type(value)())
+            for field in dataclasses.fields(value):
+                repr_classes(getattr(value, field.name), f"{path}.{field.name}", out, defaults)
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                repr_classes(item, f"{path}.{key}", out, defaults)
+
+    # HOME and XPST_CONFIG_DIR both point inside a scratch directory, so the
+    # model's path fields expand to a throwaway prefix instead of the
+    # maintainer's home. The prefix is rewritten to `~/.xpst` before the fixture
+    # is written: the model is the *default* profile, and the Rust side
+    # substitutes the real config directory at runtime.
+    with tempfile.TemporaryDirectory() as tmp:
+        config_dir = Path(tmp) / ".xpst"
+        previous_config = os.environ.get("XPST_CONFIG_DIR")
+        previous_home = os.environ.get("HOME")
+        os.environ["XPST_CONFIG_DIR"] = str(config_dir)
+        os.environ["HOME"] = tmp
+        try:
+            config = XPSTConfig.load()
+        finally:
+            for name, previous in (
+                ("XPST_CONFIG_DIR", previous_config),
+                ("HOME", previous_home),
+            ):
+                if previous is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = previous
+
+        accounts = {}
+        classes = {}
+        defaults = {}
+        for platform in ("tiktok", "youtube", "x", "instagram", "threads", "messenger", "local"):
+            section = getattr(config, platform, None)
+            if section is None:
+                continue
+            accounts[platform] = plain(section)
+            repr_classes(section, f"accounts.{platform}", classes, defaults)
+        model = {"accounts": accounts}
+        for name in ("video", "monitoring", "schedule", "reliability", "notifications", "rate_limits"):
+            section = getattr(config, name)
+            model[name] = plain(section)
+            repr_classes(section, name, classes, defaults)
+
+    model_path = ROOT / "crates" / "xpst-config" / "src" / "resources" / "python_config_model.json"
+    rendered = json.dumps(
+        {"model": model, "repr_classes": classes, "repr_defaults": defaults},
+        indent=2,
+        ensure_ascii=False,
+    )
+    # No absolute home path may reach the fixture (D-2). The scratch prefix
+    # becomes the default profile's own path; the Rust side substitutes the
+    # operator's config directory when it projects the model.
+    rendered = rendered.replace(str(config_dir), "~/.xpst")
+    model_path.write_text(rendered + "\n", encoding="utf-8")
+
     print(f"wrote {registry_path.relative_to(ROOT)} ({len(tools)} tools)")
     print(f"wrote {providers_path.relative_to(ROOT)}")
+    print(f"wrote {model_path.relative_to(ROOT)}")
     return 0
 
 
