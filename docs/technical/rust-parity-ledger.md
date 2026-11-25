@@ -38,7 +38,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `delete` | stub | xpst-core | yes |
 | `devices` | implemented | xpst-auth | none |
 | `diagnostics` | implemented | xpst-cli | possible |
-| `disconnect` | implemented | xpst-auth | yes |
+| `disconnect` | implemented | xpst-auth | none |
 | `doctor` | implemented | xpst-cli | yes |
 | `failures clear` | implemented | xpst-state | none |
 | `failures list` | implemented | xpst-state | none |
@@ -96,7 +96,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `stream relay-config` | implemented | xpst-provider | none |
 | `stream set-key` | implemented | xpst-provider | none |
 | `suggest-caption` | stub | xpst-core | possible |
-| `transcript` | implemented | xpst-store | possible |
+| `transcript` | implemented | xpst-store | none |
 | `ui` | stub | xpst-api | none |
 | `update` | stub | xpst-cli | yes |
 | `verify-media` | implemented | xpst-media | none |
