@@ -29,8 +29,8 @@ pub mod ledger;
 pub mod output;
 pub mod parity;
 pub mod paths;
-pub mod rich;
 pub mod pythonnum;
+pub mod rich;
 pub mod zipwrite;
 
 use std::ffi::OsString;

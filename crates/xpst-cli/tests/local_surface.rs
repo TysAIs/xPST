@@ -27,7 +27,6 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-<<<<<<< HEAD
 const EXPECTED_SCENARIOS: usize = 249;
 
 /// The environment both engines are run under, whatever the caller inherited.
@@ -47,9 +46,6 @@ const PINNED_ENV: &[(&str, &str)] = &[
     // A payload that serialises a set would otherwise vary between runs.
     ("PYTHONHASHSEED", "0"),
 ];
-=======
-const EXPECTED_SCENARIOS: usize = 249;
->>>>>>> 2296155a80af7458abd3b0d3f8d119e1aa2a3fd6
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -293,7 +289,6 @@ fn normalize_clock(text: &str) -> String {
     out
 }
 
-<<<<<<< HEAD
 /// `[MM/DD/YY HH:MM:SS]` — `RichHandler`'s default `log_time_format`.
 fn is_log_stamp(text: &str) -> bool {
     let chars: Vec<char> = text.chars().collect();
@@ -375,7 +370,8 @@ fn assert_backups_match(row: &Value, profile: &Profile, scenario: &str) {
             );
         }
     }
-=======
+}
+
 /// Replace the values `mask` names, wherever they appear.
 ///
 /// A bare name (`checked_at`) is replaced at ANY depth — the doctor payload
@@ -471,7 +467,6 @@ fn network_probe_env(env: &mut Vec<(String, String)>) -> std::net::TcpListener {
     ));
     env.push(("XPST_NETWORK_PROBE_PORT".to_string(), port.to_string()));
     listener
->>>>>>> 2296155a80af7458abd3b0d3f8d119e1aa2a3fd6
 }
 
 fn argv_for(row: &Value, profile: &Profile) -> Vec<String> {

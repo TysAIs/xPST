@@ -4,7 +4,7 @@
 
 One row per leaf command of the shipped CLI. `status` is `implemented` when the Rust engine runs the command and `stub` when it answers `not implemented in the Rust engine yet`. The two columns either side are the questions a reader actually has: which crate owns the behaviour, and whether the Python implementation they are comparing against makes an outbound network call.
 
-**20 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
+**66 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
 
 ## Columns
 
@@ -15,14 +15,14 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 
 | Command | Rust status | Owner crate | Python network |
 |---|---|---|---|
-| `analytics export` | stub | xpst-store | none |
-| `app` | stub | xpst-app | none |
+| `analytics export` | implemented | xpst-store | none |
+| `app` | implemented | xpst-app | none |
 | `auth` | stub | xpst-auth | yes |
 | `backfill` | stub | xpst-core | yes |
-| `best-time` | stub | xpst-store | none |
-| `bio` | stub | xpst-cli | none |
+| `best-time` | implemented | xpst-store | none |
+| `bio` | implemented | xpst-cli | none |
 | `byo clear` | implemented | xpst-auth | none |
-| `byo set` | stub | xpst-auth | possible |
+| `byo set` | implemented | xpst-auth | possible |
 | `byo status` | implemented | xpst-auth | none |
 | `capabilities` | implemented | xpst-provider | none |
 | `chat platforms` | implemented | xpst-provider | none |
@@ -33,76 +33,76 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `config set` | implemented | xpst-config | none |
 | `config show` | implemented | xpst-config | none |
 | `config validate` | implemented | xpst-config | none |
-| `connect` | stub | xpst-auth | yes |
+| `connect` | implemented | xpst-auth | yes |
 | `dashboard` | stub | xpst-api | none |
 | `delete` | stub | xpst-core | yes |
-| `devices` | stub | xpst-auth | none |
-| `diagnostics` | stub | xpst-cli | possible |
-| `disconnect` | stub | xpst-auth | yes |
+| `devices` | implemented | xpst-auth | none |
+| `diagnostics` | implemented | xpst-cli | possible |
+| `disconnect` | implemented | xpst-auth | none |
 | `doctor` | implemented | xpst-cli | yes |
-| `failures clear` | stub | xpst-state | none |
+| `failures clear` | implemented | xpst-state | none |
 | `failures list` | implemented | xpst-state | none |
 | `failures retry` | stub | xpst-core | yes |
-| `followers` | stub | xpst-provider | yes |
-| `generate caption` | stub | xpst-core | possible |
-| `generate ideas` | stub | xpst-core | possible |
+| `followers` | implemented | xpst-provider | possible |
+| `generate caption` | implemented | xpst-core | possible |
+| `generate ideas` | implemented | xpst-core | possible |
 | `health` | stub | xpst-provider | yes |
 | `kb add` | stub | xpst-store | possible |
-| `kb areas` | stub | xpst-store | none |
-| `kb course` | stub | xpst-store | none |
-| `kb doctor` | stub | xpst-store | none |
-| `kb migrate-store` | stub | xpst-store | none |
+| `kb areas` | implemented | xpst-store | none |
+| `kb course` | implemented | xpst-store | none |
+| `kb doctor` | implemented | xpst-store | none |
+| `kb migrate-store` | implemented | xpst-store | none |
 | `kb organize` | stub | xpst-store | possible |
-| `kb query` | stub | xpst-store | none |
+| `kb query` | implemented | xpst-store | none |
 | `kb reembed` | stub | xpst-store | possible |
-| `logs` | stub | xpst-cli | none |
-| `mcp list` | stub | xpst-mcp | none |
-| `mcp start` | stub | xpst-mcp | none |
-| `media fetch` | stub | xpst-media | yes |
+| `logs` | implemented | xpst-cli | none |
+| `mcp list` | implemented | xpst-mcp | none |
+| `mcp start` | implemented | xpst-mcp | none |
+| `media fetch` | implemented | xpst-media | possible |
 | `media status` | implemented | xpst-media | none |
 | `messenger check-comments` | stub | xpst-provider | yes |
 | `messenger status` | implemented | xpst-provider | none |
 | `onboard` | stub | xpst-auth | yes |
-| `pair` | stub | xpst-auth | none |
-| `plugins docs` | stub | xpst-cli | none |
-| `plugins list` | stub | xpst-cli | none |
+| `pair` | implemented | xpst-auth | none |
+| `plugins docs` | implemented | xpst-cli | none |
+| `plugins list` | implemented | xpst-cli | none |
 | `post` | stub | xpst-core | yes |
-| `preflight` | stub | xpst-core | none |
+| `preflight` | implemented | xpst-core | none |
 | `providers` | implemented | xpst-provider | none |
-| `quota` | stub | xpst-state | none |
-| `readiness` | stub | xpst-cli | none |
+| `quota` | implemented | xpst-state | none |
+| `readiness` | implemented | xpst-cli | none |
 | `refresh-tokens` | stub | xpst-auth | yes |
 | `run` | stub | xpst-core | yes |
-| `schedule add` | stub | xpst-state | none |
-| `schedule install` | stub | xpst-state | none |
+| `schedule add` | implemented | xpst-state | none |
+| `schedule install` | implemented | xpst-state | none |
 | `schedule list` | implemented | xpst-state | none |
 | `schedule pause` | implemented | xpst-state | none |
-| `schedule remove` | stub | xpst-state | none |
+| `schedule remove` | implemented | xpst-state | none |
 | `schedule resume` | implemented | xpst-state | none |
 | `schedule run` | stub | xpst-core | yes |
-| `search` | stub | xpst-store | none |
-| `security-audit` | stub | xpst-cli | none |
+| `search` | implemented | xpst-store | none |
+| `security-audit` | implemented | xpst-cli | none |
 | `serve` | stub | xpst-core | yes |
-| `setup` | stub | xpst-auth | yes |
-| `state backup` | stub | xpst-state | none |
-| `state export` | stub | xpst-state | none |
-| `state import` | stub | xpst-state | none |
+| `setup` | implemented | xpst-auth | possible |
+| `state backup` | implemented | xpst-state | none |
+| `state export` | implemented | xpst-state | none |
+| `state import` | implemented | xpst-state | none |
 | `status` | implemented | xpst-state | none |
-| `stream app-credentials` | stub | xpst-provider | none |
-| `stream clear-key` | stub | xpst-provider | none |
-| `stream destinations` | stub | xpst-provider | none |
+| `stream app-credentials` | implemented | xpst-provider | none |
+| `stream clear-key` | implemented | xpst-provider | none |
+| `stream destinations` | implemented | xpst-provider | none |
 | `stream fetch-key` | stub | xpst-provider | yes |
 | `stream live` | stub | xpst-provider | yes |
-| `stream relay-config` | stub | xpst-provider | none |
-| `stream set-key` | stub | xpst-provider | none |
+| `stream relay-config` | implemented | xpst-provider | none |
+| `stream set-key` | implemented | xpst-provider | none |
 | `suggest-caption` | stub | xpst-core | possible |
-| `transcript` | stub | xpst-store | possible |
+| `transcript` | implemented | xpst-store | none |
 | `ui` | stub | xpst-api | none |
-| `update` | stub | xpst-cli | yes |
-| `verify-media` | stub | xpst-media | none |
+| `update` | implemented | xpst-cli | yes |
+| `verify-media` | implemented | xpst-media | none |
 | `version` | implemented | xpst-cli | none |
 | `watch` | stub | xpst-core | yes |
-| `wizard` | stub | xpst-auth | possible |
+| `wizard` | implemented | xpst-auth | possible |
 
 ## Implemented commands
 
@@ -110,6 +110,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 |---|---|---|
 | `config show` | xpst-config | Masked YAML/JSON document; byte-compared with the Python output. |
 | `byo clear` | xpst-auth | Deletes the stored app pair and clears the config mirror; payload byte-compared with the Python CLI (the config file is edited in place, not rewritten from the model). |
+| `byo set` | xpst-auth | Validates the app id/secret with Python's two patterns, stores the pair in the Fernet credential store, mirrors the id into `accounts.<platform>` and reports the masked `byo status` view; payload byte-compared with the Python CLI (the config file is edited in place, not rewritten from the model). |
 | `byo status` | xpst-auth | Reads the Fernet credential store the Python engine writes (scrypt + AES-128-CBC + HMAC-SHA256) and the config/env fallbacks; payload byte-compared with the Python CLI. |
 | `capabilities` | xpst-provider | Serves the capability document captured from `xpst.content.capability_document()`; the payload is diffed against a live `python -m xpst capabilities --json` by the local-surface check. |
 | `chat platforms` | xpst-provider | Readiness rows from the captured chat read-path registry plus the config channels and the YouTube token check; payload byte-compared with the Python CLI (checked_at masked). |
@@ -117,25 +118,62 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `config fix` | xpst-config | Detects the same five defects and reports `fixes_applied`/`details`; payload byte-compared with the Python CLI. |
 | `config import` | xpst-config | Merge/replace with the same deep-merge, diff and validation rules; payload byte-compared with the Python CLI. |
 | `config set` | xpst-config | Dotted-key set with Python's bool/int/float/str parsing; payload and file byte-compared with the Python CLI. |
-| `config validate` | xpst-config | `{valid, checks}` payload; exit 2 on a blocker. |
+| `config validate` | xpst-config | `{valid, checks}` payload with the schema checks; exit 2 on a blocker. Python also checks the download/log directories, credential files and rate limits, so the check list differs by design (see the deviations). |
 | `media status` | xpst-media | Resolution order (env → PATH → system dirs → fetched) and the `env`/`system`/`fetched`/`missing` vocabulary of `media_binary_status()`; payload byte-compared with the Python CLI. |
 | `messenger status` | xpst-provider | Config + credential-presence payload (masked token preview, reply-rule count, comment platforms) read from the encrypted store with the config fallback, including the `XPST_MESSENGER_REPLY_RULES`/`XPST_MESSENGER_COMMENT_PLATFORMS` overrides and the raw `page_id`/`webhook_path`/`comment_platforms` values `config set` writes as numbers; payload byte-compared with the Python CLI. |
 | `providers` | xpst-provider | Captured registry manifests plus the ported canonical role catalog and per-destination `provider_mode`/`visible`, with Python's legacy `.crosspstr` path fix, config-directory rebase and `str()` coercion of numeric `provider_mode`/`auth_mode`; payload byte-compared with the Python CLI on pristine, configured, community-mode, legacy-path, `--config` and `config set`-shaped profiles. |
-<<<<<<< HEAD
-| `doctor` | xpst-cli | Local-only diagnostics; live probes are P1 (the report says so). |
-| `version` | xpst-cli | Version and dependency report; `--version` matches Click's shape. |
-| `status` | xpst-state | Statistics payload field-for-field with `get_statistics()` on captured fixtures. |
-| `schedule list` | xpst-state | Entries, pause marker and paused snapshots, as `schedule_list --json` reports them. |
-=======
-| `doctor` | xpst-cli | The live health report: canonical per-provider status with badge truth, per-role posting verdicts, quota rows, ban-risk advisories, rate-limit cooldowns and the environment checklist, assembled from `xpst-auth`/`xpst-limits` rather than re-derived. Payload byte-compared with the Python CLI on a seeded no-credential profile (`doctor_no_credentials`); a provider that holds a credential is reported `unverified` until the live transports land (see the deviations). |
+| `doctor` | xpst-cli | Local-only diagnostics; live probes are P1 (the report says so), so the payload differs from Python's live report by design (see the deviations). |
 | `version` | xpst-cli | Rust engine identity (`version`, `engine`, `phase`, `commit`); `--version` matches Click's shape. Python's dependency list has no Rust equivalent, so the payload differs by design (see the deviations). |
 | `status` | xpst-state | Statistics payload byte-compared with `get_statistics()` on captured fixtures — Python's `json.dumps` separators and insertion order, including the state file's own platform order. |
 | `schedule add` | xpst-state | The add-time route resolution (`build_route_plan` with readiness off) and the persisted entry: `--text`/FILE/`--caption-for`/caption-cap/date validation in Python's order, the resolved destinations stored verbatim, the UTC `scheduled_time` plus the entry's own zone, and the `json.dump(indent=2, ensure_ascii=False)` store write under the same `.schedule.lock`; payload and `schedule.json` byte-compared with the Python CLI. |
 | `schedule list` | xpst-state | Entries, pause marker and paused snapshots, byte-compared with `schedule_list --json` (store key order preserved, `scheduled_time_local` appended last). |
->>>>>>> 2296155a80af7458abd3b0d3f8d119e1aa2a3fd6
 | `schedule pause` | xpst-state | Writes the same `schedule.paused.json` marker (0600, `json.dumps(indent=2)`) under the same `.schedule.lock`; payload byte-compared with the Python CLI. |
 | `schedule resume` | xpst-state | Removes only the pause marker (snapshots survive) and reports `was_paused`; payload byte-compared with the Python CLI. |
-| `failures list` | xpst-state | Dead-letter rows with status/resolved/age_hours, as `failures_list --json` reports them. |
+| `failures list` | xpst-state | Dead-letter rows with status/resolved/age_hours, byte-compared with `failures_list --json`. |
+| `generate caption` | xpst-core | The deterministic caption generator (`generate_caption_deterministic`): sentence split, keyword hashtags, three variants and Python's per-platform truncation; payload byte-compared with the Python CLI. The LLM path is not ported, so a configured `XPST_KB_LLM_ENABLED` endpoint is a named divergence. |
+| `generate ideas` | xpst-core | The deterministic idea templates (`generate_ideas_deterministic`) with the shipped rotation, and the payload echoing the raw `--topic`; payload byte-compared with the Python CLI. The LLM path is not ported (named divergence). |
+| `failures clear` | xpst-state | Clears the dead-letter queue through the same tolerant loader `status` uses (v1 migration included) and writes Python's `json.dump` separators, keeping `errors: {}` for the per-video form; payload byte-compared with the Python CLI (written keys keep the read order). |
+| `state export` | xpst-state | Validates `state.json` as JSON and copies it byte-for-byte (mode preserved); payload and exported file byte-compared with the Python CLI. |
+| `state import` | xpst-state | Validates `posted_videos`, backs the current file up as `state.json.pre-import-<stamp>` and copies the source in; payload and resulting `state.json` byte-compared with the Python CLI. An explicit `n` at the prompt exits 0 with empty stderr (Click's `confirm()` returns False); only EOF aborts with `Aborted!` and exit 1. |
+| `state backup` | xpst-state | Snapshots `state.json` into `backups/state-<stamp>.json` with `--keep` rotation and the same `retained` count; payload byte-compared with the Python CLI. `--keep` is Click's int conversion, so a non-integer is a usage error (exit 2, empty stdout) rather than a silent default. |
+| `quota` | xpst-state | Per-platform usage ledger with config-derived limits, midnight/hourly resets, the YouTube `videos.insert` bucket block and `auth_mode`; payload byte-compared with the Python CLI on default, seeded and config-limited profiles. |
+| `logs` | xpst-cli | Last 50 lines of `monitoring.log_file` (expanded the way `_expand_paths` expands it) and the `No log file found` payload; byte-compared with the Python CLI. |
+| `devices` | xpst-auth | Paired-device rows newest-first with the token hash removed, and `--revoke` writing the same `devices.json` (sorted keys, indent 2, 0600); payload byte-compared with the Python CLI. |
+| `diagnostics` | xpst-cli | The redacted support bundle: `diagnostics.json` + `README.txt` in a ZIP, with the shipped path/secret redaction, the config snapshot, the readiness report, the credential key list, the state summary and the redacted log tail byte-compared against the Python bundle. `system`, `dependencies`, `updates` and `providers` are named divergences (a compiled engine has no Python runtime, no pip packages and no `posting_truth` projection). |
+| `pair` | xpst-auth | Issues a one-time pairing code (or the `--code` one) with the same alphabet, hashing, TTL floor and `devices.json` shape; payload byte-compared with the Python CLI on a fixed code. `--ttl 0` is falsy in Python and means the 600 s default (not the 30 s floor), and a non-integer `--ttl` is a usage error (exit 2). |
+| `stream destinations` | xpst-provider | The ingest-path registry plus per-platform key presence and fetch readiness (YouTube token, Twitch/Kick app credentials, Facebook page token) read from the encrypted store; payload byte-compared with the Python CLI. |
+| `stream app-credentials` | xpst-provider | Stored app-credential state (masked) and the registration steps for Twitch/Kick, with `--clear`; payload byte-compared with the Python CLI. |
+| `stream set-key` | xpst-provider | Validates the destination and writes it to the Fernet credential store under `stream_destination_<platform>`; payload byte-compared and the stored entry read back by the Python engine. |
+| `stream clear-key` | xpst-provider | Deletes `stream_destination_<platform>` from the credential store and reports `removed`; payload byte-compared with the Python CLI. |
+| `stream relay-config` | xpst-provider | Renders the MediaMTX relay YAML from the stored destinations (keys included on stdout, key-free summary with `--output`); payload and written file byte-compared with the Python CLI. `--rtmp-port` is Click's int conversion, so a non-integer is a usage error (exit 2) instead of a fallback to 1935. |
+| `bio` | xpst-cli | Public and editor URLs with the dashboard API token read from the credential store and masked unless `--reveal`; payload byte-compared with the Python CLI on a seeded token. `--port` is Click's int conversion, so `0900` renders as `900` and a non-integer is a usage error (exit 2). |
+| `security-audit` | xpst-cli | The six live checks (credential file modes, dashboard bind, MCP readonly, provider mode, ffmpeg, encrypted storage) with `indent=2` ASCII-escaped JSON; payload byte-compared with the Python CLI. |
+| `mcp list` | xpst-mcp | The captured Python tool registry in Python's order, rendered with `json.dumps(indent=2)`; payload byte-compared with the Python CLI. |
+| `mcp start` | xpst-mcp | Serves the 46-tool surface over stdio in-process (`xpst_mcp::serve_stdio`, the same loop the `xpst-mcp` binary runs); a bare `xpst mcp` starts it too, as the shipped Click group does. 35 of the 46 tools are ported (`xpst_status`, `xpst_config_show`, `xpst_providers`, `xpst_capabilities`, `xpst_schedule_list`, `xpst_schedule_add`, `xpst_schedule_cancel`, `xpst_schedule_pause`, `xpst_schedule_resume`, `xpst_rate_limit_status`, `xpst_readiness`, `xpst_security_audit`, `xpst_best_time`, `xpst_followers`, `xpst_activity`, `kb_query`, `xpst_search`, `kb_areas`, `xpst_transcript`, `xpst_bio_get`, `xpst_byo_app`, `xpst_chat`, `xpst_stream`, `xpst_preflight`, `xpst_cross_post_analytics`, `xpst_analytics`, `xpst_suggest_caption`, `xpst_generate_ideas`, `xpst_setup_start`, `xpst_setup_status`, `xpst_setup_resume`, `xpst_setup_reset`, `xpst_auth_start`, `messenger_set_rules`, `xpst_disconnect`); the rest answer a typed `not_implemented`. Pinned by a protocol capture from the Python server (`tests/mcp_stdio.rs`) instead of a local-surface row, because the process never exits: initialize, tools/list, 140 byte-compared `tools/call` bodies across six scenarios (the schedule writers and the two config writers need `XPST_MCP_ALLOW_MUTATIONS=1`, so they live in their own; `xpst_analytics` needs its own seeded ledger and publish records; the `writers` scenario also byte-compares the `config.yaml` the calls leave behind) and the consent/unknown-tool refusals. The server also ports **both** halves of `_argument_shape_block` (`guard::argument_shape_block`): a media path outside the config dir, the user's media folders, the system temp dir or `XPST_MEDIA_ROOTS` is refused before dispatch, and so is a URL-shaped argument (`url`, `webhook_url`, `callback_url`, `source_url`, `media_url`, `source`) that resolves to loopback, a private, link-local, reserved, multicast or metadata address or embeds credentials — with Python's sentence. The URL half is `xpst-surface::net_guard`, a port of `net_guard.validate_public_url` held to a 235-row capture (`crates/xpst-surface/tests/fixtures/python_net_guard.json`) that also pins the blocklist tables and the exact sequence of hosts the guard resolves. |
+| `app` | xpst-app | Locates the installed desktop shell in the same preference order and prints the same not-found guidance (exit 1); byte-compared with the Python CLI. |
+| `best-time` | xpst-store | Hour-of-week engagement buckets from `analytics.db` (`BestTimeAnalyzer.analyze`), ranked by Python's rounded average with the first snapshot per post and `collection_status: failed` rows excluded; payload byte-compared with the Python CLI on empty, seeded and platform-filtered ledgers. |
+| `kb areas` | xpst-store | Discovered knowledge areas in course order (`order_index`, label, id) with their nugget counts, read from the workspace's `areas.json`; payload byte-compared with the Python CLI. The reader reproduces `JsonKnowledgeStore._load_file`: a decode failure, an unknown key or a missing required key renames the file to `<name>.corrupt` and starts empty, while a non-object document escapes as Python's `AttributeError`. An invalid `--workspace` reproduces Python's uncaught `ValueError` contract — empty stdout, exit 1 — with the exception line on stderr instead of the traceback frames. |
+| `schedule remove` | xpst-state | Cancels one entry through the same local-store contract (`operation`/`scope`/`found`/`cancelled`/`entry`, `POST_NOT_FOUND` on an unknown id) with `--dry-run`; payload and resulting `schedule.json` byte-compared with the Python CLI. Control characters in a caption are escaped (`\u0001`) in the written file, so both engines can read it back. |
+| `kb course` | xpst-store | The assembled course outline (`assemble_course`): areas in course order, each with its nuggets in beginner->advanced order and a trailing `Unassigned` module for unclaimed nuggets; payload byte-compared with the Python CLI. The store reader is strict like `Nugget.from_dict`/`Area.from_dict`, so an unknown or missing key quarantines the file exactly as Python does. |
+| `kb doctor` | xpst-store | The read-only health report (`doctor.diagnose`): dependency probe, store integrity, embedding widths, orphaned areas/nuggets, queue counts and the manifest source count, with the same severities, messages and exit code; payload byte-compared with the Python CLI. The optional-dependency probe asks an interpreter out-of-process (`XPST_PYTHON`, else `python3`), because a Rust binary has no `sys.path`. |
+| `kb migrate-store` | xpst-store | The JSON-store probe and the honest LanceDB refusal (`{"ok": false, "error": "lancedb is not installed"}`, exit 1) plus the `no JSON store found` answer; payload byte-compared with the Python CLI. The vector store is not ported, so a machine with the knowledge extra would migrate in Python (named divergence). |
+| `kb query` | xpst-store | Substring search over the JSON store (`query_nuggets`): `workspace`/`query`/`mode`/`count`/`nuggets` with citation, timestamps, a null score and the area id; payload byte-compared with the Python CLI. The embedding stack is not ported, so the semantic path is not taken — the same answer Python gives without the knowledge extra or on an unembedded store. |
+| `search` | xpst-store | `kb query` on the `default` workspace rendered with `json.dumps(indent=2)` (ASCII-escaped), including Python's text-mode quirk of reading a `hits` key the payload never carries; payload byte-compared with the Python CLI. |
+| `readiness` | xpst-cli | The first-run report (`build_readiness_report`): the canonical provider status shared with `providers`, the ban-risk registry, the local folder set and the yt-dlp/FFmpeg helper probes, with `--fix` creating the same folders; payload byte-compared with the Python CLI (the `python` row reports the Rust engine, and `--fix` does not rewrite `config.yaml`). |
+| `verify-media` | xpst-media | The per-destination ingest verdict (`PostPreflightService.plan` with readiness off): `-p all` resolved through `enabled_destinations`, the `media_spec` check list and the raw ffprobe document in ffprobe's own key order, the `--plan` post plan and transform plans, and the exit-1-on-error contract; payload byte-compared with the Python CLI. |
+| `preflight` | xpst-core | The config-aware route plan (`build_route_plan`): target resolution from the config's enabled flags, the per-destination state/reason/envelope/constraints/blockers/warnings/transform/visibility payload, the ban-risk advisory and the read-only quota gate; payload byte-compared with the Python CLI. `verify_media`'s loudness check is ported but the route plan pins `check_loudness=False`, so `preflight` never spawns the extra ffmpeg pass. |
+| `analytics export` | xpst-store | The local export: post-id discovery from `state.json` (canonical `id`, legacy `post_id`, unknown platforms appended in state order), the `--platforms` filter, the totals and per-platform totals, the `collection_status` block, the `json.dump(indent=2, ensure_ascii=False)` document and the CSV BOM + `\r\n` header; payload and written file byte-compared with the Python CLI (`exported_at` masked). The per-platform metric collectors are not ported, so the export carries the answer a credential-less profile gets (empty metrics, `collection_status.status: ok`). |
+| `plugins list` | xpst-cli | The installed-plugin inventory: `~/.xpst/plugins` resolved from HOME (not `XPST_CONFIG_DIR`, as `DEFAULT_PLUGIN_DIR` does), the directory created on a fresh profile, and the `{plugins, count}` payload with `list_plugins()`'s five keys in order; payload byte-compared with the Python CLI. A plugin is Python code, so the inventory is asked of an interpreter (`XPST_PYTHON`, else `python3`, else `python`) running the shipped `PluginManager` — the same out-of-process shape `kb doctor` uses. |
+| `plugins docs` | xpst-cli | The generated markdown: the header, the `Auto-generated on` stamp, the plugin count, and per plugin its name, version, description, capabilities and `config_options` rows, written to `--output` or carried in the payload; payload and written file byte-compared with the Python CLI (the stamp masked). Same interpreter delegation as `plugins list`. |
+| `schedule install` | xpst-state | The Linux scheduler entry: `crontab -l` read, the prior xPST marker/command pair filtered out (including Python's `skip_next` quirk), the `*/N * * * * <bin> serve >> <log> 2>&1` line appended and written back with `crontab -`, plus `--remove`'s `crontab -`/`crontab -r` split and the `No crontab entries found` answer; payload and the resulting crontab byte-compared with the Python CLI against a stand-in `crontab` on PATH. The macOS LaunchAgent and Windows scheduled-task branches are not ported (named divergence). |
+| `disconnect` | xpst-auth | `disconnect_platform()` (the encrypted store's keys, the library-native plaintext files, `sessions/*<platform>*`, then `enabled: false` and the config save) behind the CLI's own destructive-action guard: a non-interactive or `--json` call without `--yes` answers `CONFIRMATION_REQUIRED` and exits 1 before anything is touched. Payload and the resulting `config.yaml` byte-compared with the Python CLI; the human view is plain text (standing divergence). |
+| `transcript` | xpst-store | The three lookups in `Workspace.get_transcript()` order (`<id>.json`, `content:<id>.json`, then the first `transcripts/` file whose name contains the id) with `create=False`; a hit is `json.dumps(indent=2)` and a miss is the compact `{"error", "video_id"}` document with exit 1. Payload and exit code byte-compared with the Python CLI. |
+| `wizard` | xpst-auth | The deprecated alias of `setup`: the same resumable transaction (`start`/`status`/`resume`/`reset` with `alias: wizard`), the agent-mode envelope (`mode`, `interactive`, `all_pass`, `completed`, `next_action`), the `INTERACTIVE_REQUIRED` document with exit 3, the legacy checklist built from a captured `PLATFORM_GUIDES` table, and `--export-md`'s markdown (byte-compared with the shipped `export_markdown()`). Payload byte-compared with the Python CLI (transaction id and timestamps masked). The interactive executor (`run_wizard`, browser + live checks) is not ported — named divergence. |
+| `setup` | xpst-auth | The canonical setup transaction: `start`/`status`/`resume`/`reset`/`--finish-later` over `xpst_surface::setup_transaction` (the service the four `xpst_setup_*` MCP tools serve), the `alias: setup` envelope, and the `INTERACTIVE_REQUIRED` document with exit 2. Payload byte-compared with the Python CLI (transaction id and timestamps masked). The interactive executor (`run_setup`, which pip-installs yt-dlp and runs the live connectivity probes) is not ported — named divergence. |
+| `connect` | xpst-auth | The two local halves: `--guide` renders the captured `PLATFORM_GUIDES` table (the same `resources/wizard_guides.json` the `wizard` port uses, including YouTube's richer payload) and `--dry-run` builds the plan document from it; a non-TTY invocation without `--test` answers the shipped `INTERACTIVE_REQUIRED` refusal with exit 3. Payloads byte-compared with the Python CLI. `--test` (`test_connections`) and the interactive `run_connect` flow are not ported — named divergence. |
+| `update` | xpst-cli | `--components` without `--check`: `check_update_components(include_network=False)` — the app row, the helper rows (yt-dlp's version from the binary xPST would invoke, FFmpeg's from `-version`), and the bundled provider-metadata row, in the shipped key order. Payload byte-compared with the Python CLI (the engine's own version string and the `packages` section masked: those describe the installation, not the engine). `--check`, `--self` and the default path reach PyPI and stay stubs — named divergence. |
+| `followers` | xpst-provider | The stored-snapshot report: `latest_followers()` and `follower_history(limit=7)` from `analytics.db`, the sorted platform list, `count`/`growth`/`history` rows and the `total_followers` sum, rendered as `json.dumps(indent=2)`. Payload byte-compared with the Python CLI. The live `get_followers()` fetch is not ported (Python swallows every failure and falls back to the same stored numbers) — named divergence. |
+| `media fetch` | xpst-media | The resolve-and-report half of `ensure_media_binaries`: a binary that already resolves is reported with its `source` and never downloaded, `--binary` selects and orders the rows, and a missing binary answers Python's own `missing (fetch disabled)` error with exit 1. Payload byte-compared with the Python CLI (the missing branch pinned with `XPST_MEDIA_AUTO_FETCH=0`). The download path (`fetch_media_binary` → `urlopen`) is not ported — named divergence. |
 
 ## Known deviations from the Python engine
 
@@ -145,11 +183,9 @@ Named on purpose: a difference that is not written down is a bug nobody found.
 * `status` answers instead of crashing when a state document has a `health` block with no `platforms` key. Python raises `KeyError: 'platforms'` and exits 1 with no JSON; the Rust reader reports the default platform table. Recorded as a divergence in `crates/xpst-cli/tests/fixtures/local_surface.json`.
 * `schedule list` is read-only: Python's manager creates `<profile>/.schedule.lock`, creates the profile directory and quarantines a corrupt store file. The listing is identical either way.
 * Human-readable output is not byte-identical to the Rich tables: the Rust engine prints plain text with the same facts. The `--json` payload is the contract and is what the parity fixture compares.
-<<<<<<< HEAD
 * `config show` and `config validate` answer a config error with the engine's `{ok:false,error:{...}}` payload under `--json`; Python prints a Rich panel that is not machine-readable even in JSON mode. Those two commands have their own read path (`config_show`/`config_validate` in `cli.py`); every other config-reading command goes through the loader below.
 * The config-load error path reproduces `XPSTConfig.load` for a corrupt `config.yaml`: the same `Configuration error:` text on **stdout** (Rich-wrapped at the console width, even under `--json`), the same `backups/config.yaml.corrupt_<epoch>` copy, the same `RichHandler` block on **stderr**, and exit 2 — for an empty file, a non-mapping document, invalid UTF-8 and unparseable YAML. The path is normalised the way `pathlib.Path` normalises it, so `./cfg/config.yaml` and `cfg/config.yaml/` both read and report `cfg/config.yaml`. Pinned by the `config_load_*` rows in `crates/xpst-cli/tests/fixtures/local_surface.json` (stdout, stderr, exit code and the backup's bytes and mode). Six residual differences, all named: (1) the parser's own text inside `could not be parsed: <path> (<message>)` is serde-saphyr's, not PyYAML's `MarkedYAMLError` block (the path, the backup and the fix are identical); (2) the same class covers an OS error — `--config` pointing at a directory reads `([Errno 21] Is a directory: '<path>')` in Python and `(Is a directory (os error 21))` here; (3) the console width is `COLUMNS` or 80, where Python also asks the terminal when one is attached (the workspace forbids `unsafe_code`, so the ioctl is not available) and the parity harness pins `COLUMNS=80`; (4) at `COLUMNS` ≤ 30 Rich truncates the time column and shrinks the message column, while `rich::log_error` keeps the full 29-cell prefix and overflows the width (stdout still matches at every width); (5) the log timestamp is the C-locale rendering of `%x %X` (`[%m/%d/%y %H:%M:%S]`), not a locale-dependent one; (6) `ensure_config_dir_usable` is not ported — a config in a directory the user cannot write to reports `XPST config directory … is not writable by uid N. Fix: chmod u+rwx …` in Python and the empty-config message with `backed up to: None` here. Porting (6) would change valid-config behaviour (Python exits 2, Rust exits 0), which this slice must not do; it is a separate card.
 * `doctor` reports a corrupt config as a failed check (exit 2, no backup) instead of printing the loader's message and dying. It is the diagnostic surface whose job is to say what is wrong; the exit code already matches, and the check names the file and the parser's complaint.
-=======
 * A JSON error path prints the engine's `{ok:false,error:{...}}` payload under `--json`; Python prints a Rich panel that is not machine-readable even in JSON mode.
 * Python's Rich logger writes INFO lines to stderr (credential-store and dashboard-token notices) for every command that touches the store; the Rust engine is silent there. stdout, exit code and written files are identical, and the two-engine harness compares stderr only where Python's is empty or a pure usage error.
 * `kb areas`/`kb course`/`kb doctor`/`kb query`/`search` with an invalid `--workspace` reproduce Python's uncaught `ValueError` contract — empty stdout, exit 1 — but print the exception line (`ValueError: Invalid workspace name: …`) instead of the traceback frames, which name Python files and line numbers. The same applies to a store the Python loader raises out of: a non-object document (`AttributeError`) or a non-coercible value (`ValueError`) prints the exception line and exits 1.
@@ -157,6 +193,7 @@ Named on purpose: a difference that is not written down is a bug nobody found.
 * `version` and `config validate` print a different `--json` payload from the Python engine, not a differently-rendered one: `version` reports the Rust engine's identity where Python lists its own dependency versions, and `config validate` runs the schema checks where Python also checks the download and log directories, the per-platform credential files and the rate limits. The renderer is shared (Python's `json.dumps` separators and insertion order), so the difference is the payload itself; porting the full validate check list is a separate slice.
 * `doctor --json` is byte-identical to the Python engine on a profile with no credentials (the `doctor_no_credentials` byte case), but a provider that HOLDS a credential is reported `unverified` rather than probed: the Rust engine has no live transport yet, so it reproduces every verdict the shipped engine reaches before a socket opens (missing credentials, disabled accounts, the local source, TikTok's two independent capabilities) and refuses to invent the rest. The placeholder is honest — `probe_class: unverified`, badge `unknown`, never green — and the live probes are the remaining P1 gap.
 * `generate caption` and `generate ideas` always take the deterministic path. Python tries the KB LLM first (`XPST_KB_LLM_ENABLED` plus a base URL) and only falls back to the templates when none is configured; the LLM client is not ported, so a machine with the knowledge extra and an endpoint gets model-written text from Python and template text here. The templates, hashtag table, character limits, truncation rules and payload shape are the shipped behaviour.
+* `suggest-caption` always seeds the generator from the video's filename stem. Python tries the KB transcriber first (`FasterWhisperTranscriber`, from the optional `knowledge` extra) and falls back to `Path(video_path).stem.replace("_", " ").replace("-", " ")` on any exception; the Rust engine has no ASR path, so it always takes the fallback. That is Python's answer on a machine without the extra, and the local-surface fixture pins the fallback branch by making the transcriber unavailable to Python too (`XPST_KB_WHISPER_MODEL` names a model faster-whisper rejects, with `HF_HUB_OFFLINE=1` and an empty `HF_HOME` so no download is attempted). A machine with the extra and a resolvable model gets transcript-seeded captions from Python and stem-seeded ones here.
 * `kb migrate-store` always answers `{"ok": false, "error": "lancedb is not installed"}` (exit 1) when a JSON store exists: the vector store is not ported. On a machine without the knowledge extra that is exactly Python's answer; with it installed Python migrates the nuggets and areas and reports the counts. The `no JSON store found` branch is identical.
 * `byo set` edits the app-id field in the raw `config.yaml` instead of rewriting the whole document from the Pydantic model (the same choice `byo clear` makes), so the file differs from Python's while the payload does not. Its interactive secret prompt reads a line from stdin rather than `getpass`, so the secret is echoed; the non-interactive path (`--app-id` plus the platform's `XPST_*_APP_SECRET`) is identical.
 * `best-time` skips a `metric_snapshots` row whose `views`/`likes`/`comments`/`shares` column holds text, where Python raises `TypeError` out of `analyze()` (its `try` only wraps the query) and exits 1. A ledger the shipped writer produced is integer-typed, so only a hand-edited database can observe the difference.
@@ -179,7 +216,7 @@ Named on purpose: a difference that is not written down is a bug nobody found.
 * `schedule install` ports the Linux branch only. macOS writes a LaunchAgent plist and Windows registers a scheduled task; neither can be exercised on this host, so both answer `Unsupported OS: <system>` (exit 1) instead of installing something unverified. The Linux path is byte-compared against a stand-in `crontab` on PATH, including the written table. A missing `crontab` reproduces Python's `RuntimeError` message and exit 1, but prints one line where Python prints a traceback.
 * `plugins list` and `plugins docs` ask an interpreter for the inventory (`XPST_PYTHON`, else `python3`, else `python`) because a plugin is Python code that `PluginManager.discover()` imports and calls `register()` on — a Rust binary cannot execute it, and a static parse of the `register()` literal would misreport any plugin that computes its dict. With no interpreter that can import `xpst.plugins` the inventory is empty where Python would list the plugins. The checked-in fixture replays a recorded inventory through a stand-in interpreter (so the row pins the rendering and the directory resolution), and `crates/xpst-cli/tests/plugin_probe.rs` drives the real delegation whenever an interpreter is available.
 * `analytics export` does not fetch platform metrics: the YouTube/twikit/instagrapg/TikTok/Threads collectors are not ported, so the export carries the payload a credential-less profile gets from the shipped engine — empty metric maps with `collection_status.status: "ok"` — and the `analytics.db` ledger writes (metric snapshots, per-run outcomes) are skipped. With credentials, Python fetches live numbers and records them. The discovery, the `--platforms` filter, the totals, the document bytes (JSON key order and separators, the CSV BOM and `\r\n`) and the payload are the shipped behaviour.
-* `diagnostics` answers three of its eleven sections differently, because they describe the Python installation rather than the engine: `system.python` is `null` (a Rust binary has no interpreter to version) and `platform`/`machine` are the Rust engine's own; `dependencies` lists every tracked Python package as `null` (none is installed — the engine is compiled in); and `updates` reports the app row with `update_mode: "binary"` and no package rows. The other eight sections — the config snapshot with its path/secret redaction, the readiness report, the credential key list, the state summary, the redacted log tail, the version, the wall clock and `providers` — are byte-compared against the Python bundle, entry by entry. `providers` is `canonical_provider_catalog()`'s full row (role statuses, posting truth, the `probe_*` fields, `byo_app`, `legacy_roles`) plus the manifests in `list_manifests()` order, which is the order `_provider_catalog()` keeps and `xpst providers` sorts. The ZIP container is not compared: Python deflates and the Rust writer stores, so the bytes are a property of the compressor.
+* `diagnostics` answers three of its eleven sections differently, because they describe the Python installation rather than the engine: `system.python` is `null` (a Rust binary has no interpreter to version) and `platform`/`machine` are the Rust engine's own; `dependencies` lists every tracked Python package as `null` (none is installed — the engine is compiled in); and `updates` reports the app row with `update_mode: "binary"` (so its ladder lands on `status: current` / `No action needed.`) and no package rows. The other eight sections — the config snapshot with its path/secret redaction, the readiness report, the credential key list, the state summary, the redacted log tail, the version, the wall clock and `providers` — are byte-compared against the Python bundle, entry by entry. `providers` is `canonical_provider_catalog()`'s full row (role statuses, posting truth, the `probe_*` fields, `byo_app`, `legacy_roles`) plus the manifests in `list_manifests()` order, which is the order `_provider_catalog()` keeps and `xpst providers` sorts. The ZIP container is not compared: Python deflates and the Rust writer stores, so the bytes are a property of the compressor.
 * `diagnostics` writes a stored (uncompressed) ZIP with a fixed 1980-01-01 timestamp, so the same content produces the same bytes. Python deflates and stamps the wall clock. Every reader accepts both; the parity surface is the entries.
 * `mcp start` serves the same 46 tool definitions Python does, and a tool whose behaviour is not ported answers a typed `not_implemented` refusal instead of disappearing from `tools/list`. Advertising the full surface keeps an agent's tool discovery identical between the two servers; the refusal is what keeps it honest. The `tools/list` `inputSchema` key order differs (the Python SDK re-serializes the schema for the negotiated revision), so the protocol fixture compares the parsed definitions — count, order and an FNV-1a digest — rather than the raw bytes.
 * `mcp start` does not run the Pydantic validation pass `XPSTConfig.load()` performs, so an invalid `config.yaml` starts the server here where Python refuses with `Configuration errors:`. The tools read the same document either way; `xpst config validate` is the surface that reports the blockers.
@@ -191,4 +228,13 @@ Named on purpose: a difference that is not written down is a bug nobody found.
 * `mcp start`'s URL guard ALLOWS deprecated site-local IPv6 (`fec0::/10`), because Python does: it is in neither `ipaddress`'s `_private_networks` nor its `_reserved_networks`. Reproduced rather than fixed — the wire contract is the shipped one — and pinned by the `ipv6-fec0::1` row so a future Python fix shows up as a fixture diff. `192.88.99.1` (the 6to4 relay anycast) is allowed for the same reason.
 * `mcp start`'s URL guard is only reachable on the tools whose schema declares a URL argument — `kb_add` and `xpst_backfill` (`source`). `xpst_run` also declares `source` but pins an `enum` of platform names, so the SDK rejects a URL there before the guard runs; an argument the schema does not declare never reaches the guard at all, because the Python SDK answers `Input validation error: Additional properties are not allowed` first. The Rust server does not enforce `additionalProperties: false`, so it would run the guard on an undeclared argument Python rejects at the SDK layer — a pre-existing divergence in argument validation, not in the guard, and the reason the wire fixture carries the URL rows on `kb_add`/`xpst_backfill` rather than on a read-only tool.
 * `mcp start`'s URL guard resolves a hostname with `ToSocketAddrs` where Python uses `getaddrinfo(..., proto=IPPROTO_TCP)`. Both return every address the name maps to, which is what the guard needs: a name that resolves to both a public and a private address is refused by both engines (the DNS-rebinding case).
->>>>>>> 2296155a80af7458abd3b0d3f8d119e1aa2a3fd6
+* `transcript` with an id that fails `_validate_content_hash()` reproduces Python's uncaught `ValueError` contract — empty stdout, exit 1 — but prints the exception line (`ValueError: Invalid content_hash: …`) instead of the traceback frames, which name Python files and line numbers. The field name is `content_hash` here and `video_id` on the MCP tool, because the CLI goes through `Workspace.get_transcript()` and the tool validates its own argument.
+* `disconnect` reads the raw `config.yaml` instead of running `XPSTConfig.load()`'s validation, so a config that fails validation reaches the confirmation guard here and fails at save with Python's `Configuration errors:` sentence, where Python exits 2 from `load_config()` before the guard is printed. A valid config is identical on both paths.
+* `setup`'s interactive executor (`run_setup()`, `cli.py:480` → `setup.py:403`, which pip-installs yt-dlp when it is missing and runs the live connectivity probes) is not ported. `--json` and a non-TTY stdin — the agent contract, and the only path the harness exercises — are byte-identical; an interactive terminal gets the transaction state plus a line naming `python -m xpst setup`.
+* `connect`'s `--test` (`test_connections`, which probes every configured platform) and the interactive `run_connect` flow are not ported: both answer `not implemented in the Rust engine yet`. `--guide`, `--dry-run` and the non-TTY `INTERACTIVE_REQUIRED` refusal are byte-compared. The `--guide is not available for '<key>'` branch is unreachable from the CLI in both engines (`platform` is a `Choice` over `GUIDE_PLATFORMS`), so it is reproduced for completeness rather than exercised by a fixture row.
+* `update`'s `--check`, `--self` and default paths reach PyPI (`updater.get_latest_version` → `urlopen`) and stay stubs; only `--components` without `--check` is ported. That document's `packages` section is empty here — `TRACKED_PACKAGES` are Python distributions a compiled engine does not ship, and Python reports their versions from `importlib.metadata`, which is a property of the interpreter rather than of the engine. The fixture masks that section (the key is still compared) and masks the engine's own version string by value; the app, helper and provider-metadata rows are otherwise byte-compared.
+* `followers` does not fetch live counts: the `get_followers()` loop is not ported, so `count` is the stored snapshot and `growth` is measured against the stored history. Python swallows every failure of that loop (`cli.py:7632-7644`) and each uploader returns `0` on error, so a credential-less profile gets the same numbers from both engines; a connected profile gets an upgraded count and a new snapshot from Python. Python also constructs `CrossPostEngine(config)` for the fetch, which rewrites `quotas.json` on a fresh profile and runs crash recovery — this engine reads the ledger directly, so the profile is untouched.
+* `media fetch` never downloads: the `fetch_media_binary` path (`urlopen`, `media/binaries.py:244`) is not ported, so a missing binary answers Python's own `missing (fetch disabled)` error and exits 1 where Python would fetch a pinned static build. A binary that already resolves is reported and never downloaded in both engines, which is the branch the fixture pins (the missing branch cannot be captured on a host that has ffmpeg, so it is covered by a unit test).
+* `auth` stays a `stub` row although two of its branches are ported: `auth api-token` (read or rotate the dashboard token in the credential store) and the unknown-platform refusal. The command's default invocation is `auth status`, which probes every platform (`collect_live_auth_status`), so the row cannot honestly say `implemented`; `dispatch` answers the local branches and falls through to `NOT_IMPLEMENTED` for the rest.
+* `wizard`'s interactive executor (`run_wizard()`, which opens a browser and runs live health checks) is not ported. `--json` and a non-TTY stdin — the agent contract, and the only path the harness exercises — are byte-identical; an interactive terminal gets the transaction state plus a line naming `python -m xpst wizard` for the human actions. The guide table is a captured resource (`resources/wizard_guides.json`, written by `xtask/scripts/capture_wizard_guides.py`) rather than a hand transcription, and the `--export-md` bytes are held to `tests/fixtures/wizard_export.md`.
+* `setup`'s interactive executor (`run_setup()`, which prompts and runs the connect flows) is not ported, for the same reason and with the same shape as `wizard`'s: `--json` and a non-TTY stdin are byte-identical, and an interactive terminal gets the transaction state plus a line naming `python -m xpst setup`. The exit code is the one real difference between the two commands — `setup` answers `EXIT_CONFIG_ERROR` (2) where the `wizard` alias answers `EXIT_AUTH_FAILURE` (3) — and both are pinned by their own fixture rows.
