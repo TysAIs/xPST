@@ -27,7 +27,7 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 133;
+const EXPECTED_SCENARIOS: usize = 142;
 
 /// The environment both engines are run under, whatever the caller inherited.
 ///

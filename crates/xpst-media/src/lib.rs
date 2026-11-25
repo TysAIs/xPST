@@ -138,6 +138,170 @@ pub fn discover() -> MediaTools {
     }
 }
 
+/// `setup.check_yt_dlp()`: the version of the yt-dlp binary xPST would invoke.
+///
+/// The candidate order is the shipped engine's — `XPST_YTDLP_PATH` (the
+/// Tauri-bundled resource), the ambient `PATH`, the venv's `bin/`, then the
+/// platform fallbacks — because a readiness report that named a *different*
+/// yt-dlp than the one the downloader runs is worse than no report.
+///
+/// Two candidates are Python-specific and cannot be reproduced exactly: the
+/// macOS framework-user directory (it embeds the interpreter's major.minor) and
+/// `sys.executable`'s directory (a Rust binary's own directory is the closest
+/// analogue). Both are recorded as divergences in the ledger.
+pub fn yt_dlp_version() -> Option<String> {
+    for candidate in yt_dlp_candidates() {
+        if let Some(version) = probe_version(&candidate, &["--version"], 10) {
+            let version = version.trim().to_string();
+            if !version.is_empty() {
+                return Some(version);
+            }
+        }
+    }
+    None
+}
+
+/// `check_helper_tools()`'s FFmpeg probe: `(version, error)`.
+///
+/// Python reads the first line of `ffmpeg -version` and takes the token after
+/// the literal `version`; a build whose banner does not carry that word reports
+/// `installed`. A probe that fails reports `installed` plus the error text
+/// (truncated to 200 characters, as Python does).
+pub fn ffmpeg_version(path: &str) -> (Option<String>, Option<String>) {
+    match run_capture(path, &["-version"], 5) {
+        Ok(stdout) => {
+            let first_line = stdout.lines().next().unwrap_or("");
+            if first_line.to_lowercase().contains("version") {
+                if let Some((_, rest)) = first_line.split_once("version") {
+                    let token = rest.trim().split(' ').next().unwrap_or("");
+                    if !token.is_empty() {
+                        return (Some(token.to_string()), None);
+                    }
+                }
+            }
+            (Some("installed".to_string()), None)
+        }
+        Err(error) => (Some("installed".to_string()), Some(truncate(&error, 200))),
+    }
+}
+
+/// The yt-dlp candidates, in `check_yt_dlp()`'s order, deduped.
+fn yt_dlp_candidates() -> Vec<String> {
+    let mut candidates: Vec<String> = Vec::new();
+    if let Ok(value) = std::env::var("XPST_YTDLP_PATH") {
+        if !value.is_empty() {
+            candidates.push(value);
+        }
+    }
+    candidates.push("yt-dlp".to_string());
+    if let Ok(venv) = std::env::var("VIRTUAL_ENV") {
+        if !venv.is_empty() {
+            candidates.push(format!("{venv}/bin/yt-dlp"));
+            if cfg!(windows) {
+                candidates.push(format!("{venv}/Scripts/yt-dlp.exe"));
+            }
+        }
+    }
+    candidates.extend(yt_dlp_fallback_paths());
+    let mut seen: Vec<String> = Vec::new();
+    for candidate in candidates {
+        if !seen.contains(&candidate) {
+            seen.push(candidate);
+        }
+    }
+    seen
+}
+
+/// `utils.platform.get_ytdlp_fallback_paths()`.
+fn yt_dlp_fallback_paths() -> Vec<String> {
+    let mut paths: Vec<String> = Vec::new();
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    if cfg!(windows) {
+        if let Some(home) = &home {
+            paths.push(
+                home.join("AppData")
+                    .join("Local")
+                    .join("Programs")
+                    .join("Python")
+                    .join("Scripts")
+                    .join("yt-dlp.exe")
+                    .display()
+                    .to_string(),
+            );
+        }
+    } else if let Some(home) = &home {
+        paths.push(
+            home.join(".local")
+                .join("bin")
+                .join("yt-dlp")
+                .display()
+                .to_string(),
+        );
+    }
+    // The running binary's own directory: a wheel/venv deployment ships the
+    // CLI next to the executable, no PATH required.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let name = if cfg!(windows) {
+                "yt-dlp.exe"
+            } else {
+                "yt-dlp"
+            };
+            paths.push(parent.join(name).display().to_string());
+        }
+    }
+    if let Some(dir) = media_bin_dir() {
+        paths.push(dir.join("yt-dlp").display().to_string());
+    }
+    paths
+}
+
+/// Run a binary and return its stdout, or the error text.
+fn run_capture(binary: &str, args: &[&str], timeout_secs: u64) -> Result<String, String> {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    let mut child = Command::new(binary)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("timed out".to_string());
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(format!("exit status {}", output.status));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// `probe_version()`: the first line of `binary --version`, when it succeeds.
+fn probe_version(binary: &str, args: &[&str], timeout_secs: u64) -> Option<String> {
+    run_capture(binary, args, timeout_secs).ok()
+}
+
+fn truncate(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_string();
+    }
+    text.chars().take(limit).collect()
+}
+
 /// `media_binary_status()`'s source classification, split out so it can be
 /// tested without depending on what is installed on the host.
 fn classify_source(

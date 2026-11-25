@@ -91,6 +91,14 @@ PINNED_ENV = {
     # A payload that serialises a set would otherwise vary between runs.
     "PYTHONHASHSEED": "0",
 }
+# Stand-in media tools for the `readiness` rows. `readiness` only asks each one
+# for its version, so a shell script with a fixed banner makes the ffmpeg/yt-dlp
+# rows a property of the fixture instead of of the machine.
+FFMPEG_STUB = (
+    "#!/bin/sh\n"
+    'echo "ffmpeg version 9.9.9-test Copyright (c) the xPST parity fixture"\n'
+)
+YTDLP_STUB = "#!/bin/sh\necho \"2026.01.01\"\n"
 
 RICH_STATE = {
     "version": 2,
@@ -1508,6 +1516,223 @@ SCENARIOS = [
         "env": {"XPST_HOME": "PROFILE"},
         "compare": "exit",
     },
+    # ── readiness (t_ff0ed405) ────────────────────────────────────────────
+    #
+    # The `python` row is the one recorded divergence: a Rust binary has no
+    # Python runtime to version, so it reports the engine instead. The row keeps
+    # its id, label, ok, severity and action and only its message/details are
+    # masked, so a dropped or reordered row still fails the comparison.
+    {
+        "name": "readiness_pristine",
+        "argv": ["readiness", "--json"],
+        "seed": {"bin/ffmpeg": FFMPEG_STUB, "bin/yt-dlp": YTDLP_STUB},
+        "executable": ["bin/ffmpeg", "bin/yt-dlp"],
+        "env": {
+            "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+            "XPST_YTDLP_PATH": "PROFILE/bin/yt-dlp",
+        },
+        "mask_checks": ["python"],
+        "compare": "json",
+    },
+    {
+        "name": "readiness_configured",
+        "argv": ["readiness", "--json"],
+        "seed": {
+            "bin/ffmpeg": FFMPEG_STUB,
+            "bin/yt-dlp": YTDLP_STUB,
+            "credentials/youtube_token.json": "{}",
+            "config.yaml": (
+                "version: 4\n"
+                "accounts:\n"
+                "  tiktok:\n"
+                "    username: someone\n"
+                "  instagram:\n"
+                "    enabled: true\n"
+                "    auth_mode: session\n"
+                "  bluesky:\n"
+                "    enabled: true\n"
+                "    identifier: someone.bsky.social\n"
+            ),
+        },
+        "executable": ["bin/ffmpeg", "bin/yt-dlp"],
+        "env": {
+            "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+            "XPST_YTDLP_PATH": "PROFILE/bin/yt-dlp",
+        },
+        "mask_checks": ["python"],
+        "compare": "json",
+    },
+    {
+        # An acknowledged unofficial path is still reported, but no longer as a
+        # warning: the operator's choice is on the record.
+        "name": "readiness_ban_risk_acknowledged",
+        "argv": ["readiness", "--json"],
+        "seed": {
+            "bin/ffmpeg": FFMPEG_STUB,
+            "bin/yt-dlp": YTDLP_STUB,
+            "config.yaml": (
+                "version: 4\n"
+                "accounts:\n"
+                "  instagram:\n"
+                "    enabled: true\n"
+                "    auth_mode: session\n"
+            ),
+            "ban_risk_acknowledgements.json": json.dumps(
+                {
+                    "version": 1,
+                    "acknowledgements": {
+                        "instagram": {
+                            "platform": "instagram",
+                            "auth_mode": "session",
+                            "ban_risk": "unofficial_private_api",
+                            "acknowledged_at": "2026-01-01T00:00:00+0000",
+                            "surface": "xpst connect instagram",
+                            "operator_choice": True,
+                        }
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+        },
+        "executable": ["bin/ffmpeg", "bin/yt-dlp"],
+        "env": {
+            "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+            "XPST_YTDLP_PATH": "PROFILE/bin/yt-dlp",
+        },
+        "mask_checks": ["python"],
+        "compare": "json",
+    },
+    {
+        # A local source folder, an official X route and two enabled-but-empty
+        # destinations: the source row flips to ready and the destination rows
+        # keep their per-platform verdicts.
+        "name": "readiness_local_source_and_ready_destination",
+        "argv": ["readiness", "--json"],
+        "seed": {
+            "bin/ffmpeg": FFMPEG_STUB,
+            "bin/yt-dlp": YTDLP_STUB,
+            "media/.keep": "",
+            "config.yaml": (
+                "version: 4\n"
+                "accounts:\n"
+                "  local:\n"
+                "    path: PROFILE/media\n"
+                "  x:\n"
+                "    auth_mode: api_v2\n"
+                "    bearer_token: synthetic-bearer-token\n"
+                "  threads:\n"
+                "    enabled: true\n"
+                "  messenger:\n"
+                "    enabled: true\n"
+                "    page_access_token: synthetic-page-token\n"
+            ),
+        },
+        "executable": ["bin/ffmpeg", "bin/yt-dlp"],
+        "env": {
+            "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+            "XPST_YTDLP_PATH": "PROFILE/bin/yt-dlp",
+        },
+        "mask_checks": ["python"],
+        "compare": "json",
+    },
+    {
+        # TikTok's sandbox route is `blocked_external_review`, not
+        # `unconfigured`: the provider has not approved the upload app.
+        "name": "readiness_tiktok_sandbox_blocked",
+        "argv": ["readiness", "--json"],
+        "seed": {
+            "bin/ffmpeg": FFMPEG_STUB,
+            "bin/yt-dlp": YTDLP_STUB,
+            "config.yaml": (
+                "version: 4\n"
+                "accounts:\n"
+                "  tiktok:\n"
+                "    sandbox: true\n"
+                "    client_key: synthetic-client-key\n"
+                "    access_token: synthetic-access-token\n"
+            ),
+        },
+        "executable": ["bin/ffmpeg", "bin/yt-dlp"],
+        "env": {
+            "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+            "XPST_YTDLP_PATH": "PROFILE/bin/yt-dlp",
+        },
+        "mask_checks": ["python"],
+        "compare": "json",
+    },
+    {
+        # `--fix` creates the four required folders and reports each one. The
+        # config file is left as written (Python rewrites it from the model);
+        # the payload is identical, which is what this row pins.
+        "name": "readiness_fix",
+        "argv": ["readiness", "--fix", "--json"],
+        "seed": {"bin/ffmpeg": FFMPEG_STUB, "bin/yt-dlp": YTDLP_STUB},
+        "executable": ["bin/ffmpeg", "bin/yt-dlp"],
+        "env": {
+            "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+            "XPST_YTDLP_PATH": "PROFILE/bin/yt-dlp",
+        },
+        "config_dir": ".xpst",
+        "mask_checks": ["python"],
+        "compare": "json",
+    },
+    {
+        "name": "readiness_fix_already_created",
+        "argv": ["readiness", "--fix", "--json"],
+        "seed": {
+            "bin/ffmpeg": FFMPEG_STUB,
+            "bin/yt-dlp": YTDLP_STUB,
+            "credentials/.keep": "",
+            "downloads/.keep": "",
+            "logs/.keep": "",
+            "backups/.keep": "",
+        },
+        "executable": ["bin/ffmpeg", "bin/yt-dlp"],
+        "env": {
+            "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+            "XPST_YTDLP_PATH": "PROFILE/bin/yt-dlp",
+        },
+        "config_dir": ".xpst",
+        "mask_checks": ["python"],
+        "compare": "json",
+    },
+    {
+        # `--config` names the file the repair reports as saved, verbatim.
+        "name": "readiness_fix_with_config_path",
+        "argv": ["--config", "PROFILE/alt.yaml", "readiness", "--fix", "--json"],
+        "seed": {
+            "bin/ffmpeg": FFMPEG_STUB,
+            "bin/yt-dlp": YTDLP_STUB,
+            "alt.yaml": "version: 4\n",
+        },
+        "executable": ["bin/ffmpeg", "bin/yt-dlp"],
+        "env": {
+            "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+            "XPST_YTDLP_PATH": "PROFILE/bin/yt-dlp",
+        },
+        "mask_checks": ["python"],
+        "compare": "json",
+    },
+    {
+        # A configured `video.download_dir` is created where the config says,
+        # not at the default: `--fix` reads the document, not the model.
+        "name": "readiness_fix_custom_download_dir",
+        "argv": ["readiness", "--fix", "--json"],
+        "seed": {
+            "bin/ffmpeg": FFMPEG_STUB,
+            "bin/yt-dlp": YTDLP_STUB,
+            "config.yaml": "version: 4\nvideo:\n  download_dir: PROFILE/media\n",
+        },
+        "executable": ["bin/ffmpeg", "bin/yt-dlp"],
+        "env": {
+            "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+            "XPST_YTDLP_PATH": "PROFILE/bin/yt-dlp",
+        },
+        "config_dir": ".xpst",
+        "mask_checks": ["python"],
+        "compare": "json",
+    },
 ]
 
 
@@ -1515,7 +1740,14 @@ def seed_profile(scenario: dict, profile: Path) -> None:
     for relative, text in scenario["seed"].items():
         target = profile / relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
+        # `PROFILE` is the scratch profile itself, so a seeded config can name a
+        # path inside it (a local source folder, a download directory).
+        target.write_text(text.replace("PROFILE", str(profile)), encoding="utf-8")
+    # A seeded stand-in binary has to be executable: `readiness` runs
+    # `ffmpeg -version` and `yt-dlp --version`, and a non-executable file is
+    # skipped by the resolver, which would make the row machine-dependent.
+    for relative in scenario.get("executable") or []:
+        (profile / relative).chmod(0o755)
     # A SQLite ledger (`analytics.db`) cannot be seeded as text. The statements
     # are recorded in the fixture and replayed by the Rust test, so both engines
     # read a database built from the same DDL and rows.
@@ -1609,7 +1841,8 @@ def env_for(scenario: dict, profile: Path) -> dict[str, str]:
 
 
 def normalize(payload, profile: Path, mask: list[str] | None = None,
-              mask_findings: list[str] | None = None):
+              mask_findings: list[str] | None = None,
+              mask_checks: list[str] | None = None):
     """Strip the values that cannot be compared across machines.
 
     * the scratch profile's absolute path becomes `<PROFILE>` (a payload that
@@ -1626,10 +1859,10 @@ def normalize(payload, profile: Path, mask: list[str] | None = None,
     if isinstance(payload, str):
         return payload.replace(str(profile), "<PROFILE>")
     if isinstance(payload, list):
-        return [normalize(item, profile, mask, mask_findings) for item in payload]
+        return [normalize(item, profile, mask, mask_findings, mask_checks) for item in payload]
     if isinstance(payload, dict):
         result = {
-            key: normalize(value, profile, mask, mask_findings)
+            key: normalize(value, profile, mask, mask_findings, mask_checks)
             for key, value in payload.items()
         }
         if "paused_snapshots" in result:
@@ -1640,6 +1873,17 @@ def normalize(payload, profile: Path, mask: list[str] | None = None,
         for path in mask or []:
             if path in result:
                 result[path] = "<TS>"
+        # `mask_checks` names readiness checks whose answer is a property of the
+        # machine rather than of the engine (the `python` row: a Rust binary has
+        # no Python runtime to version). The row keeps its id, label, ok,
+        # severity and action; only the message and details are blanked, so a
+        # dropped or reordered row still fails.
+        for key in ("checks", "blocking", "warnings"):
+            for check in result.get(key) or []:
+                if not isinstance(check, dict) or check.get("id") not in (mask_checks or []):
+                    continue
+                check["message"] = "<ENV>"
+                check["details"] = "<ENV>"
         for check in mask_findings or []:
             for finding in result.get("findings") or []:
                 if not isinstance(finding, dict) or finding.get("check") != check:
@@ -1703,6 +1947,7 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
                     profile,
                     scenario.get("mask"),
                     scenario.get("mask_findings"),
+                    scenario.get("mask_checks"),
                 )
             except json.JSONDecodeError:
                 payload = None
@@ -1731,6 +1976,7 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
                     profile,
                     scenario.get("mask"),
                     scenario.get("mask_findings"),
+                    scenario.get("mask_checks"),
                 )
         return {
             "exit_code": proc.returncode,
@@ -1743,7 +1989,11 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
             "stderr_normalized": normalize(stderr, profile, scenario.get("mask")),
             "stdout": proc.stdout,
             "stdout_normalized": normalize(
-                proc.stdout, profile, scenario.get("mask"), scenario.get("mask_findings")
+                proc.stdout,
+                profile,
+                scenario.get("mask"),
+                scenario.get("mask_findings"),
+                scenario.get("mask_checks"),
             ),
             "stderr": proc.stderr,
         }
@@ -1813,6 +2063,10 @@ def run_scenario(scenario: dict, python: str) -> dict:
         record["mask"] = scenario["mask"]
     if scenario.get("mask_findings"):
         record["mask_findings"] = scenario["mask_findings"]
+    if scenario.get("mask_checks"):
+        record["mask_checks"] = scenario["mask_checks"]
+    if scenario.get("executable"):
+        record["executable"] = scenario["executable"]
     if scenario.get("allow_nonzero"):
         record["allow_nonzero"] = True
     if scenario.get("credential"):

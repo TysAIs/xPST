@@ -306,6 +306,23 @@ pub const DEVIATIONS: &[&str] = &[
      raising the `TypeError` Python's `sorted` raises. A store the shipped writer produced is \
      homogeneous, so the order is identical; only a hand-corrupted file can observe the \
      difference.",
+    "`readiness`'s `python` row reports the Rust engine (`Rust engine (no Python runtime)`) \
+     instead of a Python version: a Rust binary has no interpreter to version. The row keeps its \
+     id, label, severity and `ok: true`, so the summary and the blocking list are unaffected; only \
+     `message` and `details` differ. The checked-in fixture masks that one row (`mask_checks`) and \
+     compares every other row, the ordering and the counts exactly.",
+    "`readiness --fix` creates the same folders and reports the same `actions`, but does not \
+     rewrite `config.yaml` from the Pydantic model (the same choice `byo set` makes). The payload \
+     is identical; the file is left as written, so a profile that had never been saved keeps the \
+     document the loader materialized.",
+    "`readiness`'s yt-dlp probe cannot reproduce two Python-specific candidates: the macOS \
+     framework-user directory (it embeds the interpreter's major.minor) and `sys.executable`'s \
+     directory (the Rust engine uses its own binary's directory). The probe order is otherwise the \
+     shipped one, and the fixture pins `XPST_YTDLP_PATH` so both engines answer from the same \
+     binary.",
+    "`readiness` renders a stored ban-risk acknowledgement in the shipped writer's \
+     `sort_keys=True` order. A hand-edited `ban_risk_acknowledgements.json` with another key order \
+     would render in that order under Python and sorted here; the values are identical.",
     "Integer options are validated and rendered with Python's arbitrary-precision `int()` \
      (`--port 0900` is `:900`, `--port 10^20` prints in full). The three that are used for \
      arithmetic — `pair --ttl`, `state backup --keep`, `stream relay-config --rtmp-port` — \
