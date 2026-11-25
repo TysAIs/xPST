@@ -1474,7 +1474,13 @@ SCENARIOS = [
             "bin/ffprobe": "#!/bin/sh\n",
             "bin/yt-dlp": "#!/bin/sh\n",
         },
+        # `doctor` live-probes every configured platform, and the Python engine
+        # refreshes and re-saves the X cookie session while doing it. With the
+        # runner's real HOME that writes into the operator's live
+        # `~/.xpst/credentials`; pinning HOME keeps the probe inside the scratch
+        # profile. The config has no accounts, so the payload is unchanged.
         "env": {
+            "HOME": "PROFILE",
             "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
             "XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe",
             "XPST_YTDLP_PATH": "PROFILE/bin/yt-dlp",
@@ -3589,7 +3595,7 @@ SCENARIOS = [
     {
         # `--resume` on a fresh profile starts the transaction first, then
         # resumes it — the pending payload and exit 2.
-        "name": "setup_resume_fresh",
+        "name": "setup_resume_fresh_stdout",
         "argv": ["setup", "--resume", "--json"],
         "seed": {},
         "mask": [
@@ -3605,7 +3611,7 @@ SCENARIOS = [
     {
         # `--finish-later` records the deferred state and does NOT add the
         # INTERACTIVE_REQUIRED error, so it exits 0.
-        "name": "setup_finish_later",
+        "name": "setup_finish_later_stdout",
         "argv": ["setup", "--finish-later", "--json"],
         "seed": {},
         "mask": [
@@ -3620,7 +3626,7 @@ SCENARIOS = [
     },
     {
         # `--reset` with no active transaction answers the reset document.
-        "name": "setup_reset",
+        "name": "setup_reset_stdout",
         "argv": ["setup", "--reset", "--json"],
         "seed": {},
         "compare": "stdout",
