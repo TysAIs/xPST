@@ -49,6 +49,14 @@ pub enum ToolError {
     #[error("Error: {message}")]
     Handler { message: String },
 
+    /// A handler that answered with its own error document instead of raising.
+    ///
+    /// Some Python handlers build a `CallToolResult(isError=True, ...)` with a
+    /// sentence of their own (`xpst_transcript`'s `Invalid video_id: ...`), so
+    /// the wire body has no `Error: ` prefix. The message is served verbatim.
+    #[error("{message}")]
+    Reported { message: String },
+
     /// Refused by the consent tier, not by the tool.
     #[error("{message}")]
     ConsentDenied { tool: String, message: String },
@@ -64,6 +72,7 @@ impl ToolError {
             ToolError::Malformed { .. } => "malformed_store",
             ToolError::InvalidArguments { .. } => "invalid_arguments",
             ToolError::Handler { .. } => "handler_error",
+            ToolError::Reported { .. } => "reported_error",
             ToolError::ConsentDenied { .. } => "consent_denied",
         }
     }
@@ -77,7 +86,8 @@ impl ToolError {
             ToolError::ConsentDenied { tool, .. } => Some(tool),
             ToolError::NotFound { .. }
             | ToolError::Malformed { .. }
-            | ToolError::Handler { .. } => None,
+            | ToolError::Handler { .. }
+            | ToolError::Reported { .. } => None,
         }
     }
 

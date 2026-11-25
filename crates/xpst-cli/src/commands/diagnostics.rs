@@ -345,44 +345,26 @@ fn config_snapshot(model: &Value, config_dir: &Path) -> Value {
 
 /// `_provider_catalog()`: the manifests plus the canonical role rows.
 ///
-/// The shipped document also carries `posting_truth` and the `probe_*` fields
-/// `canonical_provider_catalog()` adds; those are a follow-up (see the ledger
-/// note), so this row is the reduced canonical view.
+/// The rows are `canonical_provider_catalog()`'s entries — the same document
+/// `xpst providers` serves and the `xpst_capabilities` MCP tool projects, so the
+/// support bundle cannot disagree with either surface about a provider's state,
+/// its posting verdict or which platforms have a BYO app.
 fn providers(
     view: &config_view::ConfigView,
     store: &xpst_auth::credentials::CredentialStore,
 ) -> Result<Value, String> {
     let registry = provider_status::registry()?;
-    let sources = provider_status::manifests_in(&registry, "sources", view);
-    let destinations = provider_status::manifests_in(&registry, "destinations", view);
-    let canonical = provider_status::canonical_status(view, store)?;
+    // `_provider_catalog()` keeps `list_manifests()` order; only the CLI
+    // `providers` command sorts.
+    let sources = provider_status::manifests_in_order(&registry, "sources", view);
+    let destinations = provider_status::manifests_in_order(&registry, "destinations", view);
+    let catalog = xpst_surface::catalog::catalog(&registry, view, store);
 
-    let rows: Vec<Value> = canonical
-        .iter()
-        .map(|entry| {
-            json!({
-                "name": entry.name,
-                "display_name": entry.display_name,
-                "state": entry.aggregate,
-                "state_value": entry.aggregate,
-                "roles": entry.roles.iter().map(|role| role.role.clone()).collect::<Vec<_>>(),
-                "enabled": entry.enabled,
-                "auth_mode": entry.auth_mode,
-                "can_post": entry.posting.can_post,
-            })
-        })
-        .collect();
+    let rows: Vec<Value> = catalog.iter().map(xpst_config::output::to_json).collect();
     let with_role = |role: &str| -> Vec<Value> {
-        canonical
+        xpst_surface::catalog::with_role(&catalog, role)
             .iter()
-            .filter(|entry| entry.role(role).is_some())
-            .map(|entry| {
-                json!({
-                    "name": entry.name,
-                    "display_name": entry.display_name,
-                    "state": entry.aggregate,
-                })
-            })
+            .map(xpst_config::output::to_json)
             .collect()
     };
 

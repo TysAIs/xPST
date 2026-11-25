@@ -160,8 +160,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_followers",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "requires platform APIs",
+        Implementation::Ported {
+            handler: crate::tools::followers::run,
+            render: Render::Pretty,
         },
     ),
     (
@@ -197,8 +198,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_transcript",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads the knowledge store, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::transcript::run,
+            render: Render::Pretty,
         },
     ),
     (
@@ -212,8 +214,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_activity",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads the activity ledger, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::activity::run,
+            render: Render::Compact,
         },
     ),
     (
@@ -322,8 +325,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_capabilities",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "provider state is credential-derived, which needs platform probes",
+        Implementation::Ported {
+            handler: crate::tools::capabilities::run,
+            render: Render::Pretty,
         },
     ),
     (
@@ -417,8 +421,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "kb_areas",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads the knowledge store, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::kb::areas,
+            render: Render::Pretty,
         },
     ),
     (

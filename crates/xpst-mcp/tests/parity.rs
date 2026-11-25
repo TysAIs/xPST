@@ -283,10 +283,14 @@ fn the_ported_surface_is_exactly_the_read_only_network_free_set() {
     assert_eq!(
         ported,
         vec![
+            "kb_areas",
             "kb_query",
+            "xpst_activity",
             "xpst_best_time",
             "xpst_bio_get",
+            "xpst_capabilities",
             "xpst_config_show",
+            "xpst_followers",
             "xpst_providers",
             "xpst_rate_limit_status",
             "xpst_readiness",
@@ -294,6 +298,7 @@ fn the_ported_surface_is_exactly_the_read_only_network_free_set() {
             "xpst_search",
             "xpst_security_audit",
             "xpst_status",
+            "xpst_transcript",
         ]
     );
 }

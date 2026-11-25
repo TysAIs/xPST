@@ -3990,6 +3990,7 @@ dependencies = [
  "xpst-auth",
  "xpst-config",
  "xpst-state",
+ "xpst-store",
  "xpst-surface",
 ]
 

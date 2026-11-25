@@ -48,9 +48,10 @@ const FIXTURE: &str = include_str!("fixtures/mcp_stdio.json");
 /// The fixture's scenario count. A loop over an emptied array asserts nothing.
 const EXPECTED_SCENARIOS: usize = 3;
 
-/// The state file every scenario starts from (an empty ledger).
-const STATE: &str =
-    r#"{"version":2,"posted_videos":{},"health":{"total_processed":0,"platforms":{}}}"#;
+/// The state file every scenario starts from, byte-identical to `STATE` in the
+/// capture script. It carries two recorded failures so `xpst_activity` answers a
+/// populated document rather than an empty one.
+const STATE: &str = r#"{"version": 2, "posted_videos": {"vid-parity": {"source_url": "https://example.invalid/vid-parity", "last_attempt": "2026-11-20T10:00:00+00:00", "errors": {"youtube": {"error": "quota exceeded", "retryable": true, "timestamp": "2026-11-20T10:00:00+00:00"}, "x": {"error": "rate limited", "retryable": false, "timestamp": "2026-11-19T09:00:00+00:00"}}}, "vid-other": {"source_url": "https://example.invalid/vid-other", "errors": {"youtube": {"error": "", "retryable": null}}}}, "health": {"total_processed": 2, "platforms": {}}}"#;
 
 /// The helper scripts the readiness and security checks probe, byte-identical
 /// to `HELPER_SCRIPTS` in the capture script. Pinned so `ffmpeg_available` and
@@ -66,6 +67,30 @@ const HELPER_SCRIPTS: [(&str, &str); 2] = [
         "#!/bin/sh\necho \"ffmpeg version 9.9.9-test Copyright (c) the xPST parity fixture\"\n",
     ),
     ("bin/yt-dlp", "#!/bin/sh\necho \"2026.01.01\"\n"),
+];
+
+/// The knowledge workspace the KB tools read, byte-identical to
+/// `KNOWLEDGE_AREAS` in the capture script. `_xpst_home()` is `XPST_HOME`, else
+/// `~/.xpst`, and `HOME` is the scratch profile — so the workspace is
+/// `<profile>/.xpst/knowledge/default`.
+const KNOWLEDGE_AREAS: &str = r#"{
+  "area-basics": {"id": "area-basics", "label": "Basics", "centroid": [], "nugget_ids": ["nug-1", "nug-2"], "order_index": 0},
+  "area-advanced": {"id": "area-advanced", "label": "Advanced", "centroid": [], "nugget_ids": ["nug-3"], "order_index": 1}
+}"#;
+
+/// The cached transcript `xpst_transcript` finds by direct id.
+const TRANSCRIPT: &str = r#"{"content_hash": "vid-parity", "text": "parity transcript body", "segments": [{"start": 0.0, "end": 1.5, "text": "parity"}, {"start": 1.5, "end": 3.0, "text": "fixture"}]}"#;
+
+/// The follower snapshots, byte-identical to `FOLLOWER_SNAPSHOTS` in the
+/// capture script. Written with explicit timestamps because
+/// `record_followers()` stamps `now`.
+const FOLLOWER_SNAPSHOTS: [(&str, i64, &str); 6] = [
+    ("youtube", 1200, "2026-11-01T00:00:00+00:00"),
+    ("youtube", 1240, "2026-11-08T00:00:00+00:00"),
+    ("youtube", 1310, "2026-11-15T00:00:00+00:00"),
+    ("x", 480, "2026-11-15T00:00:00+00:00"),
+    ("instagram", 900, "2026-11-01T00:00:00+00:00"),
+    ("instagram", 875, "2026-11-15T00:00:00+00:00"),
 ];
 
 struct Server {
@@ -181,6 +206,27 @@ fn profile(name: &str) -> PathBuf {
             let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
         }
     }
+
+    // The knowledge workspace (`~/.xpst/knowledge/default`, since HOME is the
+    // profile) and its transcripts.
+    let workspace = dir.join(".xpst").join("knowledge").join("default");
+    std::fs::create_dir_all(workspace.join("transcripts")).expect("workspace");
+    std::fs::write(workspace.join("areas.json"), KNOWLEDGE_AREAS).expect("seed areas");
+    std::fs::write(
+        workspace.join("transcripts").join("vid-parity.json"),
+        TRANSCRIPT,
+    )
+    .expect("seed transcript");
+
+    // The follower ledger. The schema is the engine's (`Store::open` applies
+    // it), so only the rows are seeded here.
+    let store = xpst_store::Store::open(dir.join("analytics.db")).expect("open ledger");
+    for (platform, count, captured_at) in FOLLOWER_SNAPSHOTS {
+        store
+            .record_followers(platform, count, captured_at)
+            .expect("seed follower");
+    }
+
     dir
 }
 

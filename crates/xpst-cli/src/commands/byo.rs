@@ -1,19 +1,15 @@
-//! `xpst byo status` and `xpst byo clear` — bring-your-own developer app.
+//! `xpst byo status`, `xpst byo set` and `xpst byo clear` — bring-your-own
+//! developer app.
 //!
 //! Parity target: `src/xpst/byo.py` (`byo_status`, `byo_status_for_platform`,
-//! `resolve_byo_app`, `clear_byo_app`, `mask_app_id`) and the two Click
+//! `resolve_byo_app`, `clear_byo_app`, `mask_app_id`) and the three Click
 //! commands that wrap them.
 //!
-//! The registry (`BYO_PLATFORMS`) is captured, not transcribed:
-//! `xtask/scripts/capture_byo_platforms.py` runs the shipped Python and writes
-//! `resources/byo_platforms.json`, because a wrong `store_id_key` in a
-//! hand-copied table reads as "no app configured" forever and nothing would
-//! catch it. `tests/local_surface.rs` diffs the whole `byo status` payload
-//! against a live `python -m xpst byo status --json`.
-//!
-//! Credential resolution order is Python's: the encrypted store first, then the
-//! config fields (with the `XPST_*_APP_ID`/`_APP_SECRET` environment overrides
-//! `XPSTConfig.load` applies), then "id without secret" as `config-incomplete`.
+//! The registry and the masked status payload live in `xpst_surface::byo`,
+//! because three surfaces read them: these commands, the `byo_app` field of the
+//! canonical provider catalog (`xpst providers`, `xpst diagnostics`,
+//! `xpst_capabilities`) and the `xpst_byo_app` MCP tool. This module is the
+//! clap surface plus the two writers (`clear`, `set`) that mutate the profile.
 //!
 //! **Divergences, both recorded in the ledger note:**
 //!
@@ -28,7 +24,6 @@ use std::io::Write;
 use std::path::Path;
 
 use clap::ArgMatches;
-use serde_json::Value;
 use xpst_auth::credentials::CredentialStore;
 use xpst_config::{Mapping, Value as YamlValue};
 
@@ -36,252 +31,13 @@ use crate::commands::bootstrap;
 use crate::output::{array, boolean, object, string, write_python_json, write_text};
 use crate::{exit, flag, leaf_string, GlobalOptions};
 
-/// The captured registry.
-const REGISTRY: &str = include_str!("../resources/byo_platforms.json");
-
-/// One `ByoPlatformSpec`.
-struct Spec {
-    platform: String,
-    display_name: String,
-    id_label: String,
-    secret_label: String,
-    store_id_key: String,
-    store_secret_key: String,
-    redirect_uri: String,
-    scopes: Vec<String>,
-    create_url: String,
-    docs_url: String,
-    enables: String,
-    config_id_field: String,
-    config_secret_field: String,
-    configurable: bool,
-    env_id_var: String,
-    env_secret_var: String,
-}
-
-struct Registry {
-    order: Vec<String>,
-    specs: Vec<Spec>,
-    meta_redirect_uri: String,
-}
-
-fn registry() -> Result<Registry, String> {
-    let document: Value =
-        serde_json::from_str(REGISTRY).map_err(|err| format!("embedded registry: {err}"))?;
-    let order: Vec<String> = document["order"]
-        .as_array()
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut specs = Vec::new();
-    for name in &order {
-        let spec = &document["platforms"][name];
-        let text = |field: &str| spec[field].as_str().unwrap_or("").to_string();
-        specs.push(Spec {
-            platform: text("platform"),
-            display_name: text("display_name"),
-            id_label: text("id_label"),
-            secret_label: text("secret_label"),
-            store_id_key: text("store_id_key"),
-            store_secret_key: text("store_secret_key"),
-            redirect_uri: text("redirect_uri"),
-            scopes: spec["scopes"]
-                .as_array()
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_string)
-                        .collect()
-                })
-                .unwrap_or_default(),
-            create_url: text("create_url"),
-            docs_url: text("docs_url"),
-            enables: text("enables"),
-            config_id_field: text("config_id_field"),
-            config_secret_field: text("config_secret_field"),
-            configurable: spec["configurable"].as_bool().unwrap_or(true),
-            env_id_var: text("env_id_var"),
-            env_secret_var: text("env_secret_var"),
-        });
-    }
-    Ok(Registry {
-        order,
-        specs,
-        meta_redirect_uri: document["meta_redirect_uri"]
-            .as_str()
-            .unwrap_or("")
-            .to_string(),
-    })
-}
-
-/// `mask_app_id()`: never echo an identifier in full.
-fn mask_app_id(app_id: &str) -> String {
-    if app_id.is_empty() {
-        return String::new();
-    }
-    let chars: Vec<char> = app_id.chars().collect();
-    if chars.len() <= 4 {
-        return "•".repeat(chars.len());
-    }
-    format!("…{}", chars[chars.len() - 4..].iter().collect::<String>())
-}
-
-/// One field of `accounts.<platform>` in the config document.
-///
-/// The account sections live under `accounts:` — `XPSTConfig._merge_config`
-/// reads `file_config["accounts"][platform]` and exposes it as the model's
-/// `<platform>` attribute, which is what `_account_field` then reads. Looking
-/// at the top level instead silently reports every platform as unconfigured.
-fn account_field(config: &YamlValue, platform: &str, field: &str) -> String {
-    config
-        .get("accounts")
-        .and_then(|accounts| accounts.get(platform))
-        .and_then(|section| section.get(field))
-        .and_then(YamlValue::as_str)
-        .unwrap_or("")
-        .to_string()
-}
-
-/// A resolved app credential: `(app_id, app_secret, source)`.
-struct Resolved {
-    app_id: String,
-    app_secret: String,
-    source: &'static str,
-}
-
-/// `resolve_byo_app()`.
-fn resolve(spec: &Spec, config: &YamlValue, store: &CredentialStore) -> Option<Resolved> {
-    let stored_id = store.retrieve(&spec.store_id_key).unwrap_or_default();
-    let stored_secret = store.retrieve(&spec.store_secret_key).unwrap_or_default();
-    if !stored_id.is_empty() && !stored_secret.is_empty() {
-        return Some(Resolved {
-            app_id: stored_id,
-            app_secret: stored_secret,
-            source: "encrypted-store",
-        });
-    }
-
-    // `XPSTConfig.load` applies these env vars to the config fields, so a
-    // caller that set them sees the same answer from both engines.
-    let env = |name: &str| std::env::var(name).unwrap_or_default();
-    let config_id = if spec.config_id_field.is_empty() {
-        String::new()
-    } else {
-        let from_env = env(&spec.env_id_var);
-        if from_env.is_empty() {
-            account_field(config, &spec.platform, &spec.config_id_field)
-        } else {
-            from_env
-        }
-    };
-    let config_secret = if spec.config_secret_field.is_empty() {
-        String::new()
-    } else {
-        let from_env = env(&spec.env_secret_var);
-        if from_env.is_empty() {
-            account_field(config, &spec.platform, &spec.config_secret_field)
-        } else {
-            from_env
-        }
-    };
-
-    if !config_id.is_empty() && !config_secret.is_empty() {
-        return Some(Resolved {
-            app_id: config_id,
-            app_secret: config_secret,
-            source: "config",
-        });
-    }
-    if !config_id.is_empty() && stored_id.is_empty() {
-        return Some(Resolved {
-            app_id: config_id,
-            app_secret: String::new(),
-            source: "config-incomplete",
-        });
-    }
-    None
-}
-
-/// `byo_status_for_platform()`.
-fn status_for(spec: &Spec, config: &YamlValue, store: &CredentialStore) -> YamlValue {
-    let resolved = resolve(spec, config, store);
-    let configured = resolved
-        .as_ref()
-        .is_some_and(|resolved| !resolved.app_secret.is_empty());
-    let half_configured = resolved
-        .as_ref()
-        .is_some_and(|resolved| resolved.app_secret.is_empty());
-    let app_id_masked = resolved
-        .as_ref()
-        .map(|resolved| mask_app_id(&resolved.app_id))
-        .unwrap_or_default();
-    let source = resolved
-        .as_ref()
-        .map(|resolved| resolved.source)
-        .unwrap_or("");
-    let env_vars: Vec<YamlValue> = [&spec.env_id_var, &spec.env_secret_var]
-        .into_iter()
-        .filter(|name| !name.is_empty())
-        .map(|name| string(name.clone()))
-        .collect();
-
-    object(vec![
-        ("platform", string(spec.platform.clone())),
-        ("display_name", string(spec.display_name.clone())),
-        ("configurable", boolean(spec.configurable)),
-        ("configured", boolean(configured)),
-        ("half_configured", boolean(half_configured)),
-        ("app_id_masked", string(app_id_masked)),
-        ("source", string(source)),
-        ("id_label", string(spec.id_label.clone())),
-        ("secret_label", string(spec.secret_label.clone())),
-        ("redirect_uri", string(spec.redirect_uri.clone())),
-        (
-            "scopes",
-            array(
-                spec.scopes
-                    .iter()
-                    .map(|scope| string(scope.clone()))
-                    .collect(),
-            ),
-        ),
-        ("create_url", string(spec.create_url.clone())),
-        ("docs_url", string(spec.docs_url.clone())),
-        ("enables", string(spec.enables.clone())),
-        (
-            "sign_in_available",
-            boolean(configured && spec.configurable),
-        ),
-        ("env_vars", array(env_vars)),
-    ])
-}
-
-/// `byo_status_for_platform()` for one platform, or `None` when the platform
-/// has no BYO path.
-///
-/// `xpst providers` embeds this per provider (`byo_app`), so the catalog and
-/// `xpst byo status` cannot disagree about which platforms have an app.
-pub(crate) fn status_for_platform(
-    config: &YamlValue,
-    platform: &str,
-    store: &CredentialStore,
-) -> Option<YamlValue> {
-    let registry = registry().ok()?;
-    let spec = registry
-        .specs
-        .iter()
-        .find(|spec| spec.platform == platform)?;
-    Some(status_for(spec, config, store))
-}
-
-/// The note `byo_status()` carries, verbatim.
-const NOTE: &str = "One Meta app covers Instagram, Threads and Messenger: enter it once and both platforms pick it up. Secrets live only in the encrypted store under the xPST config dir and are never echoed back.";
+// The registry, the credential resolution and the masked status payload are
+// shared with the MCP surface, so they live below both crates. `byo_status()`
+// itself (the whole-platform payload) is not re-exported: this module's `status`
+// is the command runner, and the MCP tool imports the builder directly.
+pub use xpst_surface::byo::{
+    mask_app_id, registry, resolve, status_for, status_for_platform, Registry, Resolved, Spec, NOTE,
+};
 
 /// Resolve the profile and its config document.
 fn load(
@@ -322,23 +78,14 @@ pub fn status(
     };
     let store = CredentialStore::new(&dir);
 
-    let mut platforms = Mapping::new();
-    for spec in &registry.specs {
-        platforms.insert(
-            YamlValue::from(spec.platform.as_str()),
-            status_for(spec, &config, &store),
-        );
-    }
-
     if json_mode {
-        let payload = object(vec![
-            ("platforms", YamlValue::Mapping(platforms)),
-            (
-                "meta_redirect_uri",
-                string(registry.meta_redirect_uri.clone()),
-            ),
-            ("note", string(NOTE)),
-        ]);
+        let payload = match xpst_surface::byo::status(&config, &store) {
+            Ok(payload) => payload,
+            Err(message) => {
+                let _ = writeln!(err, "xpst byo status: {message}");
+                return exit::GENERAL;
+            }
+        };
         let _ = write_python_json(out, &payload);
         return exit::SUCCESS;
     }

@@ -471,3 +471,185 @@ bio:
         "an enabled account with a handle comes first; a non-http link is dropped"
     );
 }
+
+/// `xpst_activity`: one row per (video, platform) failure, `retry` only when the
+/// uploader classified the failure as retryable, newest first.
+///
+/// The `instagram` entry is a bare string on purpose — the handler skips a
+/// non-dict result, and `get_statistics` raises on one, so this branch cannot be
+/// carried by the shared protocol fixture.
+#[test]
+fn activity_flattens_failures_and_skips_a_non_dict_entry() {
+    let dir = profile("activity");
+    std::fs::write(
+        dir.join("state.json"),
+        r#"{
+          "version": 2,
+          "posted_videos": {
+            "vid-a": {
+              "source_url": "https://example.invalid/a",
+              "last_attempt": "2026-11-20T10:00:00+00:00",
+              "errors": {
+                "youtube": {"error": "quota exceeded", "retryable": true, "timestamp": "2026-11-20T10:00:00+00:00"},
+                "x": {"error": "rate limited", "retryable": false, "timestamp": "2026-11-19T09:00:00+00:00"},
+                "instagram": "not a dict"
+              }
+            },
+            "vid-b": {
+              "source_url": "https://example.invalid/b",
+              "errors": {"youtube": {"error": "", "retryable": null}}
+            }
+          },
+          "health": {"total_processed": 2, "platforms": {}}
+        }"#,
+    )
+    .expect("write state");
+
+    let payload = call(&ctx(&dir), "xpst_activity", json!({}));
+
+    assert_eq!(payload["count"], json!(3), "the non-dict entry is skipped");
+    let rows = payload["failures"].as_array().expect("failures");
+    assert_eq!(rows.len(), 3);
+    // Newest first: vid-a/youtube, vid-a/x, then the undated vid-b row.
+    assert_eq!(rows[0]["video_id"], json!("vid-a"));
+    assert_eq!(rows[0]["platform"], json!("youtube"));
+    assert_eq!(rows[0]["action"], json!("retry"));
+    assert_eq!(rows[0]["retryable"], json!(true));
+    assert_eq!(rows[1]["action"], json!("review"));
+    assert_eq!(rows[1]["retryable"], json!(false));
+    // `error or "Unknown error"`, and a missing timestamp stays null.
+    assert_eq!(rows[2]["error"], json!("Unknown error"));
+    assert_eq!(rows[2]["last_attempt"], Value::Null);
+    assert_eq!(rows[2]["action"], json!("review"));
+    assert_eq!(rows[2]["post_id"], Value::Null);
+    assert_eq!(rows[2]["post_url"], Value::Null);
+}
+
+/// `xpst_followers`: per-platform count, growth over the last seven snapshots,
+/// and the history oldest-first.
+#[test]
+fn followers_reports_counts_growth_and_history() {
+    let dir = profile("followers");
+    let store = xpst_store::Store::open(dir.join("analytics.db")).expect("open ledger");
+    for (platform, count, captured_at) in [
+        ("youtube", 1200, "2026-11-01T00:00:00+00:00"),
+        ("youtube", 1240, "2026-11-08T00:00:00+00:00"),
+        ("youtube", 1310, "2026-11-15T00:00:00+00:00"),
+        ("x", 480, "2026-11-15T00:00:00+00:00"),
+    ] {
+        store
+            .record_followers(platform, count, captured_at)
+            .expect("seed follower");
+    }
+
+    let payload = call(&ctx(&dir), "xpst_followers", json!({}));
+
+    assert_eq!(payload["total_followers"], json!(1790));
+    assert_eq!(payload["platform_count"], json!(2));
+    let platforms = payload["platforms"].as_array().expect("platforms");
+    // `sorted(latest.items())` — x before youtube.
+    assert_eq!(platforms[0]["platform"], json!("x"));
+    assert_eq!(platforms[0]["count"], json!(480));
+    assert_eq!(
+        platforms[0]["growth"],
+        json!(0),
+        "one snapshot is no growth"
+    );
+    assert_eq!(platforms[1]["platform"], json!("youtube"));
+    assert_eq!(platforms[1]["count"], json!(1310));
+    assert_eq!(platforms[1]["growth"], json!(110));
+    assert_eq!(
+        platforms[1]["history"],
+        json!([
+            {"count": 1200, "captured_at": "2026-11-01T00:00:00+00:00"},
+            {"count": 1240, "captured_at": "2026-11-08T00:00:00+00:00"},
+            {"count": 1310, "captured_at": "2026-11-15T00:00:00+00:00"},
+        ]),
+        "history is oldest first"
+    );
+}
+
+/// `xpst_followers` on a fresh profile: `AnalyticsStore.__init__` creates the
+/// ledger, so the answer is zeroes, not an error.
+#[test]
+fn followers_on_a_fresh_profile_is_zeroes() {
+    let dir = profile("followers-fresh");
+    let payload = call(&ctx(&dir), "xpst_followers", json!({}));
+    assert_eq!(payload["total_followers"], json!(0));
+    assert_eq!(payload["platform_count"], json!(0));
+    assert_eq!(payload["platforms"], json!([]));
+    assert!(dir.join("analytics.db").exists(), "the ledger is created");
+}
+
+/// `xpst_capabilities`: the offline catalog projection plus the content
+/// contract, with every live-derived fact `null`.
+#[test]
+fn capabilities_serves_the_offline_catalog_and_the_content_contract() {
+    let dir = profile("capabilities");
+    // Disable YouTube explicitly: `state` otherwise depends on whether the
+    // machine's real `~/.xpst/youtube_token.json` exists, which would make this
+    // assertion a property of the developer's profile.
+    std::fs::write(
+        dir.join("config.yaml"),
+        "version: 4\naccounts:\n  youtube:\n    enabled: false\n",
+    )
+    .expect("write config");
+    let payload = call(&ctx(&dir), "xpst_capabilities", json!({}));
+
+    assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["contract_version"], json!(1));
+    assert_eq!(
+        payload["roles"],
+        json!(["source", "video_destination", "messaging", "analytics"])
+    );
+    let providers = payload["providers"].as_array().expect("providers");
+    assert_eq!(providers.len(), 10, "every SUPPORTED_PROVIDERS entry");
+    let youtube = providers
+        .iter()
+        .find(|row| row["name"] == json!("youtube"))
+        .expect("youtube");
+    assert_eq!(
+        youtube.as_object().expect("row").keys().collect::<Vec<_>>(),
+        vec![
+            "name",
+            "display_name",
+            "roles",
+            "capabilities",
+            "state",
+            "docs_url"
+        ],
+        "the tool's projection is six fields, not the CLI's whole catalog entry"
+    );
+    assert_eq!(youtube["state"], json!("disabled"));
+    assert_eq!(
+        youtube["roles"],
+        json!(["source", "video_destination", "analytics"])
+    );
+    assert!(youtube["capabilities"]
+        .as_array()
+        .is_some_and(|caps| caps.contains(&json!("upload"))));
+    // The content contract rides along verbatim.
+    assert_eq!(payload["content"]["contract_version"], json!(2));
+    assert!(payload["content"]["platforms"]["youtube"].is_object());
+}
+
+/// `xpst_transcript` refuses an unsafe id before touching the workspace, and the
+/// wire body has no `Error: ` prefix — the handler answers with its own
+/// `CallToolResult(isError=True, ...)` rather than raising.
+#[test]
+fn transcript_rejects_an_unsafe_video_id() {
+    let dir = profile("transcript-invalid");
+    let error = registry()
+        .dispatch(
+            &ctx(&dir),
+            "xpst_transcript",
+            &json!({"video_id": "../escape"}),
+        )
+        .expect_err("an unsafe id is refused");
+    assert_eq!(
+        error.to_string(),
+        "Invalid video_id: must contain only alphanumeric, dash, underscore, colon, or dot \
+         characters (got: '../escape')"
+    );
+    assert_eq!(error.code(), "reported_error");
+}
