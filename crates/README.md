@@ -23,14 +23,20 @@ questions and refuses everything else with
 | `xpst schedule list` | The queue with each entry's local rendering, plus the pause marker and any `schedule.json.paused-*` snapshots, so an empty list cannot read as "paused and emptied". |
 | `xpst failures list` | The dead-letter queue: status (`open`/`resolved`), age, count and the platform's error. |
 
-Everything else — 95 of the 102 command paths — parses its arguments exactly as the
+Everything else — 27 of the 88 leaf commands — parses its arguments exactly as the
 Python CLI does and then exits `1` with the message above. Argument errors (missing
-required option, unknown flag) are exit `2`, matching Click.
+required option, unknown flag) are exit `2`, matching Click. The 14 group containers
+(`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`,
+`messenger`, `plugins`, `schedule`, `state`, `stream`) print help in both engines.
 
 `docs/technical/rust-parity-ledger.md` is the per-command answer to "is this one
 implemented, which crate owns it, and does the Python path it replaces call the
 network". It is generated from the engine's own tables by `cargo xtask ledger
 --write`, and `cargo test -p xpst-cli` fails when it drifts.
+
+`docs/technical/cli-parity-gates.md` is the companion map for the stubs: why each
+remaining command is not a mechanical port (network, the dashboard server, the vector
+store, or a named blocker), with the deciding `src/xpst/` call cited for every one.
 
 Read-only is a hard property for the read paths: they open files for reading only,
 never upload and never open a socket. The one write is `status`'s first-run config
