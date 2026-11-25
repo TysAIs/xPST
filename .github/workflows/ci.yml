@@ -64,9 +64,21 @@ jobs:
         run: |
           set -euo pipefail
           python -m xpst media fetch --json
-          if [ -d "$XPST_MEDIA_BIN_DIR" ]; then
-            echo "$XPST_MEDIA_BIN_DIR" >> "$GITHUB_PATH"
-          fi
+          # GITHUB_PATH wants a native path. A mixed-separator entry still works
+          # for Windows, but code that compares PATH entries literally
+          # (tests/test_cross_platform.py::test_ffmpeg_path_from_path_env) needs
+          # the canonical form, so normalise it exactly the way pathlib does.
+          python - "$XPST_MEDIA_BIN_DIR" "$GITHUB_PATH" <<'PY'
+          import os
+          import pathlib
+          import sys
+
+          bin_dir, github_path = sys.argv[1], sys.argv[2]
+          path = pathlib.Path(bin_dir)
+          if path.is_dir():
+              with open(github_path, "a", encoding="utf-8") as handle:
+                  handle.write(os.path.normpath(str(path)) + "\n")
+          PY
 
       # Prove the binaries actually run before the suite depends on them, so a
       # silent no-op install can never reach the tests again.
