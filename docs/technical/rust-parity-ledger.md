@@ -4,7 +4,7 @@
 
 One row per leaf command of the shipped CLI. `status` is `implemented` when the Rust engine runs the command and `stub` when it answers `not implemented in the Rust engine yet`. The two columns either side are the questions a reader actually has: which crate owns the behaviour, and whether the Python implementation they are comparing against makes an outbound network call.
 
-**58 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
+**61 of 88 leaf commands are implemented.** The rest parse their arguments exactly as the Python CLI does and exit 1 (`NOT_IMPLEMENTED`, documented as `EXIT_GENERAL`). The 14 group commands (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`, `messenger`, `plugins`, `schedule`, `state`, `stream`) are containers: a bare invocation prints help in both engines, which `crates/xpst-cli/tests/parity.rs` covers.
 
 ## Columns
 
@@ -38,7 +38,7 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `delete` | stub | xpst-core | yes |
 | `devices` | implemented | xpst-auth | none |
 | `diagnostics` | implemented | xpst-cli | possible |
-| `disconnect` | stub | xpst-auth | yes |
+| `disconnect` | implemented | xpst-auth | yes |
 | `doctor` | implemented | xpst-cli | yes |
 | `failures clear` | implemented | xpst-state | none |
 | `failures list` | implemented | xpst-state | none |
@@ -96,13 +96,13 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `stream relay-config` | implemented | xpst-provider | none |
 | `stream set-key` | implemented | xpst-provider | none |
 | `suggest-caption` | stub | xpst-core | possible |
-| `transcript` | stub | xpst-store | possible |
+| `transcript` | implemented | xpst-store | possible |
 | `ui` | stub | xpst-api | none |
 | `update` | stub | xpst-cli | yes |
 | `verify-media` | implemented | xpst-media | none |
 | `version` | implemented | xpst-cli | none |
 | `watch` | stub | xpst-core | yes |
-| `wizard` | stub | xpst-auth | possible |
+| `wizard` | implemented | xpst-auth | possible |
 
 ## Implemented commands
 
@@ -166,6 +166,9 @@ One row per leaf command of the shipped CLI. `status` is `implemented` when the 
 | `plugins list` | xpst-cli | The installed-plugin inventory: `~/.xpst/plugins` resolved from HOME (not `XPST_CONFIG_DIR`, as `DEFAULT_PLUGIN_DIR` does), the directory created on a fresh profile, and the `{plugins, count}` payload with `list_plugins()`'s five keys in order; payload byte-compared with the Python CLI. A plugin is Python code, so the inventory is asked of an interpreter (`XPST_PYTHON`, else `python3`, else `python`) running the shipped `PluginManager` — the same out-of-process shape `kb doctor` uses. |
 | `plugins docs` | xpst-cli | The generated markdown: the header, the `Auto-generated on` stamp, the plugin count, and per plugin its name, version, description, capabilities and `config_options` rows, written to `--output` or carried in the payload; payload and written file byte-compared with the Python CLI (the stamp masked). Same interpreter delegation as `plugins list`. |
 | `schedule install` | xpst-state | The Linux scheduler entry: `crontab -l` read, the prior xPST marker/command pair filtered out (including Python's `skip_next` quirk), the `*/N * * * * <bin> serve >> <log> 2>&1` line appended and written back with `crontab -`, plus `--remove`'s `crontab -`/`crontab -r` split and the `No crontab entries found` answer; payload and the resulting crontab byte-compared with the Python CLI against a stand-in `crontab` on PATH. The macOS LaunchAgent and Windows scheduled-task branches are not ported (named divergence). |
+| `disconnect` | xpst-auth | `disconnect_platform()` (the encrypted store's keys, the library-native plaintext files, `sessions/*<platform>*`, then `enabled: false` and the config save) behind the CLI's own destructive-action guard: a non-interactive or `--json` call without `--yes` answers `CONFIRMATION_REQUIRED` and exits 1 before anything is touched. Payload and the resulting `config.yaml` byte-compared with the Python CLI; the human view is plain text (standing divergence). |
+| `transcript` | xpst-store | The three lookups in `Workspace.get_transcript()` order (`<id>.json`, `content:<id>.json`, then the first `transcripts/` file whose name contains the id) with `create=False`; a hit is `json.dumps(indent=2)` and a miss is the compact `{"error", "video_id"}` document with exit 1. Payload and exit code byte-compared with the Python CLI. |
+| `wizard` | xpst-auth | The deprecated alias of `setup`: the same resumable transaction (`start`/`status`/`resume`/`reset` with `alias: wizard`), the agent-mode envelope (`mode`, `interactive`, `all_pass`, `completed`, `next_action`), the `INTERACTIVE_REQUIRED` document with exit 3, the legacy checklist built from a captured `PLATFORM_GUIDES` table, and `--export-md`'s markdown (byte-compared with the shipped `export_markdown()`). Payload byte-compared with the Python CLI (transaction id and timestamps masked). The interactive executor (`run_wizard`, browser + live checks) is not ported — named divergence. |
 
 ## Known deviations from the Python engine
 
@@ -215,3 +218,6 @@ Named on purpose: a difference that is not written down is a bug nobody found.
 * `mcp start`'s URL guard ALLOWS deprecated site-local IPv6 (`fec0::/10`), because Python does: it is in neither `ipaddress`'s `_private_networks` nor its `_reserved_networks`. Reproduced rather than fixed — the wire contract is the shipped one — and pinned by the `ipv6-fec0::1` row so a future Python fix shows up as a fixture diff. `192.88.99.1` (the 6to4 relay anycast) is allowed for the same reason.
 * `mcp start`'s URL guard is only reachable on the tools whose schema declares a URL argument — `kb_add` and `xpst_backfill` (`source`). `xpst_run` also declares `source` but pins an `enum` of platform names, so the SDK rejects a URL there before the guard runs; an argument the schema does not declare never reaches the guard at all, because the Python SDK answers `Input validation error: Additional properties are not allowed` first. The Rust server does not enforce `additionalProperties: false`, so it would run the guard on an undeclared argument Python rejects at the SDK layer — a pre-existing divergence in argument validation, not in the guard, and the reason the wire fixture carries the URL rows on `kb_add`/`xpst_backfill` rather than on a read-only tool.
 * `mcp start`'s URL guard resolves a hostname with `ToSocketAddrs` where Python uses `getaddrinfo(..., proto=IPPROTO_TCP)`. Both return every address the name maps to, which is what the guard needs: a name that resolves to both a public and a private address is refused by both engines (the DNS-rebinding case).
+* `transcript` with an id that fails `_validate_content_hash()` reproduces Python's uncaught `ValueError` contract — empty stdout, exit 1 — but prints the exception line (`ValueError: Invalid content_hash: …`) instead of the traceback frames, which name Python files and line numbers. The field name is `content_hash` here and `video_id` on the MCP tool, because the CLI goes through `Workspace.get_transcript()` and the tool validates its own argument.
+* `disconnect` reads the raw `config.yaml` instead of running `XPSTConfig.load()`'s validation, so a config that fails validation reaches the confirmation guard here and fails at save with Python's `Configuration errors:` sentence, where Python exits 2 from `load_config()` before the guard is printed. A valid config is identical on both paths.
+* `wizard`'s interactive executor (`run_wizard()`, which opens a browser and runs live health checks) is not ported. `--json` and a non-TTY stdin — the agent contract, and the only path the harness exercises — are byte-identical; an interactive terminal gets the transaction state plus a line naming `python -m xpst wizard` for the human actions. The guide table is a captured resource (`resources/wizard_guides.json`, written by `xtask/scripts/capture_wizard_guides.py`) rather than a hand transcription, and the `--export-md` bytes are held to `tests/fixtures/wizard_export.md`.

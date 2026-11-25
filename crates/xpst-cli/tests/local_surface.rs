@@ -27,7 +27,7 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 190;
+const EXPECTED_SCENARIOS: usize = 202;
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -320,12 +320,27 @@ fn normalize(
         }
     }
     walk(value, &root, mask_lines);
-    if let Value::Object(map) = value {
-        for path in mask {
-            if map.contains_key(path) {
-                map.insert(path.clone(), Value::String("<TS>".to_string()));
+    // `mask` is applied at ANY depth, matching `normalize()` in
+    // `capture_local_surface.py`: a wall-clock field is nested as often as the
+    // payload nests it (`readiness.verified_at`, a checklist entry's `steps`),
+    // and a top-level-only pass would leave the fixture and the actual
+    // disagreeing on exactly the values the mask exists for.
+    fn mask_walk(value: &mut Value, mask: &[String]) {
+        match value {
+            Value::Array(items) => items.iter_mut().for_each(|item| mask_walk(item, mask)),
+            Value::Object(map) => {
+                for path in mask {
+                    if map.contains_key(path) {
+                        map.insert(path.clone(), Value::String("<TS>".to_string()));
+                    }
+                }
+                map.values_mut().for_each(|item| mask_walk(item, mask));
             }
+            _ => {}
         }
+    }
+    mask_walk(value, mask);
+    if let Value::Object(map) = value {
         // `kb doctor`'s dependency probe asks an interpreter what is installed,
         // so its answer is a property of the machine, not of the engine. Blank
         // the named findings and decrement the severity count each contributed;

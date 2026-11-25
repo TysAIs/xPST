@@ -2625,6 +2625,227 @@ SCENARIOS = [
         "mask": ["output"],
         "compare": "json",
     },
+    # ── transcript ──────────────────────────────────────────────────────────
+    # `Workspace.resolve("default")` reads `XPST_HOME`, which the harness does
+    # not pin for other rows; these scenarios pin it to the scratch profile so
+    # the transcripts directory is the fixture's, not the operator's.
+    {
+        "name": "transcript_direct_id",
+        "argv": ["transcript", "vid-a", "--json"],
+        "seed": {
+            "knowledge/default/transcripts/vid-a.json": json.dumps(
+                {
+                    "content_hash": "vid-a",
+                    "text": "hello wörld — a transcript",
+                    "segments": [
+                        {"start": 0.0, "end": 1.5, "text": "hello"},
+                        {"start": 1.5, "end": 3.0, "text": "wörld"},
+                    ],
+                },
+                ensure_ascii=False,
+            )
+        },
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
+    },
+    {
+        # The second lookup: `content:<id>.json`.
+        "name": "transcript_content_hash",
+        "argv": ["transcript", "hash-b", "--json"],
+        "seed": {
+            "knowledge/default/transcripts/content:hash-b.json": json.dumps(
+                {"content_hash": "content:hash-b", "text": "second", "segments": []}
+            )
+        },
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
+    },
+    {
+        # The third lookup: the first file whose NAME CONTAINS the id.
+        "name": "transcript_substring_match",
+        "argv": ["transcript", "zzz", "--json"],
+        "seed": {
+            "knowledge/default/transcripts/aaa-zzz-bbb.json": json.dumps(
+                {"content_hash": "aaa-zzz-bbb", "text": "found by substring", "segments": []}
+            )
+        },
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
+    },
+    {
+        # A miss is a payload plus exit 1, not an error result.
+        "name": "transcript_missing",
+        "argv": ["transcript", "nope", "--json"],
+        "seed": {},
+        "env": {"XPST_HOME": "PROFILE"},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # Python raises an uncaught ValueError out of `get_transcript()`: empty
+        # stdout, exit 1, traceback on stderr. The Rust engine reproduces the
+        # empty stdout and exit 1; the stderr text is the ledger's standing
+        # divergence (the exception line instead of the frames), so the row
+        # pins the observable contract and the note carries the difference.
+        "name": "transcript_invalid_id",
+        "argv": ["transcript", "bad/id", "--json"],
+        "seed": {},
+        "env": {"XPST_HOME": "PROFILE"},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    # ── disconnect ──────────────────────────────────────────────────────────
+    # `config_dir: ".xpst"` pins `HOME` to the scratch profile, so the config
+    # `save()` writes carries the profile as its `home` (normalized to
+    # `<PROFILE>`) instead of the operator's real home directory.
+    {
+        # The destructive-action guard: no `--yes` in a non-TTY answers
+        # CONFIRMATION_REQUIRED and touches nothing.
+        "name": "disconnect_refused_without_yes",
+        "argv": ["disconnect", "x", "--json"],
+        "seed": {".xpst/credentials/x_cookies.json": json.dumps({"guest_id": "1"})},
+        "config_dir": ".xpst",
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # `--yes` removes the library-native file and the `sessions/*` artifact,
+        # flips `enabled` and rewrites the whole config from the model.
+        "name": "disconnect_removes_credentials",
+        "argv": ["disconnect", "x", "--yes", "--json"],
+        "seed": {
+            ".xpst/credentials/x_cookies.json": json.dumps({"guest_id": "1"}),
+            ".xpst/sessions/x-parity.json": json.dumps({}),
+        },
+        "config_dir": ".xpst",
+        "files": [".xpst/config.yaml"],
+        "compare": "stdout",
+    },
+    {
+        # Nothing stored: the payload reports an empty `removed` list and the
+        # config is still written (Python calls `save()` unconditionally).
+        "name": "disconnect_nothing_stored",
+        "argv": ["disconnect", "youtube", "--yes", "--json"],
+        "seed": {},
+        "config_dir": ".xpst",
+        "files": [".xpst/config.yaml"],
+        "compare": "stdout",
+    },
+    # ── wizard ──────────────────────────────────────────────────────────────
+    # The transaction id and every stamp are the wall clock, so they are masked
+    # at any depth. `steps`/`why` are the guide prose: the export fixture
+    # (`tests/fixtures/wizard_export.md`) pins those bytes, and masking them here
+    # keeps the row about the checklist's verdicts instead of its paragraphs.
+    {
+        # A fresh profile: `start` runs, the transaction is incomplete, so the
+        # INTERACTIVE_REQUIRED document is appended and the exit is 3.
+        "name": "wizard_agent_start",
+        "argv": ["wizard", "--json"],
+        "seed": {},
+        "mask": [
+            "transaction_id",
+            "created_at",
+            "updated_at",
+            "started_at",
+            "completed_at",
+            "verified_at",
+            "steps",
+            "why",
+        ],
+        "allow_nonzero": True,
+        "compare": "json",
+    },
+    {
+        # No transaction yet: `status` answers `transaction: null` and no
+        # INTERACTIVE_REQUIRED document.
+        "name": "wizard_status_empty",
+        "argv": ["wizard", "--status", "--json"],
+        "seed": {},
+        "mask": [
+            "transaction_id",
+            "created_at",
+            "updated_at",
+            "started_at",
+            "completed_at",
+            "verified_at",
+            "steps",
+            "why",
+        ],
+        "compare": "json",
+    },
+    {
+        # A seeded transaction with one verified step plus a legacy
+        # `wizard_state.json`: the checklist's `health`, `action` and
+        # `last_wizard_status` columns are the contract.
+        "name": "wizard_checklist_seeded",
+        "argv": ["wizard", "--status", "--json"],
+        "seed": {
+            "setup_transaction.json": json.dumps(
+                {
+                    "schema_version": 1,
+                    "transaction_id": "11111111-2222-3333-4444-555555555555",
+                    "selected_role_capabilities": [
+                        {"role": "source", "capability": "tiktok"},
+                        {"role": "video_destination", "capability": "youtube"},
+                    ],
+                    "steps": [
+                        {
+                            "step_id": "verify_source_tiktok",
+                            "role": "source",
+                            "capability": "tiktok",
+                            "state": "pending",
+                            "human_action": None,
+                            "started_at": None,
+                            "completed_at": None,
+                            "updated_at": "2026-01-01T00:00:00.000Z",
+                            "error": None,
+                        },
+                        {
+                            "step_id": "verify_video_destination_youtube",
+                            "role": "video_destination",
+                            "capability": "youtube",
+                            "state": "verified",
+                            "human_action": None,
+                            "started_at": "2026-01-01T00:00:00.000Z",
+                            "completed_at": "2026-01-01T00:00:01.000Z",
+                            "updated_at": "2026-01-01T00:00:01.000Z",
+                            "error": None,
+                        },
+                    ],
+                    "created_at": "2026-01-01T00:00:00.000Z",
+                    "updated_at": "2026-01-01T00:00:01.000Z",
+                    "state": "in_progress",
+                    "readiness": {},
+                    "completion": {"complete": False, "state": "in_progress"},
+                    "errors": [],
+                    "pending_human_actions": [],
+                    "human_actions": [],
+                }
+            ),
+            "wizard_state.json": json.dumps(
+                {"platforms": {"youtube": {"status": "done"}, "x": {"status": "failed"}}}
+            ),
+        },
+        "mask": [
+            "transaction_id",
+            "created_at",
+            "updated_at",
+            "started_at",
+            "completed_at",
+            "verified_at",
+            "steps",
+            "why",
+        ],
+        "compare": "json",
+    },
+    {
+        # `--export-md` writes the guide and answers with the path.
+        "name": "wizard_export_md",
+        "argv": ["wizard", "--export-md", "PROFILE/guide.md", "--json"],
+        "seed": {},
+        "files": ["guide.md"],
+        "compare": "stdout",
+    },
 ]
 
 

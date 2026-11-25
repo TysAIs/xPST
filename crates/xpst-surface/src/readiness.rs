@@ -52,7 +52,10 @@ fn role_label(role: &str) -> String {
 }
 
 /// Python's `str.title()` for the ASCII names this module renders.
-fn title_case(text: &str) -> String {
+///
+/// Public because `xpst disconnect` renders `platform.title()` in its human
+/// view; one implementation keeps the two surfaces agreeing.
+pub fn title_case(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut start = true;
     for character in text.chars() {
