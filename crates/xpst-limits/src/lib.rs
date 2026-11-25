@@ -60,12 +60,16 @@
 #![forbid(unsafe_code)]
 
 pub mod clock;
+pub mod cooldowns;
 pub mod decision;
 pub mod envelope;
 pub mod jitter;
 pub mod store;
 
 pub use clock::{next_pacific_midnight_ms, now_ms, DAY_MS, HOUR_MS, MINUTE_MS, SECOND_MS};
+pub use cooldowns::{
+    format_duration, report as cooldown_report, COOLDOWN_FILENAME, COOLDOWN_SEMANTICS,
+};
 pub use decision::{evaluate, AccountView, Decision, RefusalCode, Request, Rule, View};
 pub use envelope::{
     envelope, Ceiling, ChallengeBehaviour, Confidence, Envelope, Family, Platform, SameAssetPolicy,

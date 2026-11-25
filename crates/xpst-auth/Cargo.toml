@@ -25,6 +25,9 @@ cbc = "0.1"
 # Apache-2.0, and it is the audited way to get OS entropy without `unsafe`.
 getrandom = "0.4"
 hmac = "0.12"
+# Timestamp rendering for badge fields (`token_state._iso`). Already in the
+# workspace graph through `xpst-state`/`xpst-limits`.
+jiff = { workspace = true }
 scrypt = { version = "0.11", default-features = false, features = ["simple"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

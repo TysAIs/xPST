@@ -120,7 +120,7 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "doctor",
         "xpst-cli",
-        "Local-only diagnostics; live probes are P1 (the report says so), so the payload differs from Python's live report by design (see the deviations).",
+        "The live health report: canonical per-provider status with badge truth, per-role posting verdicts, quota rows, ban-risk advisories, rate-limit cooldowns and the environment checklist, assembled from `xpst-auth`/`xpst-limits` rather than re-derived. Payload byte-compared with the Python CLI on a seeded no-credential profile (`doctor_no_credentials`); a provider that holds a credential is reported `unverified` until the live transports land (see the deviations).",
         doctor,
     ),
     implemented(

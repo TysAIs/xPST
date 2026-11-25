@@ -27,7 +27,8 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 202;
+<<<<<<< HEAD
+const EXPECTED_SCENARIOS: usize = 203;
 
 /// The environment both engines are run under, whatever the caller inherited.
 ///
@@ -46,6 +47,9 @@ const PINNED_ENV: &[(&str, &str)] = &[
     // A payload that serialises a set would otherwise vary between runs.
     ("PYTHONHASHSEED", "0"),
 ];
+=======
+const EXPECTED_SCENARIOS: usize = 203;
+>>>>>>> 2296155a80af7458abd3b0d3f8d119e1aa2a3fd6
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -289,6 +293,7 @@ fn normalize_clock(text: &str) -> String {
     out
 }
 
+<<<<<<< HEAD
 /// `[MM/DD/YY HH:MM:SS]` — `RichHandler`'s default `log_time_format`.
 fn is_log_stamp(text: &str) -> bool {
     let chars: Vec<char> = text.chars().collect();
@@ -370,6 +375,103 @@ fn assert_backups_match(row: &Value, profile: &Profile, scenario: &str) {
             );
         }
     }
+=======
+/// Replace the values `mask` names, wherever they appear.
+///
+/// A bare name (`checked_at`) is replaced at ANY depth — the doctor payload
+/// carries it once per provider. A dotted name (`environment.network.detail`)
+/// is a path, and a segment that is not a key selects the list element whose
+/// `name` field matches it. Masked values become `"<TS>"`, so the rest of the
+/// document is still compared byte for byte.
+fn mask_payload(payload: &mut Value, mask: &[String]) {
+    fn walk(value: &mut Value, keys: &[String]) {
+        let Some((head, rest)) = keys.split_first() else {
+            *value = Value::String("<TS>".to_string());
+            return;
+        };
+        match value {
+            Value::Object(map) => {
+                if let Some(child) = map.get_mut(head) {
+                    walk(child, rest);
+                }
+            }
+            Value::Array(items) => {
+                for item in items.iter_mut() {
+                    if item.get("name").and_then(Value::as_str) == Some(head.as_str()) {
+                        walk(item, rest);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn replace(value: &mut Value, key: &str) {
+        match value {
+            Value::Object(map) => {
+                for (name, child) in map.iter_mut() {
+                    if name == key {
+                        *child = Value::String("<TS>".to_string());
+                    } else {
+                        replace(child, key);
+                    }
+                }
+            }
+            Value::Array(items) => {
+                for item in items.iter_mut() {
+                    replace(item, key);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for entry in mask {
+        if entry.contains('.') {
+            let keys: Vec<String> = entry.split('.').map(str::to_string).collect();
+            walk(payload, &keys);
+        } else {
+            replace(payload, entry);
+        }
+    }
+}
+
+/// Mask a `--json` payload and re-render it with Python's separators.
+///
+/// The re-render is asserted to reproduce the original bytes before masking, so
+/// the comparison stays a byte comparison of the whole document (key order,
+/// separators, number formatting) with only the named values replaced.
+fn masked_stdout(text: &str, mask: &[String]) -> String {
+    let mut payload: Value = serde_json::from_str(text.trim())
+        .unwrap_or_else(|error| panic!("stdout is not JSON ({error}):\n{text}"));
+    let rendered = xpst_config::python_style_json(&xpst_cli::output::from_json(&payload))
+        .expect("render the payload");
+    assert_eq!(
+        rendered,
+        text.trim_end_matches('\n'),
+        "stdout is not `json.dumps` output; a masked byte case would be comparing a re-rendered \
+         document"
+    );
+    mask_payload(&mut payload, mask);
+    xpst_config::python_style_json(&xpst_cli::output::from_json(&payload))
+        .expect("render the masked payload")
+}
+
+/// Point the connectivity probe at a loopback listener.
+///
+/// `check_network()` is the one environment check whose answer depends on the
+/// machine (and whose detail carries a measured latency). A listener makes the
+/// answer deterministically "online" on every runner; the detail is masked.
+fn network_probe_env(env: &mut Vec<(String, String)>) -> std::net::TcpListener {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("loopback listener");
+    let port = listener.local_addr().expect("listener address").port();
+    env.push((
+        "XPST_NETWORK_PROBE_HOST".to_string(),
+        "127.0.0.1".to_string(),
+    ));
+    env.push(("XPST_NETWORK_PROBE_PORT".to_string(), port.to_string()));
+    listener
+>>>>>>> 2296155a80af7458abd3b0d3f8d119e1aa2a3fd6
 }
 
 fn argv_for(row: &Value, profile: &Profile) -> Vec<String> {
@@ -509,7 +611,12 @@ fn every_recorded_scenario_matches_the_python_engine() {
         let profile = Profile::new(name);
         profile.seed(&row["seed"]);
         let argv = argv_for(row, &profile);
-        let env = env_for(row, &profile);
+        let mut env = env_for(row, &profile);
+        let _listener = row
+            .get("network_probe")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            .then(|| network_probe_env(&mut env));
         let config_dir = config_dir_for(row, &profile);
         let cwd = row
             .get("cwd")
@@ -546,6 +653,12 @@ fn every_recorded_scenario_matches_the_python_engine() {
                     .as_str()
                     .expect("stdout scenarios record the text");
                 let actual = stdout.replace(&profile.path().display().to_string(), "<PROFILE>");
+                let mask = mask_for(row);
+                let actual = if mask.is_empty() {
+                    actual
+                } else {
+                    masked_stdout(&actual, &mask)
+                };
                 assert_eq!(actual, expected, "scenario `{name}` stdout drifted");
             }
             "text" => {

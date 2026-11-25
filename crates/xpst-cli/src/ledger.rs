@@ -261,14 +261,19 @@ pub const DEVIATIONS: &[&str] = &[
      harness invokes the Python engine as a module). The message body — `Usage:`, `Try '… \
      --help'`, `Error: Invalid value for '--port' / '-p': 'abc' is not a valid integer.` — is \
      byte-identical.",
-    "`version`, `doctor` and `config validate` print a different `--json` payload from the \
-     Python engine, not a differently-rendered one: `version` reports the Rust engine's identity \
-     where Python lists its own dependency versions, `doctor` is local-only diagnostics where \
-     Python probes every platform live, and `config validate` runs the schema checks where \
-     Python also checks the download and log directories, the per-platform credential files and \
-     the rate limits. The renderer is shared (Python's `json.dumps` separators and insertion \
-     order), so the difference is the payload itself; porting the live doctor and the full \
-     validate check list are separate slices.",
+    "`version` and `config validate` print a different `--json` payload from the Python engine, \
+     not a differently-rendered one: `version` reports the Rust engine's identity where Python \
+     lists its own dependency versions, and `config validate` runs the schema checks where Python \
+     also checks the download and log directories, the per-platform credential files and the rate \
+     limits. The renderer is shared (Python's `json.dumps` separators and insertion order), so the \
+     difference is the payload itself; porting the full validate check list is a separate slice.",
+    "`doctor --json` is byte-identical to the Python engine on a profile with no credentials (the \
+     `doctor_no_credentials` byte case), but a provider that HOLDS a credential is reported \
+     `unverified` rather than probed: the Rust engine has no live transport yet, so it reproduces \
+     every verdict the shipped engine reaches before a socket opens (missing credentials, disabled \
+     accounts, the local source, TikTok's two independent capabilities) and refuses to invent the \
+     rest. The placeholder is honest — `probe_class: unverified`, badge `unknown`, never green — \
+     and the live probes are the remaining P1 gap.",
     "`generate caption` and `generate ideas` always take the deterministic path. Python tries \
      the KB LLM first (`XPST_KB_LLM_ENABLED` plus a base URL) and only falls back to the \
      templates when none is configured; the LLM client is not ported, so a machine with the \

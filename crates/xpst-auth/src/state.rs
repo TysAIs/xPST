@@ -172,7 +172,7 @@ impl Role {
 }
 
 /// One provider the truth table knows about.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Platform {
     YouTube,
@@ -185,6 +185,12 @@ pub enum Platform {
     Facebook,
     Rumble,
     Local,
+}
+
+impl std::fmt::Display for Platform {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
 }
 
 impl Platform {
@@ -251,6 +257,23 @@ impl Platform {
             Self::TikTok => "source_only",
             Self::Rumble => "api_key",
             Self::Local => "local",
+        }
+    }
+
+    /// The provider's human name (`ProviderDefinition.display_name`).
+    #[must_use]
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::YouTube => "YouTube Shorts",
+            Self::X => "X",
+            Self::Instagram => "Instagram Reels",
+            Self::Bluesky => "Bluesky",
+            Self::TikTok => "TikTok",
+            Self::Threads => "Threads",
+            Self::Messenger => "Messenger",
+            Self::Facebook => "Facebook Page",
+            Self::Rumble => "Rumble",
+            Self::Local => "Local files",
         }
     }
 

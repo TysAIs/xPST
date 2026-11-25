@@ -83,20 +83,16 @@ impl Verdict {
 
 /// Whether the configured auth mode is one of the provider's unofficial paths.
 fn ban_risk(input: &PlatformInput) -> Option<BanRiskAdvisory> {
-    let configured = input.facts.auth_mode.trim().to_ascii_lowercase();
-    let (code, severity) = match input.platform {
-        Platform::Instagram if configured == "session" => {
-            (BanRisk::UnofficialPrivateApi, Severity::High)
-        }
-        Platform::X if configured == "cookies" => {
-            (BanRisk::UnofficialWebClient, Severity::Advisory)
-        }
-        _ => return None,
-    };
+    // One registry (`auth_path_risk.UNOFFICIAL_AUTH_PATHS`) decides which paths
+    // are unofficial, so the truth table and the doctor advisory cannot drift.
+    let entry = crate::auth_path_risk::unofficial_path(input.platform)?;
+    if input.facts.auth_mode.trim().to_ascii_lowercase() != entry.auth_mode {
+        return None;
+    }
     Some(BanRiskAdvisory {
-        code,
-        advisory_code: code.advisory_code(),
-        severity,
+        code: entry.ban_risk,
+        advisory_code: entry.ban_risk.advisory_code(),
+        severity: entry.severity,
         enabled: input.facts.enabled,
         // Acknowledged paths are recorded on disk; no acknowledgement file
         // exists for these inputs, so the advisory must read as unacknowledged
@@ -110,7 +106,7 @@ fn ban_risk(input: &PlatformInput) -> Option<BanRiskAdvisory> {
 /// A mode reported by the probe wins, then the configured mode, then the
 /// provider's own rule (TikTok derives its route from the credentials it
 /// holds), then the catalog default.
-fn resolve_auth_mode(
+pub(crate) fn resolve_auth_mode(
     platform: Platform,
     facts: &crate::facts::CredentialFacts,
     probe: Option<&ProbeResult>,
@@ -141,7 +137,7 @@ fn resolve_auth_mode(
 }
 
 /// The probe a role reads: TikTok's two capabilities are separate probes.
-fn probe_for(input: &PlatformInput, role: Role) -> Option<&ProbeResult> {
+pub(crate) fn probe_for(input: &PlatformInput, role: Role) -> Option<&ProbeResult> {
     if input.platform == Platform::TikTok {
         match role {
             Role::Source => return input.source_live.as_ref().or(input.live.as_ref()),
@@ -160,7 +156,15 @@ fn probe_for(input: &PlatformInput, role: Role) -> Option<&ProbeResult> {
 /// Only consulted when a probe says no or never ran: a live success always
 /// wins, and stored encrypted credentials count even without a credential
 /// path.
-fn configured(input: &PlatformInput, role: Role) -> bool {
+pub(crate) fn configured(input: &PlatformInput, role: Role) -> bool {
+    // `_configured` accepts the ROLE's own raw result as proof first: a probe
+    // that reports `credentials_stored` / `configured` has already answered the
+    // question, and a path check must not overrule it.
+    if let Some(probe) = probe_for(input, role) {
+        if probe.credentials_stored || probe.configured {
+            return true;
+        }
+    }
     if input.facts.credentials_stored {
         return true;
     }
@@ -215,7 +219,7 @@ fn configured(input: &PlatformInput, role: Role) -> bool {
 }
 
 /// The state of one role, or `None` when the provider does not have it.
-fn role_state(input: &PlatformInput, role: Role) -> ProviderState {
+pub(crate) fn role_state(input: &PlatformInput, role: Role) -> ProviderState {
     let probe = probe_for(input, role);
     if !input.facts.enabled {
         return ProviderState::Disabled;
@@ -257,7 +261,7 @@ fn role_state(input: &PlatformInput, role: Role) -> ProviderState {
 
 /// The provider-level state: the primary role speaks, unless a better
 /// explanation exists (`provider_truth._aggregate_state`).
-fn aggregate(platform: Platform, states: &[(Role, ProviderState)]) -> ProviderState {
+pub(crate) fn aggregate(platform: Platform, states: &[(Role, ProviderState)]) -> ProviderState {
     let primary = platform.primary_role();
     let primary_state = states
         .iter()
@@ -282,7 +286,7 @@ fn aggregate(platform: Platform, states: &[(Role, ProviderState)]) -> ProviderSt
 ///
 /// The posting role is the promise everywhere except a TikTok download source,
 /// where the source verdict is the only capability that exists.
-fn compat_role(input: &PlatformInput) -> Role {
+pub(crate) fn compat_role(input: &PlatformInput) -> Role {
     let primary = input.platform.primary_role();
     if input.platform == Platform::TikTok && input.source_live.is_some() {
         let mode = resolve_auth_mode(input.platform, &input.facts, input.live.as_ref());
@@ -359,7 +363,7 @@ fn token_state(
 /// `source_only` is true only when the provider HAS a posting role that is not
 /// usable while its effective auth mode is `source_only` — it is wired up as a
 /// download source, not as an upload destination.
-fn posting(
+pub(crate) fn posting(
     input: &PlatformInput,
     states: &[(Role, ProviderState)],
     auth_mode: &str,
