@@ -4009,6 +4009,9 @@ def normalize_clock(text: str) -> str:
     """
     for pattern, replacement in CLOCK_PATTERNS:
         text = pattern.sub(replacement, text)
+    return text
+
+
 def mask_file_keys(text: str, keys: list[str] | None) -> str:
     """Replace the *values* of named top-level keys inside a written JSON file.
 
@@ -4317,15 +4320,9 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
             "files": files,
             "backups": backups,
             "stdout": stdout,
-            "stdout_normalized": normalize(stdout, profile, scenario.get("mask")),
-            "stderr": stderr,
-            "stderr_normalized": normalize(stderr, profile, scenario.get("mask")),
-            "present": present,
-            "archives": archives,
-            "stdout": proc.stdout,
             "stdout_normalized": mask_stdout(
                 normalize(
-                    proc.stdout,
+                    stdout,
                     profile,
                     scenario.get("mask"),
                     scenario.get("mask_findings"),
@@ -4335,7 +4332,10 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
                 scenario,
                 prefix,
             ),
-            "stderr": proc.stderr,
+            "stderr": stderr,
+            "stderr_normalized": normalize(stderr, profile, scenario.get("mask")),
+            "present": present,
+            "archives": archives,
         }
     finally:
         if listener is not None:
