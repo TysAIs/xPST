@@ -10198,6 +10198,7 @@
       "compare": "json",
       "exit_code": 0,
       "env": {
+        "HOME": "PROFILE",
         "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
         "XPST_YTDLP_PATH": "PROFILE/bin/yt-dlp"
       },
@@ -10215,6 +10216,8 @@
           "created <PROFILE>/downloads",
           "created <PROFILE>/logs",
           "created <PROFILE>/backups",
+          "created <PROFILE>/.xpst/downloads",
+          "created <PROFILE>/.xpst/logs",
           "saved <PROFILE>/alt.yaml"
         ],
         "readiness": {

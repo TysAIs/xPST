@@ -2009,7 +2009,12 @@ SCENARIOS = [
             "alt.yaml": "version: 4\n",
         },
         "executable": ["bin/ffmpeg", "bin/yt-dlp"],
+        # `--fix` also creates the default `~/.xpst/{downloads,logs}`. Without a
+        # pinned HOME that is the runner's real home, so the row recorded
+        # "created" on a machine with no `~/.xpst` and nothing on one that has
+        # it — the fixture was machine-dependent. Pin HOME inside the profile.
         "env": {
+            "HOME": "PROFILE",
             "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
             "XPST_YTDLP_PATH": "PROFILE/bin/yt-dlp",
         },
@@ -3899,7 +3904,10 @@ def env_for(scenario: dict, profile: Path) -> dict[str, str]:
     # The pinned block (see `PINNED_ENVIRONMENT`); a scenario's own `env` is
     # applied below and wins.
     env.update(PINNED_ENVIRONMENT)
-    if scenario.get("config_dir"):
+    # A scenario that re-points HOME (directly or through `config_dir`) must keep
+    # the interpreter's user base visible, or a `pip install --user` distribution
+    # disappears and the engine dies before it parses an argument.
+    if scenario.get("config_dir") or "HOME" in (scenario.get("env") or {}):
         env["HOME"] = str(profile)
         env["PYTHONUSERBASE"] = user_base
     for name, value in scenario.get("env", {}).items():
