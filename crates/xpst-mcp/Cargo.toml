@@ -37,6 +37,7 @@ xpst-config = { workspace = true }
 # The cooldown report is owned by the rate-limit crate so `doctor`, `health` and
 # the MCP tool render one document.
 xpst-limits = { version = "1.3.0", path = "../xpst-limits" }
+xpst-core = { path = "../xpst-core" }
 xpst-state = { workspace = true }
 xpst-surface = { path = "../xpst-surface" }
 

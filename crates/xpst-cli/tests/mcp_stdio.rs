@@ -594,7 +594,7 @@ fn fnv1a64(text: &str) -> String {
 /// `json.dumps(tools, sort_keys=True)` — the digest's input.
 fn sorted_json(value: &Value) -> String {
     let mut sorted = value.clone();
-    xpst_config::sort_keys_recursive(&mut sorted);
+    xpst_core::json::sort_keys_recursive(&mut sorted);
     xpst_config::python_style_json_compact(&sorted).expect("render tools")
 }
 

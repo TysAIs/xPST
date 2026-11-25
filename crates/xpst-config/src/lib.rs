@@ -764,26 +764,6 @@ fn write_json_string(text: &str, out: &mut String) {
     out.push('"');
 }
 
-/// Sort every object's keys, recursively — `json.dumps(..., sort_keys=True)`.
-///
-/// `serde_json` is built with `preserve_order` (workspace `Cargo.toml`), so a
-/// `Map` keeps insertion order. Python's `sort_keys=True` is the opposite
-/// contract, and the documents that use it (`devices.json`,
-/// `ban_risk_acknowledgements.json`, the MCP tool text) are byte-compared with
-/// the shipped engine, so the sort has to be explicit.
-pub fn sort_keys_recursive(value: &mut JsonValue) {
-    match value {
-        JsonValue::Object(map) => {
-            map.sort_keys();
-            for child in map.values_mut() {
-                sort_keys_recursive(child);
-            }
-        }
-        JsonValue::Array(items) => items.iter_mut().for_each(sort_keys_recursive),
-        _ => {}
-    }
-}
-
 /// Replace secret-looking string values with `***`.
 ///
 /// Rule-for-rule the Python behaviour: a key containing one of

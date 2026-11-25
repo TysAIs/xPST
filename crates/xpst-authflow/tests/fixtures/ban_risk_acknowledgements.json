@@ -1,0 +1,84 @@
+{
+  "generated_by": "xtask/scripts/capture_ban_risk_ack.py",
+  "python": "3.13.16",
+  "note": "File bytes written by xpst.auth_path_risk.record_acknowledgement. `expected` is the exact file content, trailing newline included.",
+  "cases": [
+    {
+      "name": "instagram_only",
+      "seed": null,
+      "steps": [
+        {
+          "platform": "instagram",
+          "auth_mode": "session",
+          "surface": "xpst connect instagram",
+          "acknowledged_at": "2026-11-17T00:00:00+0000"
+        }
+      ],
+      "expected": "{\n  \"acknowledgements\": {\n    \"instagram\": {\n      \"acknowledged_at\": \"2026-11-17T00:00:00+0000\",\n      \"auth_mode\": \"session\",\n      \"ban_risk\": \"unofficial_private_api\",\n      \"operator_choice\": true,\n      \"platform\": \"instagram\",\n      \"surface\": \"xpst connect instagram\"\n    }\n  },\n  \"version\": 1\n}\n"
+    },
+    {
+      "name": "x_only",
+      "seed": null,
+      "steps": [
+        {
+          "platform": "x",
+          "auth_mode": "cookies",
+          "surface": "xpst connect x",
+          "acknowledged_at": "2026-11-17T00:00:01+0000"
+        }
+      ],
+      "expected": "{\n  \"acknowledgements\": {\n    \"x\": {\n      \"acknowledged_at\": \"2026-11-17T00:00:01+0000\",\n      \"auth_mode\": \"cookies\",\n      \"ban_risk\": \"unofficial_web_client\",\n      \"operator_choice\": true,\n      \"platform\": \"x\",\n      \"surface\": \"xpst connect x\"\n    }\n  },\n  \"version\": 1\n}\n"
+    },
+    {
+      "name": "both_platforms",
+      "seed": null,
+      "steps": [
+        {
+          "platform": "instagram",
+          "auth_mode": "session",
+          "surface": "xpst connect instagram",
+          "acknowledged_at": "2026-11-17T00:00:00+0000"
+        },
+        {
+          "platform": "x",
+          "auth_mode": "cookies",
+          "surface": "xpst connect x",
+          "acknowledged_at": "2026-11-17T00:00:01+0000"
+        }
+      ],
+      "expected": "{\n  \"acknowledgements\": {\n    \"instagram\": {\n      \"acknowledged_at\": \"2026-11-17T00:00:00+0000\",\n      \"auth_mode\": \"session\",\n      \"ban_risk\": \"unofficial_private_api\",\n      \"operator_choice\": true,\n      \"platform\": \"instagram\",\n      \"surface\": \"xpst connect instagram\"\n    },\n    \"x\": {\n      \"acknowledged_at\": \"2026-11-17T00:00:01+0000\",\n      \"auth_mode\": \"cookies\",\n      \"ban_risk\": \"unofficial_web_client\",\n      \"operator_choice\": true,\n      \"platform\": \"x\",\n      \"surface\": \"xpst connect x\"\n    }\n  },\n  \"version\": 1\n}\n"
+    },
+    {
+      "name": "rewrite_same_platform",
+      "seed": null,
+      "steps": [
+        {
+          "platform": "instagram",
+          "auth_mode": "session",
+          "surface": "xpst connect instagram",
+          "acknowledged_at": "2026-11-17T00:00:00+0000"
+        },
+        {
+          "platform": "instagram",
+          "auth_mode": "session",
+          "surface": "xpst doctor --acknowledge",
+          "acknowledged_at": "2026-11-18T09:30:00+0000"
+        }
+      ],
+      "expected": "{\n  \"acknowledgements\": {\n    \"instagram\": {\n      \"acknowledged_at\": \"2026-11-18T09:30:00+0000\",\n      \"auth_mode\": \"session\",\n      \"ban_risk\": \"unofficial_private_api\",\n      \"operator_choice\": true,\n      \"platform\": \"instagram\",\n      \"surface\": \"xpst doctor --acknowledge\"\n    }\n  },\n  \"version\": 1\n}\n"
+    },
+    {
+      "name": "preexisting_unsorted",
+      "seed": "{\n  \"version\": 1,\n  \"acknowledgements\": {\n    \"instagram\": {\n      \"platform\": \"instagram\",\n      \"auth_mode\": \"session\",\n      \"ban_risk\": \"unofficial_private_api\",\n      \"acknowledged_at\": \"2026-11-16T12:00:00+0000\",\n      \"surface\": \"xpst connect instagram\",\n      \"operator_choice\": true\n    }\n  }\n}\n",
+      "steps": [
+        {
+          "platform": "x",
+          "auth_mode": "cookies",
+          "surface": "xpst connect x",
+          "acknowledged_at": "2026-11-17T00:00:01+0000"
+        }
+      ],
+      "expected": "{\n  \"acknowledgements\": {\n    \"instagram\": {\n      \"acknowledged_at\": \"2026-11-16T12:00:00+0000\",\n      \"auth_mode\": \"session\",\n      \"ban_risk\": \"unofficial_private_api\",\n      \"operator_choice\": true,\n      \"platform\": \"instagram\",\n      \"surface\": \"xpst connect instagram\"\n    },\n    \"x\": {\n      \"acknowledged_at\": \"2026-11-17T00:00:01+0000\",\n      \"auth_mode\": \"cookies\",\n      \"ban_risk\": \"unofficial_web_client\",\n      \"operator_choice\": true,\n      \"platform\": \"x\",\n      \"surface\": \"xpst connect x\"\n    }\n  },\n  \"version\": 1\n}\n"
+    }
+  ]
+}

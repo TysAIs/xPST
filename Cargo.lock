@@ -3921,6 +3921,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "xpst-auth",
+ "xpst-core",
  "zeroize",
 ]
 
@@ -3992,6 +3993,7 @@ dependencies = [
  "tokio",
  "xpst-auth",
  "xpst-config",
+ "xpst-core",
  "xpst-limits",
  "xpst-state",
  "xpst-store",

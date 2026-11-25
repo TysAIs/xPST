@@ -189,7 +189,7 @@ fn digest_for(inputs: &Value) -> String {
     // separators=(",", ":"))`; `preserve_order` keeps insertion order, so the
     // sort is explicit or the digest stops matching the Python engine.
     let mut document = inputs.clone();
-    xpst_config::sort_keys_recursive(&mut document);
+    xpst_core::json::sort_keys_recursive(&mut document);
     sha256_hex(&serde_json::to_string(&document).unwrap_or_default())
 }
 
