@@ -140,16 +140,30 @@ fn dispatch<W: Write, E: Write>(
         let mut err_ref: &mut dyn Write = err;
         return (command.handler)(global, leaf, &mut out_ref, &mut err_ref);
     }
+    // `auth` is one leaf command whose default invocation is the network probe,
+    // so its ledger row stays `stub` while two of its branches are local
+    // (`api-token`, an unknown platform). The partial handler answers those and
+    // returns `None` for the rest, which then falls through to the ordinary
+    // `NOT_IMPLEMENTED` document.
+    if key == "auth" {
+        let mut out_ref: &mut dyn Write = out;
+        let mut err_ref: &mut dyn Write = err;
+        if let Some(code) =
+            commands::auth::dispatch_partial(global, leaf, &mut out_ref, &mut err_ref)
+        {
+            return code;
+        }
+    }
     not_implemented(&key, global, leaf, out, err)
 }
 
 /// The documented P0 answer for a command whose behavior has not moved yet.
-fn not_implemented<W: Write, E: Write>(
+pub(crate) fn not_implemented(
     command: &str,
     global: &GlobalOptions,
     leaf: Option<&ArgMatches>,
-    out: &mut W,
-    err: &mut E,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
 ) -> i32 {
     let json = global.json || leaf.is_some_and(|m| flag(m, "opt:json"));
     let message = "not implemented in the Rust engine yet";

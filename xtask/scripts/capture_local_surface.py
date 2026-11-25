@@ -58,6 +58,33 @@ REPO = Path(__file__).resolve().parents[2]
 FIXTURE = REPO / "crates/xpst-cli/tests/fixtures/local_surface.json"
 SNAPSHOT_EPOCH = 1767225600  # 2026-01-01T00:00:00Z
 
+#: The environment every scenario runs under, recorded in the fixture and
+#: replayed by `crates/xpst-cli/tests/local_surface.rs`. A scenario's own `env`
+#: block is applied last and overrides a pin — that is how a row proves a value
+#: *does* matter.
+#:
+#: * ``TZ=UTC`` — ``ScheduleManager._tz`` is ``local_zone()``, which reads ``TZ``
+#:   first, so an entry with a ``scheduled_time`` but no ``timezone`` field
+#:   renders in the machine zone. Pinning makes that a property of the fixture.
+#: * ``LC_ALL``/``LANG=C`` — the engine never calls ``locale.setlocale``, so
+#:   this changes nothing today; pinned so a future one cannot make the fixture
+#:   flaky.
+#: * ``PYTHONHASHSEED=0`` — no scenario serialises a set today; pinned for the
+#:   same reason.
+#:
+#: ``COLUMNS`` is deliberately NOT pinned here. Rich wraps at 80 columns when
+#: stdout is not a TTY, and the Rust engine reproduces that wrap for the
+#: messages that need it (`output::wrap_at`), so pinning a wider terminal
+#: globally would make four existing rows disagree. A scenario whose output
+#: carries a long path (`media fetch`'s progress lines) pins ``COLUMNS=200``
+#: itself, which is the row proving the value matters.
+PINNED_ENVIRONMENT = {
+    "TZ": "UTC",
+    "LC_ALL": "C",
+    "LANG": "C",
+    "PYTHONHASHSEED": "0",
+}
+
 # Stand-in media tools for the `readiness` rows. `readiness` only asks each one
 # for its version, so a shell script with a fixed banner makes the ffmpeg/yt-dlp
 # rows a property of the fixture instead of of the machine.
@@ -2846,6 +2873,437 @@ SCENARIOS = [
         "files": ["guide.md"],
         "compare": "stdout",
     },
+    # ── tranche 11: the six local halves ───────────────────────────────────
+    {
+        # `setup` start on a fresh profile: the transaction is created, the
+        # non-TTY path answers INTERACTIVE_REQUIRED and exits 2. The clock and
+        # the uuid4 are masked; every other byte is compared.
+        "name": "setup_start_fresh",
+        "argv": ["setup", "--json"],
+        "seed": {},
+        "mask": [
+            "transaction_id",
+            "created_at",
+            "updated_at",
+            "started_at",
+            "completed_at",
+            "verified_at",
+        ],
+        "compare": "stdout",
+    },
+    {
+        # `--status` with no transaction: the empty envelope, no clock at all.
+        "name": "setup_status_none",
+        "argv": ["setup", "--status", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        # `--status` over a seeded transaction: the full document, including the
+        # `alias` block that names `setup` as canonical.
+        "name": "setup_status_seeded",
+        "argv": ["setup", "--status", "--json"],
+        # A transaction the loader accepts: every step carries a full
+        # `human_action` mapping, which `_validate_transaction` requires (a
+        # `null` there is `SetupTransactionCorrupt` and the store falls back to
+        # "no transaction"). Captured from a real `setup --json` run with the
+        # uuid and the four timestamps frozen.
+        "seed": {
+            "setup_transaction.json": json.dumps(
+            {
+                "completion": {
+                    "complete": False,
+                    "reason": "Verify at least one source and one live-ready video destination.",
+                    "resumable": True,
+                    "state": "in_progress"
+                },
+                "created_at": "2026-01-01T00:00:00.000Z",
+                "errors": [],
+                "human_actions": [
+                    {
+                        "action_id": "connect_source_tiktok",
+                        "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+                        "kind": "connect",
+                        "label": "Connect tiktok as source",
+                        "status": "pending",
+                        "url": None
+                    },
+                    {
+                        "action_id": "connect_video_destination_youtube",
+                        "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+                        "kind": "connect",
+                        "label": "Connect youtube as video destination",
+                        "status": "pending",
+                        "url": None
+                    },
+                    {
+                        "action_id": "connect_video_destination_x",
+                        "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+                        "kind": "connect",
+                        "label": "Connect x as video destination",
+                        "status": "pending",
+                        "url": None
+                    },
+                    {
+                        "action_id": "connect_video_destination_instagram",
+                        "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+                        "kind": "connect",
+                        "label": "Connect instagram as video destination",
+                        "status": "pending",
+                        "url": None
+                    },
+                    {
+                        "action_id": "connect_video_destination_threads",
+                        "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+                        "kind": "connect",
+                        "label": "Connect threads as video destination",
+                        "status": "pending",
+                        "url": None
+                    }
+                ],
+                "pending_human_actions": [
+                    {
+                        "action_id": "connect_source_tiktok",
+                        "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+                        "kind": "connect",
+                        "label": "Connect tiktok as source",
+                        "status": "pending",
+                        "url": None
+                    },
+                    {
+                        "action_id": "connect_video_destination_youtube",
+                        "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+                        "kind": "connect",
+                        "label": "Connect youtube as video destination",
+                        "status": "pending",
+                        "url": None
+                    },
+                    {
+                        "action_id": "connect_video_destination_x",
+                        "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+                        "kind": "connect",
+                        "label": "Connect x as video destination",
+                        "status": "pending",
+                        "url": None
+                    },
+                    {
+                        "action_id": "connect_video_destination_instagram",
+                        "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+                        "kind": "connect",
+                        "label": "Connect instagram as video destination",
+                        "status": "pending",
+                        "url": None
+                    },
+                    {
+                        "action_id": "connect_video_destination_threads",
+                        "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+                        "kind": "connect",
+                        "label": "Connect threads as video destination",
+                        "status": "pending",
+                        "url": None
+                    }
+                ],
+                "readiness": {
+                    "sources": [],
+                    "state": "unverified",
+                    "verified_at": None,
+                    "video_destinations": []
+                },
+                "schema_version": 1,
+                "selected_role_capabilities": [
+                    {
+                        "capability": "tiktok",
+                        "role": "source"
+                    },
+                    {
+                        "capability": "youtube",
+                        "role": "video_destination"
+                    },
+                    {
+                        "capability": "x",
+                        "role": "video_destination"
+                    },
+                    {
+                        "capability": "instagram",
+                        "role": "video_destination"
+                    },
+                    {
+                        "capability": "threads",
+                        "role": "video_destination"
+                    }
+                ],
+                "state": "in_progress",
+                "steps": [
+                    {
+                        "capability": "tiktok",
+                        "completed_at": None,
+                        "error": None,
+                        "human_action": {
+                            "action_id": "connect_source_tiktok",
+                            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+                            "kind": "connect",
+                            "label": "Connect tiktok as source",
+                            "status": "pending",
+                            "url": None
+                        },
+                        "role": "source",
+                        "started_at": None,
+                        "state": "pending",
+                        "step_id": "verify_source_tiktok",
+                        "updated_at": "2026-01-01T00:00:00.000Z"
+                    },
+                    {
+                        "capability": "youtube",
+                        "completed_at": None,
+                        "error": None,
+                        "human_action": {
+                            "action_id": "connect_video_destination_youtube",
+                            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+                            "kind": "connect",
+                            "label": "Connect youtube as video destination",
+                            "status": "pending",
+                            "url": None
+                        },
+                        "role": "video_destination",
+                        "started_at": None,
+                        "state": "pending",
+                        "step_id": "verify_video_destination_youtube",
+                        "updated_at": "2026-01-01T00:00:00.000Z"
+                    },
+                    {
+                        "capability": "x",
+                        "completed_at": None,
+                        "error": None,
+                        "human_action": {
+                            "action_id": "connect_video_destination_x",
+                            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+                            "kind": "connect",
+                            "label": "Connect x as video destination",
+                            "status": "pending",
+                            "url": None
+                        },
+                        "role": "video_destination",
+                        "started_at": None,
+                        "state": "pending",
+                        "step_id": "verify_video_destination_x",
+                        "updated_at": "2026-01-01T00:00:00.000Z"
+                    },
+                    {
+                        "capability": "instagram",
+                        "completed_at": None,
+                        "error": None,
+                        "human_action": {
+                            "action_id": "connect_video_destination_instagram",
+                            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+                            "kind": "connect",
+                            "label": "Connect instagram as video destination",
+                            "status": "pending",
+                            "url": None
+                        },
+                        "role": "video_destination",
+                        "started_at": None,
+                        "state": "pending",
+                        "step_id": "verify_video_destination_instagram",
+                        "updated_at": "2026-01-01T00:00:00.000Z"
+                    },
+                    {
+                        "capability": "threads",
+                        "completed_at": None,
+                        "error": None,
+                        "human_action": {
+                            "action_id": "connect_video_destination_threads",
+                            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+                            "kind": "connect",
+                            "label": "Connect threads as video destination",
+                            "status": "pending",
+                            "url": None
+                        },
+                        "role": "video_destination",
+                        "started_at": None,
+                        "state": "pending",
+                        "step_id": "verify_video_destination_threads",
+                        "updated_at": "2026-01-01T00:00:00.000Z"
+                    }
+                ],
+                "transaction_id": "11111111-2222-4333-4444-555555555555",
+                "updated_at": "2026-01-01T00:00:00.000Z"
+            }
+            )
+        },
+        "compare": "stdout",
+    },
+    {
+        # `--resume` on a fresh profile starts the transaction first, then
+        # resumes it — the pending payload and exit 2.
+        "name": "setup_resume_fresh",
+        "argv": ["setup", "--resume", "--json"],
+        "seed": {},
+        "mask": [
+            "transaction_id",
+            "created_at",
+            "updated_at",
+            "started_at",
+            "completed_at",
+            "verified_at",
+        ],
+        "compare": "stdout",
+    },
+    {
+        # `--finish-later` records the deferred state and does NOT add the
+        # INTERACTIVE_REQUIRED error, so it exits 0.
+        "name": "setup_finish_later",
+        "argv": ["setup", "--finish-later", "--json"],
+        "seed": {},
+        "mask": [
+            "transaction_id",
+            "created_at",
+            "updated_at",
+            "started_at",
+            "completed_at",
+            "verified_at",
+        ],
+        "compare": "stdout",
+    },
+    {
+        # `--reset` with no active transaction answers the reset document.
+        "name": "setup_reset",
+        "argv": ["setup", "--reset", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        # `auth api-token` reads the stored token: no clock, no randomness.
+        "name": "auth_api_token_existing",
+        "argv": ["auth", "api-token", "--json"],
+        "seed": {},
+        "credential": {"dashboard_api_token": "fixture-dashboard-token"},
+        "compare": "stdout",
+    },
+    {
+        # `--rotate` generates a fresh token; only that value is masked.
+        "name": "auth_api_token_rotate",
+        "argv": ["auth", "api-token", "--rotate", "--json"],
+        "seed": {},
+        "credential": {"dashboard_api_token": "fixture-dashboard-token"},
+        "mask": ["api_token"],
+        "compare": "stdout",
+    },
+    {
+        # An unknown platform is a local branch: plain text on stdout even under
+        # `--json`, exit 2.
+        "name": "auth_unknown_platform",
+        "argv": ["auth", "bogus", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        # `connect --guide` for YouTube: the richer payload with the three
+        # constants that are not in the captured guide table.
+        "name": "connect_guide_youtube",
+        "argv": ["connect", "youtube", "--guide", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        # `connect --guide` for another platform: the plain payload.
+        "name": "connect_guide_instagram",
+        "argv": ["connect", "instagram", "--guide", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        # `connect --dry-run` with no platform plans every guide platform, in
+        # `GUIDE_PLATFORMS` order.
+        "name": "connect_dry_run_all",
+        "argv": ["connect", "--dry-run", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        # `connect --dry-run <platform>` plans one.
+        "name": "connect_dry_run_one",
+        "argv": ["connect", "tiktok", "--dry-run", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        # A non-TTY `connect` without `--test` refuses instead of prompting.
+        "name": "connect_non_tty_refusal",
+        "argv": ["connect", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        # `update --components` without `--check`: the offline inventory. The
+        # helper rows are pinned to seeded stand-ins; `packages` describes the
+        # Python installation (masked) and the engine's own version string is
+        # masked by value.
+        "name": "update_components",
+        "argv": ["update", "--components", "--json"],
+        "seed": {
+            "bin/yt-dlp": YTDLP_STUB,
+            "bin/ffmpeg": FFMPEG_STUB,
+        },
+        "executable": ["bin/yt-dlp", "bin/ffmpeg"],
+        "env": {
+            "XPST_YTDLP_PATH": "PROFILE/bin/yt-dlp",
+            "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+        },
+        "mask_stdout_keys": ["packages"],
+        "mask_engine_version": True,
+        "compare": "stdout",
+    },
+    {
+        # `followers` on a fresh profile: the empty report.
+        "name": "followers_empty",
+        "argv": ["followers", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        # `followers` over a seeded ledger: sorted platforms, growth against the
+        # oldest of the last seven snapshots, and the total.
+        "name": "followers_with_snapshots",
+        "argv": ["followers", "--json"],
+        "seed": {},
+        "sqlite": {
+            "analytics.db": [
+                "CREATE TABLE IF NOT EXISTS follower_snapshots ("
+                "platform TEXT NOT NULL, count INTEGER NOT NULL, "
+                "captured_at TEXT NOT NULL, PRIMARY KEY (platform, captured_at))",
+                "INSERT INTO follower_snapshots VALUES "
+                "('youtube', 100, '2026-01-01T00:00:00+00:00')",
+                "INSERT INTO follower_snapshots VALUES "
+                "('youtube', 130, '2026-01-02T00:00:00+00:00')",
+                "INSERT INTO follower_snapshots VALUES "
+                "('x', 40, '2026-01-01T00:00:00+00:00')",
+            ]
+        },
+        "compare": "stdout",
+    },
+    {
+        # `media fetch` with both binaries already resolved: nothing is
+        # downloaded, and the progress lines plus the payload are compared.
+        "name": "media_fetch_resolved",
+        "argv": ["media", "fetch", "--json"],
+        "seed": {"bin/ffmpeg": FFMPEG_STUB, "bin/ffprobe": FFPROBE_STUB},
+        "executable": ["bin/ffmpeg", "bin/ffprobe"],
+        "env": {
+            "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+            "XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe",
+            "COLUMNS": "200",
+        },
+        "compare": "stdout",
+    },
+    {
+        # `--binary` selects and orders the rows.
+        "name": "media_fetch_one_binary",
+        "argv": ["media", "fetch", "--binary", "ffmpeg", "--json"],
+        "seed": {"bin/ffmpeg": FFMPEG_STUB},
+        "executable": ["bin/ffmpeg"],
+        "env": {"XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg", "COLUMNS": "200"},
+        "compare": "stdout",
+    },
 ]
 
 
@@ -2974,6 +3432,9 @@ def env_for(scenario: dict, profile: Path) -> dict[str, str]:
         del env[name]
     env["XPST_CONFIG_DIR"] = str(config_dir_for(scenario, profile))
     env["PYTHONPATH"] = str(REPO / "src")
+    # The pinned block (see `PINNED_ENVIRONMENT`); a scenario's own `env` is
+    # applied below and wins.
+    env.update(PINNED_ENVIRONMENT)
     if scenario.get("config_dir"):
         env["HOME"] = str(profile)
     for name, value in scenario.get("env", {}).items():
@@ -3092,6 +3553,81 @@ def mask_file_keys(text: str, keys: list[str] | None) -> str:
     return text
 
 
+def engine_version(prefix: list[str]) -> str:
+    """The version string the engine under test reports.
+
+    The Python engine is asked through its own module; the Rust binary through
+    ``--version`` (``xPST, version <v>``). A scenario that masks the engine's
+    version must mask *that* engine's value, or the two engines would be
+    compared against each other's number.
+    """
+    if len(prefix) > 1:
+        import xpst
+
+        return xpst.__version__
+    proc = subprocess.run(
+        [prefix[0], "--version"], capture_output=True, text=True, timeout=30
+    )
+    return proc.stdout.strip().rsplit(" ", 1)[-1]
+
+
+def mask_stdout(text: str, scenario: dict, prefix: list[str]) -> str:
+    """Mask named values inside a one-line ``json.dumps`` stdout.
+
+    ``stdout`` mode compares the exact bytes, which is the only thing that
+    catches a renderer regression — but a payload that carries a wall clock, a
+    ``uuid4`` or the engine's own version cannot be pinned. So the document is
+    parsed, the named values replaced, and re-rendered with Python's separators;
+    the re-render is asserted to reproduce the original bytes first, so a
+    renderer change fails here instead of being hidden by the mask.
+
+    * ``mask`` — key names replaced with ``<TS>`` at any depth (the same rule
+      the payload normaliser applies);
+    * ``mask_stdout_keys`` — top-level keys replaced with ``<ENV>`` (a section
+      that describes the installation rather than the engine);
+    * ``mask_engine_version`` — the engine's own version literal replaced with
+      ``<VERSION>``.
+    """
+    keys = scenario.get("mask") or []
+    sections = scenario.get("mask_stdout_keys") or []
+    version = scenario.get("mask_engine_version")
+    if not keys and not sections and not version:
+        return text
+
+    stripped = text.strip()
+    try:
+        document = json.loads(stripped)
+    except ValueError:
+        raise SystemExit(
+            f"scenario {scenario['name']}: stdout is not JSON, so it cannot be masked"
+        )
+    rendered = json.dumps(document, default=str, ensure_ascii=False)
+    if rendered != stripped:
+        raise SystemExit(
+            f"scenario {scenario['name']}: stdout is not `json.dumps` output; "
+            "masking would hide a renderer regression"
+        )
+
+    def walk(value):
+        if isinstance(value, dict):
+            return {
+                key: ("<TS>" if key in keys else walk(item))
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [walk(item) for item in value]
+        return value
+
+    document = walk(document)
+    for key in sections:
+        if isinstance(document, dict) and key in document:
+            document[key] = "<ENV>"
+    masked = json.dumps(document, default=str, ensure_ascii=False)
+    if version:
+        masked = masked.replace(json.dumps(engine_version(prefix)), '"<VERSION>"')
+    return masked + "\n"
+
+
 def observe(scenario: dict, prefix: list[str]) -> dict:
     """Run one scenario against one engine and return what it answered."""
     profile = Path(tempfile.mkdtemp(prefix="xpst-observe-"))
@@ -3179,13 +3715,17 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
             "files": files,
             "archives": archives,
             "stdout": proc.stdout,
-            "stdout_normalized": normalize(
-                proc.stdout,
-                profile,
-                scenario.get("mask"),
-                scenario.get("mask_findings"),
-                scenario.get("mask_checks"),
-                scenario.get("mask_lines"),
+            "stdout_normalized": mask_stdout(
+                normalize(
+                    proc.stdout,
+                    profile,
+                    scenario.get("mask"),
+                    scenario.get("mask_findings"),
+                    scenario.get("mask_checks"),
+                    scenario.get("mask_lines"),
+                ),
+                scenario,
+                prefix,
             ),
             "stderr": proc.stderr,
         }
@@ -3273,6 +3813,10 @@ def run_scenario(scenario: dict, python: str) -> dict:
         record["files_zip"] = observed["archives"]
     if scenario.get("mask_sections"):
         record["mask_sections"] = scenario["mask_sections"]
+    if scenario.get("mask_stdout_keys"):
+        record["mask_stdout_keys"] = scenario["mask_stdout_keys"]
+    if scenario.get("mask_engine_version"):
+        record["mask_engine_version"] = True
     if "snapshot_epoch" in scenario:
         record["snapshot_epoch"] = scenario["snapshot_epoch"]
     if scenario["compare"] == "divergence":
@@ -3453,6 +3997,7 @@ def main() -> None:
             "the local rendering is machine-independent; snapshot modified_at is "
             "stripped and its epoch recorded instead."
         ),
+        "environment": PINNED_ENVIRONMENT,
         "scenario_count": len(records),
         "scenarios": records,
     }

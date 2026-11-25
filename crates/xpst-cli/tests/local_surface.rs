@@ -27,7 +27,7 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 202;
+const EXPECTED_SCENARIOS: usize = 221;
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -263,6 +263,107 @@ fn env_for(row: &Value, profile: &Profile) -> Vec<(String, String)> {
         env.push(("HOME".to_string(), profile.path().display().to_string()));
     }
     env
+}
+
+/// The fixture's pinned environment block, replayed before a scenario's own.
+///
+/// `capture_local_surface.py` pins `TZ`, `LC_ALL`, `LANG` and `PYTHONHASHSEED`
+/// for every scenario and records the block, so a capture and a replay cannot
+/// disagree about the environment. (`COLUMNS` is pinned per scenario instead:
+/// Rich's 80-column wrap is behaviour the Rust engine reproduces, so a global
+/// wider terminal would change four existing rows.) A scenario's own `env` is
+/// applied after this and wins — that is how a row proves a value *does*
+/// matter.
+fn environment(document: &Value) -> Vec<(String, String)> {
+    let map = document
+        .get("environment")
+        .and_then(Value::as_object)
+        .expect("the fixture records the pinned environment");
+    for name in ["TZ", "LC_ALL", "LANG", "PYTHONHASHSEED"] {
+        assert!(
+            map.contains_key(name),
+            "the pinned environment block lost `{name}`"
+        );
+    }
+    map.iter()
+        .map(|(name, value)| (name.clone(), value.as_str().unwrap_or_default().to_string()))
+        .collect()
+}
+
+/// Mask named values inside a one-line `json.dumps` stdout.
+///
+/// The mirror of `mask_stdout()` in `capture_local_surface.py`: parse, replace,
+/// re-render with Python's separators, and assert the re-render reproduces the
+/// original bytes first — so a renderer regression fails here instead of being
+/// hidden by the mask.
+fn mask_stdout(text: &str, row: &Value) -> String {
+    let keys = mask_for(row);
+    let sections = row
+        .get("mask_stdout_keys")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let version = row
+        .get("mask_engine_version")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if keys.is_empty() && sections.is_empty() && !version {
+        return text.to_owned();
+    }
+
+    let stripped = text.trim();
+    let mut document: Value = serde_json::from_str(stripped)
+        .unwrap_or_else(|error| panic!("stdout is not JSON, so it cannot be masked: {error}"));
+    let rendered = render_python_json(&document);
+    assert_eq!(
+        rendered, stripped,
+        "stdout is not `json.dumps` output; masking would hide a renderer regression"
+    );
+
+    fn walk(value: &mut Value, keys: &[String]) {
+        match value {
+            Value::Object(map) => {
+                for (key, item) in map.iter_mut() {
+                    if keys.iter().any(|name| name == key) {
+                        *item = Value::String("<TS>".to_string());
+                    } else {
+                        walk(item, keys);
+                    }
+                }
+            }
+            Value::Array(items) => items.iter_mut().for_each(|item| walk(item, keys)),
+            _ => {}
+        }
+    }
+    walk(&mut document, &keys);
+    if let Some(map) = document.as_object_mut() {
+        for key in &sections {
+            if map.contains_key(key) {
+                map.insert(key.clone(), Value::String("<ENV>".to_string()));
+            }
+        }
+    }
+    let mut masked = render_python_json(&document);
+    if version {
+        masked = masked.replace(
+            &format!("\"{}\"", env!("CARGO_PKG_VERSION")),
+            "\"<VERSION>\"",
+        );
+    }
+    masked.push('\n');
+    masked
+}
+
+/// `json.dumps(value, default=str, ensure_ascii=False)` — the renderer every
+/// `--json` command uses.
+fn render_python_json(value: &Value) -> String {
+    xpst_config::python_style_json(&xpst_config::output::from_json(value)).unwrap_or_default()
 }
 
 /// Replace the tail of any line that starts with a named prefix.
@@ -830,7 +931,8 @@ fn every_recorded_scenario_matches_the_python_engine() {
         profile.seed_credentials(&row["credential"]);
         profile.seed_credential_json(&row["credential_json"]);
         let argv = argv_for(row, &profile);
-        let env = env_for(row, &profile);
+        let mut env = environment(&document);
+        env.extend(env_for(row, &profile));
         let config_dir = config_dir_for(row, &profile);
         let (code, stdout, stderr) = run(binary(), &profile, &argv, &env, &config_dir);
         let compare = row["compare"].as_str().expect("compare mode");
@@ -869,7 +971,10 @@ fn every_recorded_scenario_matches_the_python_engine() {
                 let expected = row["stdout"]
                     .as_str()
                     .expect("stdout scenarios record the text");
-                let actual = stdout.replace(&profile.path().display().to_string(), "<PROFILE>");
+                let actual = mask_stdout(
+                    &stdout.replace(&profile.path().display().to_string(), "<PROFILE>"),
+                    row,
+                );
                 assert_eq!(actual, expected, "scenario `{name}` stdout drifted");
             }
             "digest" => {

@@ -380,44 +380,14 @@ fn providers(
 }
 
 /// `check_update_components(include_network=False)`, for a compiled engine.
+///
+/// The builder is shared with `xpst update --components`
+/// ([`crate::commands::updates::components`]); only the app row's
+/// `update_mode` differs, because a compiled engine has no pip install to
+/// update. The section is masked in the diagnostics fixture (it describes the
+/// installation, not the engine) and byte-compared by the `update` fixture.
 fn updates() -> Value {
-    let component = |name: &str, kind: &str, mode: &str, installed: bool| {
-        json!({
-            "name": name,
-            "component_type": kind,
-            "current_version": if installed { json!(env!("CARGO_PKG_VERSION")) } else { Value::Null },
-            "latest_version": Value::Null,
-            "installed": installed,
-            "update_mode": mode,
-            "required": true,
-            "updatable": false,
-            "status": "unknown",
-            "action": "Run xpst update --components --check to check latest versions.",
-            "update_command": "xpst update --components --check",
-            "error": Value::Null,
-        })
-    };
-    json!({
-        "app": [component("xpst", "app", "binary", true)],
-        "packages": Vec::<Value>::new(),
-        "helpers": [
-            component("yt-dlp", "helper", "external", which("yt-dlp")),
-            component("FFmpeg", "helper", "external", which("ffmpeg")),
-        ],
-        "provider_metadata": [component("provider-manifests", "provider_metadata", "bundled", true)],
-    })
-}
-
-/// Whether a helper binary is on `PATH` (the shipped probe runs `-version`).
-fn which(binary: &str) -> bool {
-    std::env::var_os("PATH")
-        .map(|paths| {
-            std::env::split_paths(&paths).any(|dir| {
-                let candidate = dir.join(binary);
-                candidate.is_file()
-            })
-        })
-        .unwrap_or(false)
+    crate::commands::updates::components("binary")
 }
 
 /// `_credential_status()`: the store kind and the sorted key names.

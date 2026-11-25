@@ -399,6 +399,36 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         "The deprecated alias of `setup`: the same resumable transaction (`start`/`status`/`resume`/`reset` with `alias: wizard`), the agent-mode envelope (`mode`, `interactive`, `all_pass`, `completed`, `next_action`), the `INTERACTIVE_REQUIRED` document with exit 3, the legacy checklist built from a captured `PLATFORM_GUIDES` table, and `--export-md`'s markdown (byte-compared with the shipped `export_markdown()`). Payload byte-compared with the Python CLI (transaction id and timestamps masked). The interactive executor (`run_wizard`, browser + live checks) is not ported — named divergence.",
         wizard,
     ),
+    implemented(
+        "setup",
+        "xpst-auth",
+        "The canonical setup transaction: `start`/`status`/`resume`/`reset`/`--finish-later` over `xpst_surface::setup_transaction` (the service the four `xpst_setup_*` MCP tools serve), the `alias: setup` envelope, and the `INTERACTIVE_REQUIRED` document with exit 2. Payload byte-compared with the Python CLI (transaction id and timestamps masked). The interactive executor (`run_setup`, which pip-installs yt-dlp and runs the live connectivity probes) is not ported — named divergence.",
+        setup,
+    ),
+    implemented(
+        "connect",
+        "xpst-auth",
+        "The two local halves: `--guide` renders the captured `PLATFORM_GUIDES` table (the same `resources/wizard_guides.json` the `wizard` port uses, including YouTube's richer payload) and `--dry-run` builds the plan document from it; a non-TTY invocation without `--test` answers the shipped `INTERACTIVE_REQUIRED` refusal with exit 3. Payloads byte-compared with the Python CLI. `--test` (`test_connections`) and the interactive `run_connect` flow are not ported — named divergence.",
+        connect,
+    ),
+    implemented(
+        "update",
+        "xpst-cli",
+        "`--components` without `--check`: `check_update_components(include_network=False)` — the app row, the helper rows (yt-dlp's version from the binary xPST would invoke, FFmpeg's from `-version`), and the bundled provider-metadata row, in the shipped key order. Payload byte-compared with the Python CLI (the engine's own version string and the `packages` section masked: those describe the installation, not the engine). `--check`, `--self` and the default path reach PyPI and stay stubs — named divergence.",
+        update,
+    ),
+    implemented(
+        "followers",
+        "xpst-provider",
+        "The stored-snapshot report: `latest_followers()` and `follower_history(limit=7)` from `analytics.db`, the sorted platform list, `count`/`growth`/`history` rows and the `total_followers` sum, rendered as `json.dumps(indent=2)`. Payload byte-compared with the Python CLI. The live `get_followers()` fetch is not ported (Python swallows every failure and falls back to the same stored numbers) — named divergence.",
+        followers,
+    ),
+    implemented(
+        "media fetch",
+        "xpst-media",
+        "The resolve-and-report half of `ensure_media_binaries`: a binary that already resolves is reported with its `source` and never downloaded, `--binary` selects and orders the rows, and a missing binary answers Python's own `missing (fetch disabled)` error with exit 1. Payload byte-compared with the Python CLI (the missing branch pinned with `XPST_MEDIA_AUTO_FETCH=0`). The download path (`fetch_media_binary` → `urlopen`) is not ported — named divergence.",
+        media_fetch,
+    ),
 ];
 
 const fn implemented(
@@ -979,6 +1009,51 @@ fn wizard(
     err: &mut dyn Write,
 ) -> i32 {
     commands::wizard::run(global, leaf, out, err)
+}
+
+fn setup(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::setup::run(global, leaf, out, err)
+}
+
+fn connect(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::connect::run(global, leaf, out, err)
+}
+
+fn update(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::update::run(global, leaf, out, err)
+}
+
+fn followers(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::followers::run(global, leaf, out, err)
+}
+
+fn media_fetch(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::media::fetch(global, leaf, out, err)
 }
 
 #[cfg(test)]

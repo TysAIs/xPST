@@ -23,13 +23,16 @@
 //! transaction state and a line naming the Python command that performs the
 //! human actions.
 
-use std::io::{IsTerminal, Write};
-use std::path::{Path, PathBuf};
+use std::io::Write;
+use std::path::Path;
 
 use clap::ArgMatches;
 use serde_json::{json, Map, Value};
 use xpst_surface::setup_transaction::{ResumeRequest, SetupTransactionService};
 
+use crate::commands::setup::{
+    config_dir, expanduser, pending_payload, render, report, stdin_is_interactive,
+};
 use crate::output::{write_python_json_value, write_text};
 use crate::{exit, flag, leaf_string, GlobalOptions};
 
@@ -37,14 +40,17 @@ use crate::{exit, flag, leaf_string, GlobalOptions};
 const GUIDES: &str = include_str!("../resources/wizard_guides.json");
 
 /// The parsed guide table.
-struct Guides {
-    order: Vec<String>,
-    opt_in: Vec<String>,
-    guides: Map<String, Value>,
+///
+/// `connect --guide` and `connect --dry-run` render the same table, so it is
+/// `pub(crate)`: one captured resource, three renderers.
+pub(crate) struct Guides {
+    pub(crate) order: Vec<String>,
+    pub(crate) opt_in: Vec<String>,
+    pub(crate) guides: Map<String, Value>,
 }
 
 impl Guides {
-    fn load() -> Result<Self, String> {
+    pub(crate) fn load() -> Result<Self, String> {
         let document: Value =
             serde_json::from_str(GUIDES).map_err(|error| format!("wizard guides: {error}"))?;
         let order: Vec<String> = document
@@ -84,7 +90,7 @@ impl Guides {
         })
     }
 
-    fn guide(&self, key: &str) -> Option<&Value> {
+    pub(crate) fn guide(&self, key: &str) -> Option<&Value> {
         self.guides.get(key)
     }
 }
@@ -418,113 +424,6 @@ fn legacy_checklist(
         checklist.push(Value::Object(entry));
     }
     checklist
-}
-
-/// `_setup_pending_payload()`: `ok: false` plus the `INTERACTIVE_REQUIRED` error,
-/// without hiding the resumable state.
-fn pending_payload(mut payload: Value, command: &str) -> Value {
-    let hint = if command == "onboard" {
-        format!("xpst {command} --dry-run --json")
-    } else {
-        format!("xpst {command} --resume")
-    };
-    if let Some(map) = payload.as_object_mut() {
-        map.insert("ok".to_string(), json!(false));
-        map.insert(
-            "error".to_string(),
-            json!({
-                "code": "INTERACTIVE_REQUIRED",
-                "message": format!(
-                    "{command} cannot perform human approval actions in non-TTY JSON mode."
-                ),
-                "action": "Complete the listed human actions, then run the command again or use setup resume.",
-                "hint": hint,
-            }),
-        );
-    }
-    payload
-}
-
-/// `_render_setup_transaction()` — the terse human view.
-fn render(payload: &Value, command: &str, out: &mut dyn Write) {
-    let transaction_id = payload
-        .get("transaction_id")
-        .and_then(Value::as_str)
-        .unwrap_or("none");
-    let completion = payload
-        .get("completion")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    let state = completion
-        .get("state")
-        .or_else(|| payload.get("state"))
-        .and_then(Value::as_str)
-        .unwrap_or("not_started");
-    let mut rendered = format!("Setup transaction {transaction_id}\n  State: {state}\n");
-    let actions = payload
-        .get("pending_human_actions")
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or(0);
-    let complete = completion
-        .get("complete")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    if actions > 0 {
-        rendered.push_str(&format!("  {actions} human action(s) pending.\n"));
-        rendered.push_str(&format!("  Resume with: xpst {command} --resume\n"));
-    } else if complete {
-        rendered.push_str("  Setup readiness verified.\n");
-    }
-    let _ = write_text(out, &rendered);
-}
-
-/// `Path.expanduser()` for the two forms the engine writes.
-fn expanduser(path: &str) -> PathBuf {
-    if path == "~" {
-        return std::env::var_os("HOME").map_or_else(|| PathBuf::from(path), PathBuf::from);
-    }
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(rest);
-        }
-    }
-    PathBuf::from(path)
-}
-
-/// `_setup_transaction_service()`: `--config`'s parent, else the profile dir.
-fn config_dir(global: &GlobalOptions) -> Result<PathBuf, i32> {
-    if let Some(path) = &global.config_path {
-        let expanded = expanduser(path);
-        return Ok(expanded
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from(".")));
-    }
-    match crate::paths::config_dir() {
-        Some(dir) => Ok(dir),
-        None => Err(exit::CONFIG_ERROR),
-    }
-}
-
-/// `stdin_is_interactive()` on POSIX: `sys.stdin.isatty()`.
-fn stdin_is_interactive() -> bool {
-    std::io::stdin().is_terminal()
-}
-
-/// Report a `SetupError` the way the other commands report a failure.
-fn report(err: &mut dyn Write, json_mode: bool, out: &mut dyn Write, message: &str) -> i32 {
-    if json_mode {
-        let payload = crate::output::error_payload_with(
-            "SETUP_REQUEST_INVALID",
-            message,
-            serde_json::json!({}),
-        );
-        let _ = write_python_json_value(out, &payload);
-    } else {
-        let _ = writeln!(err, "{message}");
-    }
-    exit::GENERAL
 }
 
 #[cfg(test)]
