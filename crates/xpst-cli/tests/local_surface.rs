@@ -27,7 +27,7 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 202;
+const EXPECTED_SCENARIOS: usize = 210;
 
 fn document() -> Value {
     serde_json::from_str(FIXTURE).expect("fixture is valid JSON")
@@ -662,6 +662,46 @@ fn assert_files_match(row: &Value, profile: &Profile, scenario: &str) {
     }
 }
 
+/// Compare the files whose *content* is random by design.
+///
+/// `files` byte-compares a written document, which is impossible for the
+/// per-install Fernet material (`credentials/.fallback_secret`,
+/// `credentials/.fallback_salt`): Python generates it with `secrets.token_bytes`
+/// and so does the Rust engine. What is not random is the contract — the file
+/// exists, it is exactly the documented length, and it is owner-only. The
+/// fixture records the observed `{bytes, mode}` map, so a Python-side change to
+/// any of the three fails the capture and a Rust-side change fails here.
+fn assert_files_present(row: &Value, profile: &Profile, scenario: &str) {
+    let Some(expected) = row.get("files_present").and_then(Value::as_object) else {
+        return;
+    };
+    assert!(
+        !expected.is_empty(),
+        "scenario `{scenario}` records an empty files_present map"
+    );
+    for (relative, want) in expected {
+        let path = profile.path().join(relative);
+        let metadata = std::fs::metadata(&path).unwrap_or_else(|error| {
+            panic!("scenario `{scenario}`: {relative} was not written: {error}")
+        });
+        assert_eq!(
+            metadata.len(),
+            want["bytes"].as_u64().unwrap_or(0),
+            "scenario `{scenario}`: {relative} length drifted"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = metadata.permissions().mode() & 0o777;
+            assert_eq!(
+                format!("0o{mode:o}"),
+                want["mode"].as_str().unwrap_or_default(),
+                "scenario `{scenario}`: {relative} is not owner-only"
+            );
+        }
+    }
+}
+
 fn mask_sections_for(row: &Value) -> Vec<String> {
     row.get("mask_sections")
         .and_then(Value::as_array)
@@ -857,8 +897,6 @@ fn every_recorded_scenario_matches_the_python_engine() {
                     &mask_lines_for(row),
                 );
                 assert_payload_matches(&row["stdout_json"], &actual, name);
-                assert_files_match(row, &profile, name);
-                assert_files_zip_match(row, &profile, name);
             }
             "stdout" => {
                 assert_eq!(
@@ -927,6 +965,18 @@ fn every_recorded_scenario_matches_the_python_engine() {
                 );
             }
             other => panic!("scenario `{name}` has unknown compare mode `{other}`"),
+        }
+
+        // Written files are behaviour, not decoration: a `stdout` row that
+        // records `files` is claiming the state store it wrote matches Python's
+        // byte for byte, so every mode that records them has to compare them.
+        // `divergence` is the one exception — the two engines are expected to
+        // differ there, and a file comparison would contradict the row's own
+        // reason.
+        if compare != "divergence" {
+            assert_files_match(row, &profile, name);
+            assert_files_zip_match(row, &profile, name);
+            assert_files_present(row, &profile, name);
         }
         checked += 1;
     }

@@ -444,4 +444,10 @@ pub const DEVIATIONS: &[&str] = &[
      a captured resource (`resources/wizard_guides.json`, written by \
      `xtask/scripts/capture_wizard_guides.py`) rather than a hand transcription, and the \
      `--export-md` bytes are held to `tests/fixtures/wizard_export.md`.",
+    "`setup`'s interactive executor (`run_setup()`, which prompts and runs the connect flows) is \
+     not ported, for the same reason and with the same shape as `wizard`'s: `--json` and a \
+     non-TTY stdin are byte-identical, and an interactive terminal gets the transaction state \
+     plus a line naming `python -m xpst setup`. The exit code is the one real difference between \
+     the two commands — `setup` answers `EXIT_CONFIG_ERROR` (2) where the `wizard` alias answers \
+     `EXIT_AUTH_FAILURE` (3) — and both are pinned by their own fixture rows.",
 ];

@@ -2,7 +2,7 @@
 """Capture the wizard's per-platform guide table and its markdown export.
 
 `xpst wizard --json` carries a `checklist` built from `xpst.wizard.PLATFORM_GUIDES`
-(seven platforms of prose), and `xpst wizard --export-md` renders the same table
+(eight platforms of prose), and `xpst wizard --export-md` renders the same table
 as markdown. Both are static data, so the Rust engine holds them as a captured
 resource instead of a hand-transcribed table — a hand port of 40-odd sentences
 would drift on the first typo and nothing would notice.

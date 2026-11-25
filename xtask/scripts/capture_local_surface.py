@@ -371,6 +371,19 @@ KB_STORE = {
 }
 
 
+#: The setup transaction's wall-clock fields, masked at any depth. Shared by the
+#: `wizard` and `setup` rows: both commands answer the same document.
+WIZARD_MASK = [
+    "transaction_id",
+    "created_at",
+    "updated_at",
+    "started_at",
+    "completed_at",
+    "verified_at",
+    "steps",
+    "why",
+]
+
 SCENARIOS = [
     {
         "name": "status_empty_profile",
@@ -2719,6 +2732,14 @@ SCENARIOS = [
         },
         "config_dir": ".xpst",
         "files": [".xpst/config.yaml"],
+        # Python's `CredentialStore.__init__` derives the fallback Fernet key, so
+        # constructing the store writes the per-install material even when the
+        # platform has nothing in the encrypted store. The bytes are random by
+        # design; presence, length and mode are the contract.
+        "files_present": [
+            ".xpst/credentials/.fallback_secret",
+            ".xpst/credentials/.fallback_salt",
+        ],
         "compare": "stdout",
     },
     {
@@ -2729,6 +2750,10 @@ SCENARIOS = [
         "seed": {},
         "config_dir": ".xpst",
         "files": [".xpst/config.yaml"],
+        "files_present": [
+            ".xpst/credentials/.fallback_secret",
+            ".xpst/credentials/.fallback_salt",
+        ],
         "compare": "stdout",
     },
     # ── wizard ──────────────────────────────────────────────────────────────
@@ -2845,6 +2870,74 @@ SCENARIOS = [
         "seed": {},
         "files": ["guide.md"],
         "compare": "stdout",
+    },
+    {
+        # `--resume` on a fresh profile starts the transaction first, then
+        # resumes it; the agent envelope and the exit 3 are the contract.
+        "name": "wizard_resume_fresh",
+        "argv": ["wizard", "--resume", "--json"],
+        "seed": {},
+        "mask": WIZARD_MASK,
+        "allow_nonzero": True,
+        "compare": "json",
+    },
+    {
+        # `--finish-later` is an explicit resumable state, so no
+        # INTERACTIVE_REQUIRED document and exit 0.
+        "name": "wizard_finish_later",
+        "argv": ["wizard", "--finish-later", "--json"],
+        "seed": {},
+        "mask": WIZARD_MASK,
+        "compare": "json",
+    },
+    {
+        # `--reset` on a fresh profile answers a fresh transaction, exit 0.
+        "name": "wizard_reset",
+        "argv": ["wizard", "--reset", "--json"],
+        "seed": {},
+        "mask": WIZARD_MASK,
+        "compare": "json",
+    },
+    # ── setup ───────────────────────────────────────────────────────────────
+    # `setup` is the canonical command `wizard` aliases. Same transaction, same
+    # agent document — but no checklist, no envelope, and exit 2
+    # (`EXIT_CONFIG_ERROR`) instead of 3.
+    {
+        "name": "setup_agent_start",
+        "argv": ["setup", "--json"],
+        "seed": {},
+        "mask": WIZARD_MASK,
+        "allow_nonzero": True,
+        "compare": "json",
+    },
+    {
+        "name": "setup_status_empty",
+        "argv": ["setup", "--status", "--json"],
+        "seed": {},
+        "mask": WIZARD_MASK,
+        "compare": "json",
+    },
+    {
+        "name": "setup_resume_fresh",
+        "argv": ["setup", "--resume", "--json"],
+        "seed": {},
+        "mask": WIZARD_MASK,
+        "allow_nonzero": True,
+        "compare": "json",
+    },
+    {
+        "name": "setup_finish_later",
+        "argv": ["setup", "--finish-later", "--json"],
+        "seed": {},
+        "mask": WIZARD_MASK,
+        "compare": "json",
+    },
+    {
+        "name": "setup_reset",
+        "argv": ["setup", "--reset", "--json"],
+        "seed": {},
+        "mask": WIZARD_MASK,
+        "compare": "json",
     },
 ]
 
@@ -3173,10 +3266,26 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
                     scenario.get("mask_lines"),
                 )
                 files[relative] = mask_file_keys(text, scenario.get("mask_file_keys"))
+        # Files whose content is random by design (the per-install Fernet
+        # material). Presence, length and mode are the contract; the bytes are
+        # not comparable between two runs of the *same* engine, let alone two
+        # engines.
+        present = {}
+        for relative in scenario.get("files_present", []):
+            path = profile / relative
+            if not path.exists():
+                present[relative] = None
+                continue
+            stat = path.stat()
+            present[relative] = {
+                "bytes": stat.st_size,
+                "mode": f"0o{stat.st_mode & 0o777:o}",
+            }
         return {
             "exit_code": proc.returncode,
             "payload": payload,
             "files": files,
+            "present": present,
             "archives": archives,
             "stdout": proc.stdout,
             "stdout_normalized": normalize(
@@ -3268,7 +3377,21 @@ def run_scenario(scenario: dict, python: str) -> dict:
     if scenario.get("credential_json"):
         record["credential_json"] = scenario["credential_json"]
     if scenario.get("files"):
+        missing = [name for name in scenario["files"] if name not in observed["files"]]
+        if missing:
+            raise SystemExit(
+                f"scenario {scenario['name']}: declared file(s) {missing} were not written; "
+                "a row that records a state store must not silently drop it"
+            )
         record["files"] = observed["files"]
+    if scenario.get("files_present"):
+        missing = [name for name, value in observed["present"].items() if value is None]
+        if missing:
+            raise SystemExit(
+                f"scenario {scenario['name']}: {missing} were not written; the row pins "
+                "their presence, length and mode"
+            )
+        record["files_present"] = observed["present"]
     if scenario.get("files_zip"):
         record["files_zip"] = observed["archives"]
     if scenario.get("mask_sections"):
@@ -3338,6 +3461,29 @@ def compare_scenarios(python: str, binary: str) -> int:
         actual = observe(scenario, [binary])
         mode = scenario["compare"]
 
+        # Written files are behaviour for every mode that records them, not just
+        # for `json`. `divergence` rows are the exception: the engines are
+        # expected to differ there, so a file comparison would contradict the
+        # row's own reason.
+        if mode != "divergence":
+            if files_differ(expected["files"], actual["files"]):
+                mismatches.append(
+                    f"{name}: written files differ\n  python: {json.dumps(expected['files'])}\n"
+                    f"  rust:   {json.dumps(actual['files'])}"
+                )
+            if expected["archives"] != actual["archives"]:
+                mismatches.append(
+                    f"{name}: written archives differ\n"
+                    f"  python: {json.dumps(expected['archives'])}\n"
+                    f"  rust:   {json.dumps(actual['archives'])}"
+                )
+            if expected["present"] != actual["present"]:
+                mismatches.append(
+                    f"{name}: random-content files differ\n"
+                    f"  python: {json.dumps(expected['present'])}\n"
+                    f"  rust:   {json.dumps(actual['present'])}"
+                )
+
         if mode == "json":
             if actual["payload"] is None:
                 mismatches.append(
@@ -3348,11 +3494,6 @@ def compare_scenarios(python: str, binary: str) -> int:
                 mismatches.append(
                     f"{name}: exit {expected['exit_code']} (python) != "
                     f"{actual['exit_code']} (rust)"
-                )
-            if files_differ(expected["files"], actual["files"]):
-                mismatches.append(
-                    f"{name}: written files differ\n  python: {json.dumps(expected['files'])}\n"
-                    f"  rust:   {json.dumps(actual['files'])}"
                 )
             if expected["payload"] != actual["payload"]:
                 mismatches.append(

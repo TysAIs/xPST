@@ -23,13 +23,16 @@
 //! transaction state and a line naming the Python command that performs the
 //! human actions.
 
-use std::io::{IsTerminal, Write};
-use std::path::{Path, PathBuf};
+use std::io::Write;
+use std::path::Path;
 
 use clap::ArgMatches;
 use serde_json::{json, Map, Value};
-use xpst_surface::setup_transaction::{ResumeRequest, SetupTransactionService};
+use xpst_surface::setup_transaction::SetupTransactionService;
 
+use crate::commands::setup_transaction::{
+    self, interactive_required, pending_payload, render, Flags,
+};
 use crate::output::{write_python_json_value, write_text};
 use crate::{exit, flag, leaf_string, GlobalOptions};
 
@@ -98,10 +101,7 @@ pub fn run(
 ) -> i32 {
     let json_mode = global.json || leaf.is_some_and(|m| flag(m, "opt:json"));
     let export_md = leaf_string(leaf, "opt:export-md");
-    let show_status = leaf.is_some_and(|m| flag(m, "opt:status"));
-    let resume_transaction = leaf.is_some_and(|m| flag(m, "opt:resume"));
-    let finish_later = leaf.is_some_and(|m| flag(m, "opt:finish-later"));
-    let reset_transaction = leaf.is_some_and(|m| flag(m, "opt:reset"));
+    let flags = Flags::read(leaf);
 
     let guides = match Guides::load() {
         Ok(guides) => guides,
@@ -115,46 +115,18 @@ pub fn run(
         return export(&guides, &target, json_mode, out, err);
     }
 
-    let config_dir = match config_dir(global) {
+    let config_dir = match setup_transaction::config_dir(global) {
         Ok(dir) => dir,
         Err(code) => return code,
     };
     let mut service = SetupTransactionService::new(&config_dir);
 
-    let payload = if reset_transaction {
-        service.reset_json(None, "wizard")
-    } else if show_status {
-        service.status_json(None, "wizard")
-    } else if resume_transaction {
-        if service.status(None).ok().flatten().is_none() {
-            if let Err(error) = service.start(None) {
-                return report(err, json_mode, out, error.message());
-            }
-        }
-        service.resume_json(ResumeRequest::default(), "wizard")
-    } else if finish_later {
-        if service.status(None).ok().flatten().is_none() {
-            if let Err(error) = service.start(None) {
-                return report(err, json_mode, out, error.message());
-            }
-        }
-        service.resume_json(
-            ResumeRequest {
-                finish_later: true,
-                ..ResumeRequest::default()
-            },
-            "wizard",
-        )
-    } else {
-        service.start_json(None, "wizard")
-    };
-
-    let mut payload = match payload {
+    let mut payload = match setup_transaction::resolve(&mut service, &flags, "wizard") {
         Ok(payload) => payload,
-        Err(error) => return report(err, json_mode, out, error.message()),
+        Err(message) => return report(err, json_mode, out, &message),
     };
 
-    if json_mode || !stdin_is_interactive() {
+    if json_mode || !setup_transaction::stdin_is_interactive() {
         let completion = payload
             .get("completion")
             .cloned()
@@ -187,25 +159,21 @@ pub fn run(
             .get("transaction_id")
             .map(|value| !value.is_null())
             .unwrap_or(false);
-        if has_transaction && !complete && !reset_transaction && !show_status && !finish_later {
+        if has_transaction && !complete && !flags.reset && !flags.show_status && !flags.finish_later
+        {
             payload = pending_payload(payload, "wizard");
         }
 
         let _ = write_python_json_value(out, &payload);
 
-        let interactive_required = payload
-            .get("error")
-            .and_then(|error| error.get("code"))
-            .and_then(Value::as_str)
-            == Some("INTERACTIVE_REQUIRED");
-        return if interactive_required {
+        return if interactive_required(&payload) {
             exit::AUTH_FAILURE
         } else {
             exit::SUCCESS
         };
     }
 
-    if reset_transaction || show_status || finish_later {
+    if flags.reset || flags.show_status || flags.finish_later {
         render(&payload, "wizard", out);
         return exit::SUCCESS;
     }
@@ -231,7 +199,7 @@ fn export(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
-    let path = expanduser(target);
+    let path = setup_transaction::expanduser(target);
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             if let Err(error) = std::fs::create_dir_all(parent) {
@@ -418,98 +386,6 @@ fn legacy_checklist(
         checklist.push(Value::Object(entry));
     }
     checklist
-}
-
-/// `_setup_pending_payload()`: `ok: false` plus the `INTERACTIVE_REQUIRED` error,
-/// without hiding the resumable state.
-fn pending_payload(mut payload: Value, command: &str) -> Value {
-    let hint = if command == "onboard" {
-        format!("xpst {command} --dry-run --json")
-    } else {
-        format!("xpst {command} --resume")
-    };
-    if let Some(map) = payload.as_object_mut() {
-        map.insert("ok".to_string(), json!(false));
-        map.insert(
-            "error".to_string(),
-            json!({
-                "code": "INTERACTIVE_REQUIRED",
-                "message": format!(
-                    "{command} cannot perform human approval actions in non-TTY JSON mode."
-                ),
-                "action": "Complete the listed human actions, then run the command again or use setup resume.",
-                "hint": hint,
-            }),
-        );
-    }
-    payload
-}
-
-/// `_render_setup_transaction()` — the terse human view.
-fn render(payload: &Value, command: &str, out: &mut dyn Write) {
-    let transaction_id = payload
-        .get("transaction_id")
-        .and_then(Value::as_str)
-        .unwrap_or("none");
-    let completion = payload
-        .get("completion")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    let state = completion
-        .get("state")
-        .or_else(|| payload.get("state"))
-        .and_then(Value::as_str)
-        .unwrap_or("not_started");
-    let mut rendered = format!("Setup transaction {transaction_id}\n  State: {state}\n");
-    let actions = payload
-        .get("pending_human_actions")
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or(0);
-    let complete = completion
-        .get("complete")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    if actions > 0 {
-        rendered.push_str(&format!("  {actions} human action(s) pending.\n"));
-        rendered.push_str(&format!("  Resume with: xpst {command} --resume\n"));
-    } else if complete {
-        rendered.push_str("  Setup readiness verified.\n");
-    }
-    let _ = write_text(out, &rendered);
-}
-
-/// `Path.expanduser()` for the two forms the engine writes.
-fn expanduser(path: &str) -> PathBuf {
-    if path == "~" {
-        return std::env::var_os("HOME").map_or_else(|| PathBuf::from(path), PathBuf::from);
-    }
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(rest);
-        }
-    }
-    PathBuf::from(path)
-}
-
-/// `_setup_transaction_service()`: `--config`'s parent, else the profile dir.
-fn config_dir(global: &GlobalOptions) -> Result<PathBuf, i32> {
-    if let Some(path) = &global.config_path {
-        let expanded = expanduser(path);
-        return Ok(expanded
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from(".")));
-    }
-    match crate::paths::config_dir() {
-        Some(dir) => Ok(dir),
-        None => Err(exit::CONFIG_ERROR),
-    }
-}
-
-/// `stdin_is_interactive()` on POSIX: `sys.stdin.isatty()`.
-fn stdin_is_interactive() -> bool {
-    std::io::stdin().is_terminal()
 }
 
 /// Report a `SetupError` the way the other commands report a failure.

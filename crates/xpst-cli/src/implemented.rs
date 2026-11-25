@@ -384,7 +384,7 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "disconnect",
         "xpst-auth",
-        "`disconnect_platform()` (the encrypted store's keys, the library-native plaintext files, `sessions/*<platform>*`, then `enabled: false` and the config save) behind the CLI's own destructive-action guard: a non-interactive or `--json` call without `--yes` answers `CONFIRMATION_REQUIRED` and exits 1 before anything is touched. Payload and the resulting `config.yaml` byte-compared with the Python CLI; the human view is plain text (standing divergence).",
+        "`disconnect_platform()` (the encrypted store's keys, the library-native plaintext files, `sessions/*<platform>*`, then `enabled: false` and the config save) behind the CLI's own destructive-action guard: a non-interactive or `--json` call without `--yes` answers `CONFIRMATION_REQUIRED` and exits 1 before anything is touched. Payload and the resulting `config.yaml` byte-compared with the Python CLI, and the per-install Fernet material Python's `CredentialStore.__init__` writes on a fresh profile is pinned by presence, length and mode (its bytes are random by design). The human view is plain text (standing divergence).",
         disconnect,
     ),
     implemented(
@@ -392,6 +392,12 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         "xpst-store",
         "The three lookups in `Workspace.get_transcript()` order (`<id>.json`, `content:<id>.json`, then the first `transcripts/` file whose name contains the id) with `create=False`; a hit is `json.dumps(indent=2)` and a miss is the compact `{\"error\", \"video_id\"}` document with exit 1. Payload and exit code byte-compared with the Python CLI.",
         transcript,
+    ),
+    implemented(
+        "setup",
+        "xpst-auth",
+        "The canonical setup transaction: `start`/`status`/`resume`/`reset` with `alias: setup`, `--finish-later`, the `INTERACTIVE_REQUIRED` document with exit 2 (`EXIT_CONFIG_ERROR`, where the `wizard` alias uses 3) and the terse human view. Payload byte-compared with the Python CLI (transaction id and timestamps masked). The interactive executor (`run_setup`, prompts + connect flows) is not ported — named divergence.",
+        setup,
     ),
     implemented(
         "wizard",
@@ -979,6 +985,15 @@ fn wizard(
     err: &mut dyn Write,
 ) -> i32 {
     commands::wizard::run(global, leaf, out, err)
+}
+
+fn setup(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::setup::run(global, leaf, out, err)
 }
 
 #[cfg(test)]
