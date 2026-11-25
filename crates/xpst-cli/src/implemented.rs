@@ -396,13 +396,13 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "setup",
         "xpst-auth",
-        "The canonical setup transaction: `start`/`status`/`resume`/`reset` with `alias: setup`, `--finish-later`, the `INTERACTIVE_REQUIRED` document with exit 2 (`EXIT_CONFIG_ERROR`, where the `wizard` alias uses 3) and the terse human view. Payload byte-compared with the Python CLI (transaction id and timestamps masked). The interactive executor (`run_setup`, prompts + connect flows) is not ported — named divergence.",
+        "The canonical setup transaction: `start`/`status`/`resume`/`reset` with `alias: setup`, `--finish-later`, the `INTERACTIVE_REQUIRED` document with exit 2 (`EXIT_CONFIG_ERROR`, where the `wizard` alias uses 3) and the terse human view. Payload byte-compared with the Python CLI (transaction id and timestamps masked), and `--resume --finish-later` together is pinned to Python's `elif` precedence (`--resume` wins, so the transaction stays `in_progress`) with the persisted `setup_transaction.json` byte-compared too. The interactive executor (`run_setup`, prompts + connect flows) is not ported — named divergence.",
         setup,
     ),
     implemented(
         "wizard",
         "xpst-auth",
-        "The deprecated alias of `setup`: the same resumable transaction (`start`/`status`/`resume`/`reset` with `alias: wizard`), the agent-mode envelope (`mode`, `interactive`, `all_pass`, `completed`, `next_action`), the `INTERACTIVE_REQUIRED` document with exit 3, the legacy checklist built from a captured `PLATFORM_GUIDES` table, and `--export-md`'s markdown (byte-compared with the shipped `export_markdown()`). Payload byte-compared with the Python CLI (transaction id and timestamps masked). The interactive executor (`run_wizard`, browser + live checks) is not ported — named divergence.",
+        "The deprecated alias of `setup`: the same resumable transaction (`start`/`status`/`resume`/`reset` with `alias: wizard`), the agent-mode envelope (`mode`, `interactive`, `all_pass`, `completed`, `next_action`), the `INTERACTIVE_REQUIRED` document with exit 3, the legacy checklist built from a captured `PLATFORM_GUIDES` table, and `--export-md`'s markdown (byte-compared with the shipped `export_markdown()`). Payload byte-compared with the Python CLI (transaction id and timestamps masked), and `--resume --finish-later` together is pinned to Python's `elif` precedence (`--resume` wins, so the transaction stays `in_progress`) with the persisted `setup_transaction.json` byte-compared too. The interactive executor (`run_wizard`, browser + live checks) is not ported — named divergence.",
         wizard,
     ),
 ];

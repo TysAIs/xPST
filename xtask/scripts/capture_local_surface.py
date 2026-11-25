@@ -384,6 +384,20 @@ WIZARD_MASK = [
     "why",
 ]
 
+#: The line prefixes of `setup_transaction.json` that carry the wall clock or a
+#: fresh `uuid4`. `mask` blanks payload *keys* and does nothing to a written
+#: file, so the persisted transaction is pinned with `mask_lines` instead: the
+#: key survives and only its value is blanked, which keeps
+#: `completion.state`/`completion.reason` byte-compared. `started_at`,
+#: `completed_at` and `verified_at` are `null` on a fresh profile, so they are
+#: deliberately not masked — a non-null value there is a real difference.
+TRANSACTION_FILE_MASK_LINES = [
+    '  "created_at": ',
+    '  "transaction_id": ',
+    '  "updated_at": ',
+    '      "updated_at": ',
+]
+
 SCENARIOS = [
     {
         "name": "status_empty_profile",
@@ -2898,6 +2912,25 @@ SCENARIOS = [
         "mask": WIZARD_MASK,
         "compare": "json",
     },
+    {
+        # Both transaction flags at once. They are independent Click booleans
+        # with no mutual exclusion, and Python's `elif` chain gives `--resume`
+        # precedence, so `--finish-later` is ignored: the answer is a plain
+        # resume (`completion.state` = `in_progress`, not `finish_later`) and
+        # the pending-payload envelope is still suppressed, because that
+        # condition reads the raw `finish_later` flag. The persisted
+        # transaction is pinned as well — that is where the precedence becomes
+        # durable — with only the wall clock and the transaction id blanked, so
+        # `completion.state` and `completion.reason` are byte-compared.
+        "name": "wizard_resume_and_finish_later",
+        "argv": ["wizard", "--resume", "--finish-later", "--json"],
+        "seed": {},
+        "config_dir": ".xpst",
+        "mask": WIZARD_MASK,
+        "mask_lines": TRANSACTION_FILE_MASK_LINES,
+        "files": [".xpst/setup_transaction.json"],
+        "compare": "json",
+    },
     # ── setup ───────────────────────────────────────────────────────────────
     # `setup` is the canonical command `wizard` aliases. Same transaction, same
     # agent document — but no checklist, no envelope, and exit 2
@@ -2937,6 +2970,19 @@ SCENARIOS = [
         "argv": ["setup", "--reset", "--json"],
         "seed": {},
         "mask": WIZARD_MASK,
+        "compare": "json",
+    },
+    {
+        # The same combination on the canonical command: `--resume` wins, so
+        # the transaction stays `in_progress` and the state store is written
+        # with the resume reason. See `wizard_resume_and_finish_later`.
+        "name": "setup_resume_and_finish_later",
+        "argv": ["setup", "--resume", "--finish-later", "--json"],
+        "seed": {},
+        "config_dir": ".xpst",
+        "mask": WIZARD_MASK,
+        "mask_lines": TRANSACTION_FILE_MASK_LINES,
+        "files": [".xpst/setup_transaction.json"],
         "compare": "json",
     },
 ]

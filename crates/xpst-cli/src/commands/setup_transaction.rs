@@ -46,6 +46,14 @@ impl Flags {
 ///
 /// `resume` and `finish_later` start a transaction first when none exists —
 /// Python's `if service.status() is None: service.start()`.
+///
+/// The two flags are independent Click booleans with no mutual exclusion, so
+/// both can be passed at once. Python's `elif` chain then gives `--resume`
+/// precedence and never reaches the `--finish-later` branch, so the request is
+/// a plain resume. Mirroring that here is not cosmetic: `finish_later` is
+/// persisted into `setup_transaction.json` (`completion.state` /
+/// `completion.reason`), so ORing the flags would write a different state store
+/// than the Python engine for the same argv.
 pub fn resolve(
     service: &mut SetupTransactionService,
     flags: &Flags,
@@ -74,7 +82,9 @@ pub fn resolve(
         return service
             .resume_json(
                 ResumeRequest {
-                    finish_later: flags.finish_later,
+                    // `elif resume_transaction:` comes before `elif finish_later:`,
+                    // so a resume request is never a finish-later request.
+                    finish_later: flags.finish_later && !flags.resume,
                     ..ResumeRequest::default()
                 },
                 alias,

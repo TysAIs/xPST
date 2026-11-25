@@ -5,7 +5,7 @@
     "source": "src/xpst/cli.py"
   },
   "note": "Captured by running the shipped Python CLI against scratch profiles. scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent; snapshot modified_at is stripped and its epoch recorded instead.",
-  "scenario_count": 210,
+  "scenario_count": 212,
   "scenarios": [
     {
       "name": "status_empty_profile",
@@ -20842,6 +20842,395 @@
       }
     },
     {
+      "name": "wizard_resume_and_finish_later",
+      "argv": [
+        "wizard",
+        "--resume",
+        "--finish-later",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "mask": [
+        "transaction_id",
+        "created_at",
+        "updated_at",
+        "started_at",
+        "completed_at",
+        "verified_at",
+        "steps",
+        "why"
+      ],
+      "mask_lines": [
+        "  \"created_at\": ",
+        "  \"transaction_id\": ",
+        "  \"updated_at\": ",
+        "      \"updated_at\": "
+      ],
+      "files": {
+        ".xpst/setup_transaction.json": "{\n  \"completion\": {\n    \"complete\": false,\n    \"reason\": \"Verify at least one source and one live-ready video destination.\",\n    \"resumable\": true,\n    \"state\": \"in_progress\"\n  },\n  \"created_at\": <MASK>\n  \"errors\": [],\n  \"human_actions\": [\n    {\n      \"action_id\": \"connect_source_tiktok\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect tiktok as source\",\n      \"status\": \"pending\",\n      \"url\": null\n    },\n    {\n      \"action_id\": \"connect_video_destination_youtube\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect youtube as video destination\",\n      \"status\": \"pending\",\n      \"url\": null\n    },\n    {\n      \"action_id\": \"connect_video_destination_x\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect x as video destination\",\n      \"status\": \"pending\",\n      \"url\": null\n    },\n    {\n      \"action_id\": \"connect_video_destination_instagram\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect instagram as video destination\",\n      \"status\": \"pending\",\n      \"url\": null\n    },\n    {\n      \"action_id\": \"connect_video_destination_threads\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect threads as video destination\",\n      \"status\": \"pending\",\n      \"url\": null\n    }\n  ],\n  \"pending_human_actions\": [\n    {\n      \"action_id\": \"connect_source_tiktok\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect tiktok as source\",\n      \"status\": \"pending\",\n      \"url\": null\n    },\n    {\n      \"action_id\": \"connect_video_destination_youtube\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect youtube as video destination\",\n      \"status\": \"pending\",\n      \"url\": null\n    },\n    {\n      \"action_id\": \"connect_video_destination_x\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect x as video destination\",\n      \"status\": \"pending\",\n      \"url\": null\n    },\n    {\n      \"action_id\": \"connect_video_destination_instagram\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect instagram as video destination\",\n      \"status\": \"pending\",\n      \"url\": null\n    },\n    {\n      \"action_id\": \"connect_video_destination_threads\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect threads as video destination\",\n      \"status\": \"pending\",\n      \"url\": null\n    }\n  ],\n  \"readiness\": {\n    \"sources\": [],\n    \"state\": \"unverified\",\n    \"verified_at\": null,\n    \"video_destinations\": []\n  },\n  \"schema_version\": 1,\n  \"selected_role_capabilities\": [\n    {\n      \"capability\": \"tiktok\",\n      \"role\": \"source\"\n    },\n    {\n      \"capability\": \"youtube\",\n      \"role\": \"video_destination\"\n    },\n    {\n      \"capability\": \"x\",\n      \"role\": \"video_destination\"\n    },\n    {\n      \"capability\": \"instagram\",\n      \"role\": \"video_destination\"\n    },\n    {\n      \"capability\": \"threads\",\n      \"role\": \"video_destination\"\n    }\n  ],\n  \"state\": \"in_progress\",\n  \"steps\": [\n    {\n      \"capability\": \"tiktok\",\n      \"completed_at\": null,\n      \"error\": null,\n      \"human_action\": {\n        \"action_id\": \"connect_source_tiktok\",\n        \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n        \"kind\": \"connect\",\n        \"label\": \"Connect tiktok as source\",\n        \"status\": \"pending\",\n        \"url\": null\n      },\n      \"role\": \"source\",\n      \"started_at\": null,\n      \"state\": \"pending\",\n      \"step_id\": \"verify_source_tiktok\",\n      \"updated_at\": <MASK>\n    },\n    {\n      \"capability\": \"youtube\",\n      \"completed_at\": null,\n      \"error\": null,\n      \"human_action\": {\n        \"action_id\": \"connect_video_destination_youtube\",\n        \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n        \"kind\": \"connect\",\n        \"label\": \"Connect youtube as video destination\",\n        \"status\": \"pending\",\n        \"url\": null\n      },\n      \"role\": \"video_destination\",\n      \"started_at\": null,\n      \"state\": \"pending\",\n      \"step_id\": \"verify_video_destination_youtube\",\n      \"updated_at\": <MASK>\n    },\n    {\n      \"capability\": \"x\",\n      \"completed_at\": null,\n      \"error\": null,\n      \"human_action\": {\n        \"action_id\": \"connect_video_destination_x\",\n        \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n        \"kind\": \"connect\",\n        \"label\": \"Connect x as video destination\",\n        \"status\": \"pending\",\n        \"url\": null\n      },\n      \"role\": \"video_destination\",\n      \"started_at\": null,\n      \"state\": \"pending\",\n      \"step_id\": \"verify_video_destination_x\",\n      \"updated_at\": <MASK>\n    },\n    {\n      \"capability\": \"instagram\",\n      \"completed_at\": null,\n      \"error\": null,\n      \"human_action\": {\n        \"action_id\": \"connect_video_destination_instagram\",\n        \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n        \"kind\": \"connect\",\n        \"label\": \"Connect instagram as video destination\",\n        \"status\": \"pending\",\n        \"url\": null\n      },\n      \"role\": \"video_destination\",\n      \"started_at\": null,\n      \"state\": \"pending\",\n      \"step_id\": \"verify_video_destination_instagram\",\n      \"updated_at\": <MASK>\n    },\n    {\n      \"capability\": \"threads\",\n      \"completed_at\": null,\n      \"error\": null,\n      \"human_action\": {\n        \"action_id\": \"connect_video_destination_threads\",\n        \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n        \"kind\": \"connect\",\n        \"label\": \"Connect threads as video destination\",\n        \"status\": \"pending\",\n        \"url\": null\n      },\n      \"role\": \"video_destination\",\n      \"started_at\": null,\n      \"state\": \"pending\",\n      \"step_id\": \"verify_video_destination_threads\",\n      \"updated_at\": <MASK>\n    }\n  ],\n  \"transaction_id\": <MASK>\n  \"updated_at\": <MASK>\n}"
+      },
+      "stdout_json": {
+        "ok": true,
+        "operation": "resume",
+        "completion": {
+          "state": "in_progress",
+          "complete": false,
+          "resumable": true,
+          "reason": "Verify at least one source and one live-ready video destination."
+        },
+        "created_at": "<TS>",
+        "errors": [],
+        "human_actions": [
+          {
+            "action_id": "connect_source_tiktok",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect tiktok as source",
+            "status": "pending",
+            "url": null
+          },
+          {
+            "action_id": "connect_video_destination_youtube",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect youtube as video destination",
+            "status": "pending",
+            "url": null
+          },
+          {
+            "action_id": "connect_video_destination_x",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect x as video destination",
+            "status": "pending",
+            "url": null
+          },
+          {
+            "action_id": "connect_video_destination_instagram",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect instagram as video destination",
+            "status": "pending",
+            "url": null
+          },
+          {
+            "action_id": "connect_video_destination_threads",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect threads as video destination",
+            "status": "pending",
+            "url": null
+          }
+        ],
+        "pending_human_actions": [
+          {
+            "action_id": "connect_source_tiktok",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect tiktok as source",
+            "status": "pending",
+            "url": null
+          },
+          {
+            "action_id": "connect_video_destination_youtube",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect youtube as video destination",
+            "status": "pending",
+            "url": null
+          },
+          {
+            "action_id": "connect_video_destination_x",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect x as video destination",
+            "status": "pending",
+            "url": null
+          },
+          {
+            "action_id": "connect_video_destination_instagram",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect instagram as video destination",
+            "status": "pending",
+            "url": null
+          },
+          {
+            "action_id": "connect_video_destination_threads",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect threads as video destination",
+            "status": "pending",
+            "url": null
+          }
+        ],
+        "readiness": {
+          "sources": [],
+          "state": "unverified",
+          "verified_at": "<TS>",
+          "video_destinations": []
+        },
+        "schema_version": 1,
+        "selected_role_capabilities": [
+          {
+            "capability": "tiktok",
+            "role": "source"
+          },
+          {
+            "capability": "youtube",
+            "role": "video_destination"
+          },
+          {
+            "capability": "x",
+            "role": "video_destination"
+          },
+          {
+            "capability": "instagram",
+            "role": "video_destination"
+          },
+          {
+            "capability": "threads",
+            "role": "video_destination"
+          }
+        ],
+        "state": "in_progress",
+        "steps": "<TS>",
+        "transaction_id": "<TS>",
+        "updated_at": "<TS>",
+        "transaction": {
+          "completion": {
+            "state": "in_progress",
+            "complete": false,
+            "resumable": true,
+            "reason": "Verify at least one source and one live-ready video destination."
+          },
+          "created_at": "<TS>",
+          "errors": [],
+          "human_actions": [
+            {
+              "action_id": "connect_source_tiktok",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect tiktok as source",
+              "status": "pending",
+              "url": null
+            },
+            {
+              "action_id": "connect_video_destination_youtube",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect youtube as video destination",
+              "status": "pending",
+              "url": null
+            },
+            {
+              "action_id": "connect_video_destination_x",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect x as video destination",
+              "status": "pending",
+              "url": null
+            },
+            {
+              "action_id": "connect_video_destination_instagram",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect instagram as video destination",
+              "status": "pending",
+              "url": null
+            },
+            {
+              "action_id": "connect_video_destination_threads",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect threads as video destination",
+              "status": "pending",
+              "url": null
+            }
+          ],
+          "pending_human_actions": [
+            {
+              "action_id": "connect_source_tiktok",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect tiktok as source",
+              "status": "pending",
+              "url": null
+            },
+            {
+              "action_id": "connect_video_destination_youtube",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect youtube as video destination",
+              "status": "pending",
+              "url": null
+            },
+            {
+              "action_id": "connect_video_destination_x",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect x as video destination",
+              "status": "pending",
+              "url": null
+            },
+            {
+              "action_id": "connect_video_destination_instagram",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect instagram as video destination",
+              "status": "pending",
+              "url": null
+            },
+            {
+              "action_id": "connect_video_destination_threads",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect threads as video destination",
+              "status": "pending",
+              "url": null
+            }
+          ],
+          "readiness": {
+            "sources": [],
+            "state": "unverified",
+            "verified_at": "<TS>",
+            "video_destinations": []
+          },
+          "schema_version": 1,
+          "selected_role_capabilities": [
+            {
+              "capability": "tiktok",
+              "role": "source"
+            },
+            {
+              "capability": "youtube",
+              "role": "video_destination"
+            },
+            {
+              "capability": "x",
+              "role": "video_destination"
+            },
+            {
+              "capability": "instagram",
+              "role": "video_destination"
+            },
+            {
+              "capability": "threads",
+              "role": "video_destination"
+            }
+          ],
+          "state": "in_progress",
+          "steps": "<TS>",
+          "transaction_id": "<TS>",
+          "updated_at": "<TS>"
+        },
+        "alias": {
+          "command": "wizard",
+          "alias_of": "setup",
+          "deprecated": true,
+          "semantics": "All setup aliases address the same resumable transaction."
+        },
+        "mode": "agent",
+        "interactive": false,
+        "all_pass": false,
+        "completed": false,
+        "next_action": "Connect tiktok as source",
+        "checklist": [
+          {
+            "platform": "youtube",
+            "title": "YouTube Shorts",
+            "why": "<TS>",
+            "steps": "<TS>",
+            "docs_url": "https://github.com/TysAIs/xPST/blob/main/docs/youtube-oauth-production.md",
+            "opt_in": false,
+            "health": "fail",
+            "last_wizard_status": null,
+            "action": "xpst wizard youtube"
+          },
+          {
+            "platform": "instagram",
+            "title": "Instagram Reels",
+            "why": "<TS>",
+            "steps": "<TS>",
+            "docs_url": "",
+            "opt_in": false,
+            "health": "fail",
+            "last_wizard_status": null,
+            "action": "xpst wizard instagram"
+          },
+          {
+            "platform": "x",
+            "title": "X / Twitter",
+            "why": "<TS>",
+            "steps": "<TS>",
+            "docs_url": "",
+            "opt_in": false,
+            "health": "fail",
+            "last_wizard_status": null,
+            "action": "xpst wizard x"
+          },
+          {
+            "platform": "tiktok",
+            "title": "TikTok",
+            "why": "<TS>",
+            "steps": "<TS>",
+            "docs_url": "",
+            "opt_in": false,
+            "health": "fail",
+            "last_wizard_status": null,
+            "action": "xpst wizard tiktok"
+          },
+          {
+            "platform": "threads",
+            "title": "Threads",
+            "why": "<TS>",
+            "steps": "<TS>",
+            "docs_url": "",
+            "opt_in": false,
+            "health": "fail",
+            "last_wizard_status": null,
+            "action": "xpst wizard threads"
+          },
+          {
+            "platform": "facebook",
+            "title": "Facebook Page",
+            "why": "<TS>",
+            "steps": "<TS>",
+            "docs_url": "https://github.com/TysAIs/xPST/blob/main/docs/setup-facebook.md",
+            "opt_in": false,
+            "health": "fail",
+            "last_wizard_status": null,
+            "action": "xpst wizard facebook"
+          },
+          {
+            "platform": "messenger",
+            "title": "Messenger (optional)",
+            "why": "<TS>",
+            "steps": "<TS>",
+            "docs_url": "",
+            "opt_in": false,
+            "health": "fail",
+            "last_wizard_status": null,
+            "action": "xpst wizard messenger"
+          },
+          {
+            "platform": "bluesky",
+            "title": "Bluesky",
+            "why": "<TS>",
+            "steps": "<TS>",
+            "docs_url": "https://docs.bsky.app/",
+            "opt_in": true,
+            "health": "fail",
+            "last_wizard_status": null,
+            "action": "xpst wizard bluesky"
+          }
+        ]
+      }
+    },
+    {
       "name": "setup_agent_start",
       "argv": [
         "setup",
@@ -21781,6 +22170,300 @@
             "reason": "No active setup transaction."
           },
           "pending_human_actions": []
+        },
+        "alias": {
+          "command": "setup",
+          "alias_of": "setup",
+          "deprecated": false,
+          "semantics": "All setup aliases address the same resumable transaction."
+        }
+      }
+    },
+    {
+      "name": "setup_resume_and_finish_later",
+      "argv": [
+        "setup",
+        "--resume",
+        "--finish-later",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "json",
+      "exit_code": 0,
+      "config_dir": ".xpst",
+      "mask": [
+        "transaction_id",
+        "created_at",
+        "updated_at",
+        "started_at",
+        "completed_at",
+        "verified_at",
+        "steps",
+        "why"
+      ],
+      "mask_lines": [
+        "  \"created_at\": ",
+        "  \"transaction_id\": ",
+        "  \"updated_at\": ",
+        "      \"updated_at\": "
+      ],
+      "files": {
+        ".xpst/setup_transaction.json": "{\n  \"completion\": {\n    \"complete\": false,\n    \"reason\": \"Verify at least one source and one live-ready video destination.\",\n    \"resumable\": true,\n    \"state\": \"in_progress\"\n  },\n  \"created_at\": <MASK>\n  \"errors\": [],\n  \"human_actions\": [\n    {\n      \"action_id\": \"connect_source_tiktok\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect tiktok as source\",\n      \"status\": \"pending\",\n      \"url\": null\n    },\n    {\n      \"action_id\": \"connect_video_destination_youtube\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect youtube as video destination\",\n      \"status\": \"pending\",\n      \"url\": null\n    },\n    {\n      \"action_id\": \"connect_video_destination_x\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect x as video destination\",\n      \"status\": \"pending\",\n      \"url\": null\n    },\n    {\n      \"action_id\": \"connect_video_destination_instagram\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect instagram as video destination\",\n      \"status\": \"pending\",\n      \"url\": null\n    },\n    {\n      \"action_id\": \"connect_video_destination_threads\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect threads as video destination\",\n      \"status\": \"pending\",\n      \"url\": null\n    }\n  ],\n  \"pending_human_actions\": [\n    {\n      \"action_id\": \"connect_source_tiktok\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect tiktok as source\",\n      \"status\": \"pending\",\n      \"url\": null\n    },\n    {\n      \"action_id\": \"connect_video_destination_youtube\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect youtube as video destination\",\n      \"status\": \"pending\",\n      \"url\": null\n    },\n    {\n      \"action_id\": \"connect_video_destination_x\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect x as video destination\",\n      \"status\": \"pending\",\n      \"url\": null\n    },\n    {\n      \"action_id\": \"connect_video_destination_instagram\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect instagram as video destination\",\n      \"status\": \"pending\",\n      \"url\": null\n    },\n    {\n      \"action_id\": \"connect_video_destination_threads\",\n      \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n      \"kind\": \"connect\",\n      \"label\": \"Connect threads as video destination\",\n      \"status\": \"pending\",\n      \"url\": null\n    }\n  ],\n  \"readiness\": {\n    \"sources\": [],\n    \"state\": \"unverified\",\n    \"verified_at\": null,\n    \"video_destinations\": []\n  },\n  \"schema_version\": 1,\n  \"selected_role_capabilities\": [\n    {\n      \"capability\": \"tiktok\",\n      \"role\": \"source\"\n    },\n    {\n      \"capability\": \"youtube\",\n      \"role\": \"video_destination\"\n    },\n    {\n      \"capability\": \"x\",\n      \"role\": \"video_destination\"\n    },\n    {\n      \"capability\": \"instagram\",\n      \"role\": \"video_destination\"\n    },\n    {\n      \"capability\": \"threads\",\n      \"role\": \"video_destination\"\n    }\n  ],\n  \"state\": \"in_progress\",\n  \"steps\": [\n    {\n      \"capability\": \"tiktok\",\n      \"completed_at\": null,\n      \"error\": null,\n      \"human_action\": {\n        \"action_id\": \"connect_source_tiktok\",\n        \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n        \"kind\": \"connect\",\n        \"label\": \"Connect tiktok as source\",\n        \"status\": \"pending\",\n        \"url\": null\n      },\n      \"role\": \"source\",\n      \"started_at\": null,\n      \"state\": \"pending\",\n      \"step_id\": \"verify_source_tiktok\",\n      \"updated_at\": <MASK>\n    },\n    {\n      \"capability\": \"youtube\",\n      \"completed_at\": null,\n      \"error\": null,\n      \"human_action\": {\n        \"action_id\": \"connect_video_destination_youtube\",\n        \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n        \"kind\": \"connect\",\n        \"label\": \"Connect youtube as video destination\",\n        \"status\": \"pending\",\n        \"url\": null\n      },\n      \"role\": \"video_destination\",\n      \"started_at\": null,\n      \"state\": \"pending\",\n      \"step_id\": \"verify_video_destination_youtube\",\n      \"updated_at\": <MASK>\n    },\n    {\n      \"capability\": \"x\",\n      \"completed_at\": null,\n      \"error\": null,\n      \"human_action\": {\n        \"action_id\": \"connect_video_destination_x\",\n        \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n        \"kind\": \"connect\",\n        \"label\": \"Connect x as video destination\",\n        \"status\": \"pending\",\n        \"url\": null\n      },\n      \"role\": \"video_destination\",\n      \"started_at\": null,\n      \"state\": \"pending\",\n      \"step_id\": \"verify_video_destination_x\",\n      \"updated_at\": <MASK>\n    },\n    {\n      \"capability\": \"instagram\",\n      \"completed_at\": null,\n      \"error\": null,\n      \"human_action\": {\n        \"action_id\": \"connect_video_destination_instagram\",\n        \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n        \"kind\": \"connect\",\n        \"label\": \"Connect instagram as video destination\",\n        \"status\": \"pending\",\n        \"url\": null\n      },\n      \"role\": \"video_destination\",\n      \"started_at\": null,\n      \"state\": \"pending\",\n      \"step_id\": \"verify_video_destination_instagram\",\n      \"updated_at\": <MASK>\n    },\n    {\n      \"capability\": \"threads\",\n      \"completed_at\": null,\n      \"error\": null,\n      \"human_action\": {\n        \"action_id\": \"connect_video_destination_threads\",\n        \"instructions\": \"Complete the provider's human approval, then resume this setup transaction.\",\n        \"kind\": \"connect\",\n        \"label\": \"Connect threads as video destination\",\n        \"status\": \"pending\",\n        \"url\": null\n      },\n      \"role\": \"video_destination\",\n      \"started_at\": null,\n      \"state\": \"pending\",\n      \"step_id\": \"verify_video_destination_threads\",\n      \"updated_at\": <MASK>\n    }\n  ],\n  \"transaction_id\": <MASK>\n  \"updated_at\": <MASK>\n}"
+      },
+      "stdout_json": {
+        "ok": true,
+        "operation": "resume",
+        "completion": {
+          "state": "in_progress",
+          "complete": false,
+          "resumable": true,
+          "reason": "Verify at least one source and one live-ready video destination."
+        },
+        "created_at": "<TS>",
+        "errors": [],
+        "human_actions": [
+          {
+            "action_id": "connect_source_tiktok",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect tiktok as source",
+            "status": "pending",
+            "url": null
+          },
+          {
+            "action_id": "connect_video_destination_youtube",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect youtube as video destination",
+            "status": "pending",
+            "url": null
+          },
+          {
+            "action_id": "connect_video_destination_x",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect x as video destination",
+            "status": "pending",
+            "url": null
+          },
+          {
+            "action_id": "connect_video_destination_instagram",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect instagram as video destination",
+            "status": "pending",
+            "url": null
+          },
+          {
+            "action_id": "connect_video_destination_threads",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect threads as video destination",
+            "status": "pending",
+            "url": null
+          }
+        ],
+        "pending_human_actions": [
+          {
+            "action_id": "connect_source_tiktok",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect tiktok as source",
+            "status": "pending",
+            "url": null
+          },
+          {
+            "action_id": "connect_video_destination_youtube",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect youtube as video destination",
+            "status": "pending",
+            "url": null
+          },
+          {
+            "action_id": "connect_video_destination_x",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect x as video destination",
+            "status": "pending",
+            "url": null
+          },
+          {
+            "action_id": "connect_video_destination_instagram",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect instagram as video destination",
+            "status": "pending",
+            "url": null
+          },
+          {
+            "action_id": "connect_video_destination_threads",
+            "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+            "kind": "connect",
+            "label": "Connect threads as video destination",
+            "status": "pending",
+            "url": null
+          }
+        ],
+        "readiness": {
+          "sources": [],
+          "state": "unverified",
+          "verified_at": "<TS>",
+          "video_destinations": []
+        },
+        "schema_version": 1,
+        "selected_role_capabilities": [
+          {
+            "capability": "tiktok",
+            "role": "source"
+          },
+          {
+            "capability": "youtube",
+            "role": "video_destination"
+          },
+          {
+            "capability": "x",
+            "role": "video_destination"
+          },
+          {
+            "capability": "instagram",
+            "role": "video_destination"
+          },
+          {
+            "capability": "threads",
+            "role": "video_destination"
+          }
+        ],
+        "state": "in_progress",
+        "steps": "<TS>",
+        "transaction_id": "<TS>",
+        "updated_at": "<TS>",
+        "transaction": {
+          "completion": {
+            "state": "in_progress",
+            "complete": false,
+            "resumable": true,
+            "reason": "Verify at least one source and one live-ready video destination."
+          },
+          "created_at": "<TS>",
+          "errors": [],
+          "human_actions": [
+            {
+              "action_id": "connect_source_tiktok",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect tiktok as source",
+              "status": "pending",
+              "url": null
+            },
+            {
+              "action_id": "connect_video_destination_youtube",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect youtube as video destination",
+              "status": "pending",
+              "url": null
+            },
+            {
+              "action_id": "connect_video_destination_x",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect x as video destination",
+              "status": "pending",
+              "url": null
+            },
+            {
+              "action_id": "connect_video_destination_instagram",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect instagram as video destination",
+              "status": "pending",
+              "url": null
+            },
+            {
+              "action_id": "connect_video_destination_threads",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect threads as video destination",
+              "status": "pending",
+              "url": null
+            }
+          ],
+          "pending_human_actions": [
+            {
+              "action_id": "connect_source_tiktok",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect tiktok as source",
+              "status": "pending",
+              "url": null
+            },
+            {
+              "action_id": "connect_video_destination_youtube",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect youtube as video destination",
+              "status": "pending",
+              "url": null
+            },
+            {
+              "action_id": "connect_video_destination_x",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect x as video destination",
+              "status": "pending",
+              "url": null
+            },
+            {
+              "action_id": "connect_video_destination_instagram",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect instagram as video destination",
+              "status": "pending",
+              "url": null
+            },
+            {
+              "action_id": "connect_video_destination_threads",
+              "instructions": "Complete the provider's human approval, then resume this setup transaction.",
+              "kind": "connect",
+              "label": "Connect threads as video destination",
+              "status": "pending",
+              "url": null
+            }
+          ],
+          "readiness": {
+            "sources": [],
+            "state": "unverified",
+            "verified_at": "<TS>",
+            "video_destinations": []
+          },
+          "schema_version": 1,
+          "selected_role_capabilities": [
+            {
+              "capability": "tiktok",
+              "role": "source"
+            },
+            {
+              "capability": "youtube",
+              "role": "video_destination"
+            },
+            {
+              "capability": "x",
+              "role": "video_destination"
+            },
+            {
+              "capability": "instagram",
+              "role": "video_destination"
+            },
+            {
+              "capability": "threads",
+              "role": "video_destination"
+            }
+          ],
+          "state": "in_progress",
+          "steps": "<TS>",
+          "transaction_id": "<TS>",
+          "updated_at": "<TS>"
         },
         "alias": {
           "command": "setup",
