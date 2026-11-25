@@ -90,7 +90,7 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "config validate",
         "xpst-config",
-        "`{valid, checks}` payload; exit 2 on a blocker.",
+        "`{valid, checks}` payload with the schema checks; exit 2 on a blocker. Python also checks the download/log directories, credential files and rate limits, so the check list differs by design (see the deviations).",
         config_validate,
     ),
     implemented(
@@ -114,25 +114,25 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "doctor",
         "xpst-cli",
-        "Local-only diagnostics; live probes are P1 (the report says so).",
+        "Local-only diagnostics; live probes are P1 (the report says so), so the payload differs from Python's live report by design (see the deviations).",
         doctor,
     ),
     implemented(
         "version",
         "xpst-cli",
-        "Version and dependency report; `--version` matches Click's shape.",
+        "Rust engine identity (`version`, `engine`, `phase`, `commit`); `--version` matches Click's shape. Python's dependency list has no Rust equivalent, so the payload differs by design (see the deviations).",
         version,
     ),
     implemented(
         "status",
         "xpst-state",
-        "Statistics payload field-for-field with `get_statistics()` on captured fixtures.",
+        "Statistics payload byte-compared with `get_statistics()` on captured fixtures — Python's `json.dumps` separators and insertion order, including the state file's own platform order.",
         status,
     ),
     implemented(
         "schedule list",
         "xpst-state",
-        "Entries, pause marker and paused snapshots, as `schedule_list --json` reports them.",
+        "Entries, pause marker and paused snapshots, byte-compared with `schedule_list --json` (store key order preserved, `scheduled_time_local` appended last).",
         schedule_list,
     ),
     implemented(
@@ -150,8 +150,122 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "failures list",
         "xpst-state",
-        "Dead-letter rows with status/resolved/age_hours, as `failures_list --json` reports them.",
+        "Dead-letter rows with status/resolved/age_hours, byte-compared with `failures_list --json`.",
         failures_list,
+    ),
+    implemented(
+        "failures clear",
+        "xpst-state",
+        "Clears the dead-letter queue through the same tolerant loader `status` uses (v1 migration included) and writes Python's `json.dump` separators, keeping `errors: {}` for the per-video form; payload byte-compared with the Python CLI (written keys keep the read order).",
+        failures_clear,
+    ),
+    implemented(
+        "state export",
+        "xpst-state",
+        "Validates `state.json` as JSON and copies it byte-for-byte (mode preserved); payload and exported file byte-compared with the Python CLI.",
+        state_export,
+    ),
+    implemented(
+        "state import",
+        "xpst-state",
+        "Validates `posted_videos`, backs the current file up as `state.json.pre-import-<stamp>` and copies the source in; payload and resulting `state.json` byte-compared with the Python CLI. An explicit `n` at the prompt exits 0 with empty stderr (Click's `confirm()` returns False); only EOF aborts with `Aborted!` and exit 1.",
+        state_import,
+    ),
+    implemented(
+        "state backup",
+        "xpst-state",
+        "Snapshots `state.json` into `backups/state-<stamp>.json` with `--keep` rotation and the same `retained` count; payload byte-compared with the Python CLI. `--keep` is Click's int conversion, so a non-integer is a usage error (exit 2, empty stdout) rather than a silent default.",
+        state_backup,
+    ),
+    implemented(
+        "quota",
+        "xpst-state",
+        "Per-platform usage ledger with config-derived limits, midnight/hourly resets, the YouTube `videos.insert` bucket block and `auth_mode`; payload byte-compared with the Python CLI on default, seeded and config-limited profiles.",
+        quota,
+    ),
+    implemented(
+        "logs",
+        "xpst-cli",
+        "Last 50 lines of `monitoring.log_file` (expanded the way `_expand_paths` expands it) and the `No log file found` payload; byte-compared with the Python CLI.",
+        logs,
+    ),
+    implemented(
+        "devices",
+        "xpst-auth",
+        "Paired-device rows newest-first with the token hash removed, and `--revoke` writing the same `devices.json` (sorted keys, indent 2, 0600); payload byte-compared with the Python CLI.",
+        devices,
+    ),
+    implemented(
+        "pair",
+        "xpst-auth",
+        "Issues a one-time pairing code (or the `--code` one) with the same alphabet, hashing, TTL floor and `devices.json` shape; payload byte-compared with the Python CLI on a fixed code. `--ttl 0` is falsy in Python and means the 600 s default (not the 30 s floor), and a non-integer `--ttl` is a usage error (exit 2).",
+        pair,
+    ),
+    implemented(
+        "stream destinations",
+        "xpst-provider",
+        "The ingest-path registry plus per-platform key presence and fetch readiness (YouTube token, Twitch/Kick app credentials, Facebook page token) read from the encrypted store; payload byte-compared with the Python CLI.",
+        stream_destinations,
+    ),
+    implemented(
+        "stream app-credentials",
+        "xpst-provider",
+        "Stored app-credential state (masked) and the registration steps for Twitch/Kick, with `--clear`; payload byte-compared with the Python CLI.",
+        stream_app_credentials,
+    ),
+    implemented(
+        "stream set-key",
+        "xpst-provider",
+        "Validates the destination and writes it to the Fernet credential store under `stream_destination_<platform>`; payload byte-compared and the stored entry read back by the Python engine.",
+        stream_set_key,
+    ),
+    implemented(
+        "stream clear-key",
+        "xpst-provider",
+        "Deletes `stream_destination_<platform>` from the credential store and reports `removed`; payload byte-compared with the Python CLI.",
+        stream_clear_key,
+    ),
+    implemented(
+        "stream relay-config",
+        "xpst-provider",
+        "Renders the MediaMTX relay YAML from the stored destinations (keys included on stdout, key-free summary with `--output`); payload and written file byte-compared with the Python CLI. `--rtmp-port` is Click's int conversion, so a non-integer is a usage error (exit 2) instead of a fallback to 1935.",
+        stream_relay_config,
+    ),
+    implemented(
+        "bio",
+        "xpst-cli",
+        "Public and editor URLs with the dashboard API token read from the credential store and masked unless `--reveal`; payload byte-compared with the Python CLI on a seeded token. `--port` is Click's int conversion, so `0900` renders as `900` and a non-integer is a usage error (exit 2).",
+        bio,
+    ),
+    implemented(
+        "security-audit",
+        "xpst-cli",
+        "The six live checks (credential file modes, dashboard bind, MCP readonly, provider mode, ffmpeg, encrypted storage) with `indent=2` ASCII-escaped JSON; payload byte-compared with the Python CLI.",
+        security_audit,
+    ),
+    implemented(
+        "mcp list",
+        "xpst-mcp",
+        "The captured Python tool registry in Python's order, rendered with `json.dumps(indent=2)`; payload byte-compared with the Python CLI.",
+        mcp_list,
+    ),
+    implemented(
+        "app",
+        "xpst-app",
+        "Locates the installed desktop shell in the same preference order and prints the same not-found guidance (exit 1); byte-compared with the Python CLI.",
+        app,
+    ),
+    implemented(
+        "kb areas",
+        "xpst-store",
+        "Discovered knowledge areas in course order (`order_index`, label, id) with their nugget counts, read from the workspace's `areas.json`; payload byte-compared with the Python CLI. An invalid `--workspace` reproduces Python's uncaught `ValueError` contract — empty stdout, exit 1 — with the exception line on stderr instead of the traceback frames.",
+        kb_areas,
+    ),
+    implemented(
+        "schedule remove",
+        "xpst-state",
+        "Cancels one entry through the same local-store contract (`operation`/`scope`/`found`/`cancelled`/`entry`, `POST_NOT_FOUND` on an unknown id) with `--dry-run`; payload and resulting `schedule.json` byte-compared with the Python CLI. Control characters in a caption are escaped (`\\u0001`) in the written file, so both engines can read it back.",
+        schedule_remove,
     ),
 ];
 
@@ -364,6 +478,177 @@ fn failures_list(
     err: &mut dyn Write,
 ) -> i32 {
     commands::failures::run(global, leaf, out, err)
+}
+
+fn failures_clear(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::failures::clear(global, leaf, out, err)
+}
+
+fn state_export(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::state::export(global, leaf, out, err)
+}
+
+fn state_import(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::state::import(global, leaf, out, err)
+}
+
+fn state_backup(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::state::backup(global, leaf, out, err)
+}
+
+fn quota(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::quota::run(global, leaf, out, err)
+}
+
+fn logs(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::logs::run(global, leaf, out, err)
+}
+
+fn devices(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::devices::list(global, leaf, out, err)
+}
+
+fn pair(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::devices::pair(global, leaf, out, err)
+}
+
+fn stream_destinations(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::stream::destinations(global, leaf, out, err)
+}
+
+fn stream_app_credentials(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::stream::app_credentials(global, leaf, out, err)
+}
+
+fn stream_set_key(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::stream::set_key(global, leaf, out, err)
+}
+
+fn stream_clear_key(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::stream::clear_key(global, leaf, out, err)
+}
+
+fn stream_relay_config(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::stream::relay_config(global, leaf, out, err)
+}
+
+fn bio(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::bio::run(global, leaf, out, err)
+}
+
+fn security_audit(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::security::run(global, leaf, out, err)
+}
+
+fn mcp_list(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::mcp::list(global, leaf, out, err)
+}
+
+fn app(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::app::run(global, leaf, out, err)
+}
+
+fn kb_areas(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::kb::areas(global, leaf, out, err)
+}
+
+fn schedule_remove(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::schedule::remove(global, leaf, out, err)
 }
 
 #[cfg(test)]

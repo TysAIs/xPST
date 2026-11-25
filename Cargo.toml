@@ -52,7 +52,15 @@ authors = ["xPST contributors"]
 # One runtime, per the proposal §2: no OpenSSL, no plugin loader.
 clap = { version = "4", features = ["derive", "wrap_help", "string"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `preserve_order` makes `serde_json::Map` an insertion-ordered map instead of a
+# `BTreeMap`. Python's `json` module keeps dict insertion order, and the shipped
+# engine prints `json.dumps(...)` straight to stdout, so a payload that came
+# through a parsed document (`state.json`, `schedule.json`, `config.yaml`) has to
+# keep the order the file had — otherwise `status --json` and `schedule list
+# --json` cannot be byte-compared with the Python engine even though every field
+# matches. The feature is additive across the graph, so it is declared once here
+# rather than per crate; `indexmap` was already in the dependency graph.
+serde_json = { version = "1", features = ["preserve_order"] }
 # YAML: safe Rust parser, no C translation layer. Replaces `serde_yaml`, which
 # is deprecated and reaches the unmaintained `unsafe-libyaml`
 # (RUSTSEC-2024-0449). The data model lives in `crates/xpst-config/src/yaml.rs`

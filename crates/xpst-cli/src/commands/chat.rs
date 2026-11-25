@@ -40,9 +40,9 @@ struct Registry {
 
 /// Parse the captured registry.
 ///
-/// Parsed into `xpst_config::Value`, not `serde_json::Value`: the latter is a
-/// `BTreeMap` and would sort each registry row's keys, while Python emits the
-/// dataclass field order (`platform`, `display_name`, `transport`, …).
+/// Parsed into `xpst_config::Value` so each registry row keeps the YAML
+/// document's key order, which is the dataclass field order Python emits
+/// (`platform`, `display_name`, `transport`, …).
 fn registry() -> Result<Registry, String> {
     let document =
         xpst_config::yaml::from_str(REGISTRY).map_err(|err| format!("embedded registry: {err}"))?;

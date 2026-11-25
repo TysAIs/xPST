@@ -104,6 +104,23 @@ ACCOUNT_FIELDS: dict[str, tuple[str, ...]] = {
 #: `accounts.tiktok.aggregator` fields the catalog reads.
 AGGREGATOR_FIELDS = ("api_key_ref", "account_id")
 
+#: Top-level config sections the local commands read, with the dataclass field
+#: list Python's `_merge_config` filters a file section through. Captured so the
+#: Rust config view starts from the same numbers instead of transcribing them.
+SECTION_FIELDS: dict[str, tuple[str, ...]] = {
+    "monitoring": (
+        "log_level",
+        "log_file",
+        "log_rotation",
+        "healthcheck_port",
+        "enable_metrics",
+        "dashboard_username",
+        "dashboard_password_hash",
+        "health_check_interval",
+    ),
+    "rate_limits": ("youtube", "instagram", "x", "tiktok", "threads", "facebook"),
+}
+
 #: The route each destination manifest switches on, and the config that selects
 #: each variant. `default` is the route a pristine profile takes.
 MANIFEST_VARIANTS: dict[str, dict[str, dict]] = {
@@ -174,7 +191,24 @@ def _defaults() -> dict:
                 field: getattr(account.aggregator, field) for field in AGGREGATOR_FIELDS
             }
         accounts[platform] = captured
-    return {"provider_mode": base.provider_mode, "accounts": accounts}
+
+    # A file section is rebuilt from the dataclass defaults, not from the
+    # DEFAULT_CONFIG values, so the two must agree for the Rust merge to be
+    # faithful. Assert it here rather than discovering the drift in a payload.
+    sections: dict[str, dict] = {}
+    for name, fields in SECTION_FIELDS.items():
+        effective = getattr(base, name)
+        dataclass_default = type(effective)()
+        for field in fields:
+            if getattr(effective, field) != getattr(dataclass_default, field):
+                raise SystemExit(
+                    f"{name}.{field}: DEFAULT_CONFIG ({getattr(effective, field)!r}) differs "
+                    f"from the dataclass default ({getattr(dataclass_default, field)!r}); "
+                    "the Rust config view merges file sections over the dataclass defaults"
+                )
+        sections[name] = {field: getattr(effective, field) for field in fields}
+
+    return {"provider_mode": base.provider_mode, "accounts": accounts, "sections": sections}
 
 
 def _manifests(workdir: Path) -> dict:

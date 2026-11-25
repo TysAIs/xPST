@@ -558,3 +558,44 @@ fn config_validate_file_missing_path_fails_the_load_check() {
         "the failed check must name the missing file: {loaded}"
     );
 }
+
+/// `schedule remove` must write a `schedule.json` that both engines can read.
+///
+/// A caption may legally contain a control character (escaped in the JSON
+/// source). Python's `py_encode_basestring` escapes `[\x00-\x1f]` even with
+/// `ensure_ascii=False`; emitting the byte raw produced a file the Rust reader
+/// refused and the Python reader quarantined, so one `schedule remove` made the
+/// pending queue disappear from both engines.
+#[test]
+fn schedule_remove_escapes_control_characters_in_the_written_file() {
+    let fixture = Fixture::new("schedule-control-char");
+    fixture.write("config.yaml", "version: 4\n");
+    fixture.write(
+        "schedule.json",
+        r#"[{"id": "id-1", "caption": "a\u0001b", "scheduled_time": "2026-01-01T00:00:00+00:00", "status": "pending"}, {"id": "id-2", "caption": "b", "scheduled_time": "2026-02-01T00:00:00+00:00", "status": "pending"}]"#,
+    );
+
+    let (code, out, err) = run(&["schedule", "remove", "id-2", "--json"], false);
+    assert_eq!(code, 0, "stdout: {out} stderr: {err}");
+
+    let written = std::fs::read_to_string(fixture.profile.join("schedule.json"))
+        .expect("schedule.json must still exist");
+    assert!(
+        written.contains(r#""caption": "a\u0001b""#),
+        "the control character must be escaped, got: {written}"
+    );
+    let parsed: serde_json::Value =
+        serde_json::from_str(&written).expect("the written file must be valid JSON");
+    assert_eq!(parsed[0]["caption"], "a\u{1}b");
+
+    // The engine must be able to read back what it wrote: a raw 0x01 made the
+    // reader report "starting with an empty schedule".
+    let (code, out, err) = run(&["schedule", "list", "--json"], false);
+    assert_eq!(code, 0, "stderr: {err}");
+    assert!(
+        !err.contains("could not be read"),
+        "the engine refused its own file: {err}"
+    );
+    let listed: serde_json::Value = serde_json::from_str(out.trim()).expect("valid JSON");
+    assert_eq!(listed[0]["id"], "id-1");
+}

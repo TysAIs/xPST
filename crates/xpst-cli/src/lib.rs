@@ -20,14 +20,17 @@
 //! `docs/DIRECTION.md` D-3/D-4 for why the rebuild exists.
 
 pub mod cli;
+pub mod clickargs;
 pub mod commands;
 pub mod exit;
+pub mod fsutil;
 pub mod implemented;
 pub mod ledger;
 pub mod output;
 pub mod parity;
 pub mod paths;
 pub mod rich;
+pub mod pythonnum;
 
 use std::ffi::OsString;
 use std::io::{IsTerminal, Write};
@@ -107,6 +110,12 @@ pub fn run_with_io<W: Write, E: Write>(
 
     let global = GlobalOptions::from_matches(&matches, stdout_is_tty);
     let leaf = leaf_matches(&matches, &path);
+    // Click converts `IntParamType`/`FloatParamType`/`IntRange` options before
+    // the command body runs, so a value that does not convert is a usage error
+    // (exit 2, empty stdout) — not a silent fallback to the default.
+    if let Some(code) = clickargs::validate_numeric_options(&path, leaf, err) {
+        return code;
+    }
     dispatch(&path, &global, leaf, out, err)
 }
 
@@ -147,7 +156,11 @@ fn not_implemented<W: Write, E: Write>(
                 "phase": "P0",
             }
         });
-        let _ = writeln!(out, "{payload}");
+        // Same renderer as every implemented command: Python's `json.dumps`
+        // separators and insertion order. There is no Python payload to match
+        // here (the shipped engine implements the command), but one renderer
+        // means a stub cannot teach the next command the compact form.
+        let _ = crate::output::write_python_json_value(out, &payload);
     } else {
         let _ = writeln!(err, "xpst {command}: {message}");
         let _ = writeln!(
@@ -247,4 +260,14 @@ pub fn string_value(matches: &ArgMatches, id: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// [`string_value`] for a handler that receives the leaf as an `Option`.
+pub fn leaf_string(leaf: Option<&ArgMatches>, id: &str) -> Option<String> {
+    leaf.and_then(|matches| string_value(matches, id))
+}
+
+/// [`flag`] for a handler that receives the leaf as an `Option`.
+pub fn leaf_flag(leaf: Option<&ArgMatches>, id: &str) -> bool {
+    leaf.is_some_and(|matches| flag(matches, id))
 }

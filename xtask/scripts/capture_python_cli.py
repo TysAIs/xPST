@@ -57,6 +57,10 @@ def _param(p: click.Parameter) -> dict:
         "metavar": getattr(p, "metavar", None),
         "type": str(getattr(getattr(p, "type", None), "name", "")),
         "choices": _choices(p),
+        # Click's `IntRange`/`FloatRange` bounds, so the Rust engine can refuse
+        # an out-of-range value with Click's own message. Emitted only for the
+        # parameters that have a bound, which keeps the fixture diff to those.
+        **_bounds(p),
         # A flag's "default" needs normalizing, not dropping: Click 8.5 returns an
         # UNSET sentinel for an undeclared flag default while older versions
         # return False, so recording the raw value would make the manifest
@@ -80,6 +84,20 @@ def _jsonable(value):
 def _choices(p: click.Parameter):
     choices = getattr(getattr(p, "type", None), "choices", None)
     return [str(c) for c in choices] if choices else None
+
+
+def _bounds(p: click.Parameter) -> dict:
+    """`min`/`max` of a Click `IntRange`/`FloatRange`, when the type has them.
+
+    A plain `click.INT` has no bounds, so the keys are omitted rather than
+    written as null — the manifest stays a description of what Click enforces.
+    """
+    bounds = {}
+    for key in ("min", "max"):
+        value = getattr(getattr(p, "type", None), key, None)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            bounds[key] = value
+    return bounds
 
 
 def _flag_default(p: click.Parameter) -> bool:

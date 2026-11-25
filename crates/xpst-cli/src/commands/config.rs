@@ -13,7 +13,7 @@ use serde_json::json;
 use xpst_config::{ConfigDocument, ConfigError};
 
 use crate::commands::config_view::python_str;
-use crate::output::{error_payload_with, write_json, write_text};
+use crate::output::{error_payload_with, write_python_json_value, write_text};
 use crate::{exit, flag, paths, string_value, GlobalOptions};
 
 /// Resolve which config file to read: `--file`, then the root `--config`, then
@@ -63,7 +63,7 @@ fn report_error<W: Write, E: Write>(
         let payload = error_payload_with(code, &error.to_string(), extra);
         // Machine-readable errors stay on stdout so a `--json` caller can
         // parse them regardless of exit status, exactly like `_error_payload`.
-        let _ = write_json(out, &payload);
+        let _ = write_python_json_value(out, &payload);
     } else {
         let _ = writeln!(err, "{}", error);
         if let Some(hint) = hint {
@@ -151,7 +151,7 @@ pub fn validate<W: Write, E: Write>(
                         "detail": error.to_string(),
                     }],
                 });
-                let _ = write_json(out, &payload);
+                let _ = write_python_json_value(out, &payload);
             } else {
                 let _ = writeln!(err, "✗ Config file loaded — {error}");
             }
@@ -161,7 +161,7 @@ pub fn validate<W: Write, E: Write>(
 
     let report = document.validate();
     if json_mode {
-        let _ = write_json(out, &report.to_json());
+        let _ = write_python_json_value(out, &report.to_json());
     } else {
         let mut text = String::new();
         for check in &report.checks {
@@ -269,54 +269,15 @@ fn parse_cli_value(text: &str) -> YamlValue {
     if matches!(lower.as_str(), "false" | "no" | "0") {
         return YamlValue::Bool(false);
     }
-    if let Some(integer) = python_int(text) {
+    if let Some(integer) = crate::pythonnum::int(text) {
         return YamlValue::Number(integer.into());
     }
-    if let Some(float) = python_float(text) {
+    if let Some(float) = crate::pythonnum::float(text) {
         if let Some(number) = serde_json::Number::from_f64(float) {
             return YamlValue::Number(number);
         }
     }
     YamlValue::String(text.to_string())
-}
-
-fn python_int(text: &str) -> Option<i64> {
-    let trimmed = text.trim();
-    let (sign, digits) = match trimmed.strip_prefix('-') {
-        Some(rest) => (-1i64, rest),
-        None => (1i64, trimmed.strip_prefix('+').unwrap_or(trimmed)),
-    };
-    if digits.is_empty() || digits.starts_with('_') || digits.ends_with('_') {
-        return None;
-    }
-    let mut cleaned = String::new();
-    let mut previous_underscore = false;
-    for ch in digits.chars() {
-        if ch == '_' {
-            if previous_underscore {
-                return None;
-            }
-            previous_underscore = true;
-            continue;
-        }
-        if !ch.is_ascii_digit() {
-            return None;
-        }
-        previous_underscore = false;
-        cleaned.push(ch);
-    }
-    cleaned.parse::<i64>().ok().map(|value| sign * value)
-}
-
-fn python_float(text: &str) -> Option<f64> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() || trimmed.starts_with('_') || trimmed.ends_with('_') {
-        return None;
-    }
-    let cleaned: String = trimmed.chars().filter(|ch| *ch != '_').collect();
-    // `f64::from_str` accepts `inf`/`infinity`/`nan` case-insensitively, which
-    // is what Python's `float()` accepts too.
-    cleaned.parse::<f64>().ok()
 }
 
 /// Python's `==` for two YAML values: numbers compare numerically (`1 == 1.0`)

@@ -21,7 +21,7 @@ use clap::ArgMatches;
 use serde_json::Value;
 
 use crate::commands::bootstrap;
-use crate::output::write_json;
+use crate::output::write_python_json_value;
 use crate::{exit, flag, GlobalOptions};
 
 /// Run `status`.
@@ -41,7 +41,7 @@ pub fn run(
     let stats = xpst_state::status::statistics(&state);
 
     if json_mode {
-        let _ = write_json(out, &stats);
+        let _ = write_python_json_value(out, &stats);
     } else {
         let _ = write!(out, "{}", render_text(&stats));
     }

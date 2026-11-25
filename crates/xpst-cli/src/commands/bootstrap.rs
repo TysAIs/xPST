@@ -40,6 +40,10 @@ pub enum BootstrapError {
     /// The file exists but `XPSTConfig.load` refused it — empty, not a mapping,
     /// not parseable, not UTF-8. Carries the backup path and Python's message.
     Load(LoadError),
+    /// The file exists but is not readable as an xPST config (the parse-only
+    /// check `ensure_config` performs for callers that read the document
+    /// themselves).
+    Invalid(String),
 }
 
 impl BootstrapError {
@@ -55,6 +59,7 @@ impl BootstrapError {
             BootstrapError::NoProfile(message) => message.clone(),
             BootstrapError::Io(message) => message.clone(),
             BootstrapError::Load(error) => error.to_string(),
+            BootstrapError::Invalid(message) => message.clone(),
         }
     }
 }

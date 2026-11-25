@@ -200,6 +200,13 @@ fn build_option(param: &ParamSpec) -> Vec<Arg> {
         } else {
             ArgAction::Set
         });
+        // Click's parser takes the next token as an option's value even when it
+        // starts with `-`: `xpst pair --ttl -5` is valid (the TTL floor clamps
+        // it to 30) and `xpst bio --host --json` stores `--json` as the host.
+        // clap would read both as flags. Positionals are *not* hyphen-tolerant
+        // in Click (`config set a.negative -3` is "No such option '-3'"), so
+        // this belongs on options only.
+        arg = arg.allow_hyphen_values(true);
         arg = arg.value_name(
             param
                 .metavar

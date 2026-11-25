@@ -42,6 +42,18 @@ Notes on determinism (the fixture is checked in and runs on every OS):
   when one is attached, so an interactive capture would otherwise record a
   different fixture than CI.
 
+`compare` decides what is asserted:
+
+* `json` — the parsed payload (structural; for rows whose payload carries a
+  wall clock or a machine-local mtime);
+* `stdout` — the exact stdout bytes, profile path normalized. This is the mode
+  every deterministic `--json` command uses: Python prints `json.dumps`
+  defaults (`, ` / `: ` separators, insertion order), so a byte case is the only
+  thing that catches a renderer regression;
+* `digest` — an FNV-1a digest of the exact stdout, for payloads too large to
+  check in (`providers`);
+* `divergence` / `exit` — a recorded difference, or an exit code only.
+
 The script refuses to write a fixture with no scenarios, and asserts the
 recorded count, so an emptied fixture cannot silently turn the parity test into
 a no-op.
@@ -104,6 +116,46 @@ RICH_STATE = {
     },
 }
 
+STATE_DOC = json.dumps(
+    {
+        "version": 2,
+        "posted_videos": {
+            "v1": {
+                "source_platform": "tiktok",
+                "source_url": "https://example.invalid/v1",
+                "posted_to": {"youtube": {"id": "a"}},
+                "errors": {"instagram": {"error": "boom", "timestamp": None, "count": 2}},
+            }
+        },
+        "health": {
+            "total_processed": 1,
+            "last_check": None,
+            "last_wake_check": None,
+            "platforms": {"youtube": {"status": "ok", "last_success": None, "failures": 0}},
+        },
+    },
+    indent=2,
+)
+
+DEVICES_DOC = json.dumps(
+    {
+        "version": 1,
+        "pairing_codes": [],
+        "failed_attempts": [],
+        "devices": [
+            {
+                "device_id": "dev-1",
+                "label": "phone",
+                "token_sha256": "abc",
+                "created_at": 1767225600.0,
+                "last_seen_at": 1767225600.0,
+                "client": "",
+                "revoked": False,
+            }
+        ],
+    }
+)
+
 SCHEDULE_ENTRIES = [
     {
         "id": "id-late",
@@ -154,19 +206,19 @@ SCENARIOS = [
         "name": "status_empty_profile",
         "argv": ["status", "--json"],
         "seed": {},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "status_rich_state",
         "argv": ["status", "--json"],
         "seed": {"state.json": json.dumps(RICH_STATE, indent=2)},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "status_corrupt_state",
         "argv": ["status", "--json"],
         "seed": {"state.json": "{not json"},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "status_legacy_v1",
@@ -182,7 +234,7 @@ SCENARIOS = [
                 }
             )
         },
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         # Python raises KeyError('platforms') and exits 1 on this shape; the
@@ -216,7 +268,7 @@ SCENARIOS = [
                 }
             )
         },
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "status_backup_recovery",
@@ -227,37 +279,37 @@ SCENARIOS = [
                 {"version": 2, "posted_videos": {"b": {"posted_to": {"x": {"id": "1"}}}}}
             ),
         },
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "failures_list_rich",
         "argv": ["failures", "list", "--json"],
         "seed": {"state.json": json.dumps(RICH_STATE, indent=2)},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "failures_list_empty",
         "argv": ["failures", "list", "--json"],
         "seed": {},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_list_missing_store",
         "argv": ["schedule", "list", "--json"],
         "seed": {},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_list_empty_store",
         "argv": ["schedule", "list", "--json"],
         "seed": {"schedule.json": "[]"},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_list_entries",
         "argv": ["schedule", "list", "--json"],
         "seed": {"schedule.json": json.dumps(SCHEDULE_ENTRIES)},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_list_paused",
@@ -268,7 +320,7 @@ SCENARIOS = [
                 {"paused_at": "2026-01-01T00:00:00+00:00", "reason": "operator pause"}
             ),
         },
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_list_snapshots",
@@ -284,13 +336,13 @@ SCENARIOS = [
         "name": "schedule_list_non_array",
         "argv": ["schedule", "list", "--json"],
         "seed": {"schedule.json": "{}"},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_list_unreadable_pause",
         "argv": ["schedule", "list", "--json"],
         "seed": {"schedule.paused.json": "[1,2,3]"},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "status_explicit_config_missing",
@@ -318,7 +370,7 @@ SCENARIOS = [
                 {"version": 2, "posted_videos": {"ignored": {"posted_to": {}}}}
             ),
         },
-        "compare": "json",
+        "compare": "stdout",
     },
     # ── the local write surface (t_8e065790) ──────────────────────────────
     {
@@ -344,6 +396,32 @@ SCENARIOS = [
         "seed": {},
         "allow_nonzero": True,
         "compare": "json",
+    },
+    # `config show` resolves `~/.xpst/config.yaml` from HOME in the Python engine
+    # (it ignores XPST_CONFIG_DIR), so the profile is pinned to `<profile>/.xpst`
+    # and both engines read the same file. These are byte cases: the payload is
+    # the raw YAML document, so key order and separators are the whole contract.
+    {
+        "name": "config_show_masked",
+        "config_dir": ".xpst",
+        "argv": ["config", "show", "--json"],
+        "seed": {".xpst/config.yaml": SECRET_CONFIG},
+        "compare": "stdout",
+    },
+    {
+        "name": "config_show_raw",
+        "config_dir": ".xpst",
+        "argv": ["config", "show", "--raw", "--json"],
+        "seed": {".xpst/config.yaml": SECRET_CONFIG},
+        "compare": "stdout",
+    },
+    {
+        "name": "config_show_missing",
+        "config_dir": ".xpst",
+        "argv": ["config", "show", "--file", "MISSING", "--json"],
+        "seed": {},
+        "allow_nonzero": True,
+        "compare": "stdout",
     },
     {
         "name": "config_set_bool",
@@ -526,7 +604,7 @@ SCENARIOS = [
                 {"paused_at": "2026-01-01T00:00:00+00:00", "reason": "operator pause"}
             )
         },
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_resume",
@@ -536,19 +614,19 @@ SCENARIOS = [
                 {"paused_at": "2026-01-01T00:00:00+00:00", "reason": "operator pause"}
             )
         },
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_resume_not_paused",
         "argv": ["schedule", "resume", "--json"],
         "seed": {},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "schedule_list_ignores_root_config",
         "argv": ["--config", "MISSING", "schedule", "list", "--json"],
         "seed": {"schedule.json": json.dumps(SCHEDULE_ENTRIES[:1])},
-        "compare": "json",
+        "compare": "stdout",
     },
     # ── the provider surface (t_53b960e8) ─────────────────────────────────
     #
@@ -897,6 +975,202 @@ SCENARIOS = [
         "allow_nonzero": True,
         "compare": "text",
     },
+    # ── the state / quota / logs / devices / stream / bio / audit tranche ──
+    {
+        "name": "state_export_ok",
+        "argv": ["state", "export", "PROFILE/out.json", "--json"],
+        "seed": {"config.yaml": "version: 4\n", "state.json": STATE_DOC},
+        "files": ["out.json"],
+        "compare": "json",
+    },
+    {
+        "name": "state_export_missing",
+        "argv": ["state", "export", "PROFILE/out.json", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "allow_nonzero": True,
+        "compare": "json",
+    },
+    {
+        "name": "state_import_yes",
+        "argv": ["state", "import", "PROFILE/incoming.json", "--yes", "--json"],
+        "seed": {
+            "config.yaml": "version: 4\n",
+            "state.json": STATE_DOC,
+            "incoming.json": '{"version": 2, "posted_videos": {"z": {"posted_to": {}}}}',
+        },
+        "files": ["state.json"],
+        "compare": "json",
+    },
+    {
+        "name": "state_backup_ok",
+        "argv": ["state", "backup", "--json"],
+        "seed": {"config.yaml": "version: 4\n", "state.json": STATE_DOC},
+        "mask": ["backup"],
+        "compare": "json",
+    },
+    {
+        "name": "failures_clear_all",
+        "argv": ["failures", "clear", "--json"],
+        "seed": {"config.yaml": "version: 4\n", "state.json": STATE_DOC},
+        "files": ["state.json"],
+        "compare": "json",
+    },
+    {
+        "name": "failures_clear_one",
+        "argv": ["failures", "clear", "v1", "--json"],
+        "seed": {"config.yaml": "version: 4\n", "state.json": STATE_DOC},
+        "files": ["state.json"],
+        "compare": "json",
+    },
+    {
+        "name": "quota_defaults",
+        "argv": ["quota", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "compare": "json",
+    },
+    {
+        "name": "logs_present",
+        "argv": ["logs", "--json"],
+        "seed": {
+            "config.yaml": "version: 4\nmonitoring:\n  log_file: ~/xpst.log\n",
+            "xpst.log": "line one\nline two\n",
+        },
+        "compare": "json",
+    },
+    {
+        "name": "devices_list",
+        "argv": ["devices", "--json"],
+        "seed": {"config.yaml": "version: 4\n", "devices.json": DEVICES_DOC},
+        "compare": "json",
+    },
+    {
+        "name": "pair_fixed_code",
+        "argv": ["pair", "--code", "ABCD2345", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "mask": ["created_at", "expires_at"],
+        "compare": "json",
+    },
+    {
+        "name": "stream_destinations",
+        "argv": ["stream", "destinations", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "compare": "json",
+    },
+    {
+        "name": "stream_set_key_ok",
+        "argv": [
+            "stream", "set-key", "youtube",
+            "--ingest-url", "rtmps://a.example/live2", "--key", "secret123", "--json",
+        ],
+        "seed": {"config.yaml": "version: 4\n"},
+        "compare": "json",
+    },
+    {
+        "name": "stream_clear_key",
+        "argv": ["stream", "clear-key", "youtube", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "compare": "json",
+    },
+    {
+        "name": "stream_relay_config_output",
+        "argv": ["stream", "relay-config", "--output", "PROFILE/mediamtx.yml", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "credential_json": {
+            "stream_destination_youtube": {
+                "ingest_url": "rtmps://a.example/live2",
+                "stream_key": "secret123",
+            }
+        },
+        "files": ["mediamtx.yml"],
+        "compare": "json",
+    },
+    {
+        # No destination is stored, so the command prints the JSON error AND the
+        # wrapped text line (Python does both); compare the whole stdout.
+        "name": "stream_relay_config_empty",
+        "argv": ["stream", "relay-config", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        "name": "bio_masked",
+        "argv": ["bio", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "credential": {"dashboard_api_token": "SYNTHETIC_dashboard_api_token_0001"},
+        "compare": "json",
+    },
+    {
+        "name": "bio_reveal",
+        "argv": ["bio", "--reveal", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "credential": {"dashboard_api_token": "SYNTHETIC_dashboard_api_token_0001"},
+        "compare": "json",
+    },
+    {
+        "name": "security_audit",
+        "argv": ["security-audit", "--json"],
+        # `ffmpeg_available` is a property of the machine: the check is
+        # `resolve_ffmpeg_path() is not None`, so a runner without ffmpeg
+        # reports "FFmpeg not found" and flips `overall_status` to fail. Pin a
+        # stub through `XPST_FFMPEG_PATH` the way the readiness rows do, so the
+        # captured payload is the fixture's and not the host's.
+        "seed": {
+            "config.yaml": "version: 4\n",
+            "bin/ffmpeg": "#!/bin/sh\necho \"ffmpeg version 9.9.9-test\"\n",
+        },
+        "executable": ["bin/ffmpeg"],
+        "env": {"XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg"},
+        "compare": "json",
+    },
+    {
+        "name": "mcp_list",
+        "argv": ["mcp", "list", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "compare": "json",
+    },
+    {
+        "name": "app_missing",
+        "argv": ["app"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # The knowledge workspace resolves from XPST_HOME (default `~/.xpst`),
+        # not from XPST_CONFIG_DIR, so the scenario pins it to the profile.
+        "name": "kb_areas_empty",
+        "argv": ["kb", "areas", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "json",
+    },
+    {
+        "name": "kb_areas_populated",
+        "argv": ["kb", "areas", "--json"],
+        "seed": {
+            "config.yaml": "version: 4\n",
+            ".xpst/knowledge/default/areas.json": (
+                '{"b": {"label": "Beta", "order_index": 1, "nugget_ids": ["n1"]}, '
+                '"a": {"label": "Alpha", "order_index": 0, "nugget_ids": ["n1", "n2"]}}'
+            ),
+        },
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "json",
+    },
+    {
+        "name": "schedule_remove_ok",
+        "argv": ["schedule", "remove", "id-1", "--json"],
+        "seed": {
+            "config.yaml": "version: 4\n",
+            "schedule.json": (
+                '[{"id": "id-1", "caption": "c", '
+                '"scheduled_time": "2026-01-01T00:00:00+00:00", "status": "pending"}]'
+            ),
+        },
+        "files": ["schedule.json"],
+        "compare": "json",
+    },
 ]
 
 
@@ -905,6 +1179,20 @@ def seed_profile(scenario: dict, profile: Path) -> None:
         target = profile / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
+    # A credential the command reads from the encrypted store (the dashboard API
+    # token `bio` masks) is written with the REAL Python store, so both engines
+    # read the same value instead of each generating its own.
+    for key, value in (scenario.get("credential") or {}).items():
+        from xpst.utils.credentials import CredentialStore
+
+        CredentialStore(str(profile)).store(key, value)
+    # JSON credentials the command under test reads from the encrypted store (a
+    # stored stream key, an app credential), written with the REAL Python store
+    # so both engines start from identical material.
+    for key, value in (scenario.get("credential_json") or {}).items():
+        from xpst.utils.credentials import CredentialStore
+
+        CredentialStore(str(profile)).store_json(key, value)
     if "snapshot_epoch" in scenario:
         for path in profile.glob("schedule.json.paused-*"):
             os.utime(path, (scenario["snapshot_epoch"], scenario["snapshot_epoch"]))
@@ -1144,6 +1432,10 @@ def run_scenario(scenario: dict, python: str) -> dict:
         record["mask"] = scenario["mask"]
     if scenario.get("allow_nonzero"):
         record["allow_nonzero"] = True
+    if scenario.get("credential"):
+        record["credential"] = scenario["credential"]
+    if scenario.get("credential_json"):
+        record["credential_json"] = scenario["credential_json"]
     if scenario.get("files"):
         record["files"] = observed["files"]
     if "snapshot_epoch" in scenario:
@@ -1185,6 +1477,28 @@ def run_scenario(scenario: dict, python: str) -> dict:
     return record
 
 
+def files_differ(expected: dict, actual: dict) -> bool:
+    """Compare written files: YAML byte-for-byte, JSON structurally.
+
+    A JSON object is unordered, and the Rust engine writes `state.json` with
+    sorted keys where Python preserves the order it read — a difference no
+    reader can observe. The values, types and array order are still compared.
+    """
+    if set(expected) != set(actual):
+        return True
+    for name, want in expected.items():
+        got = actual[name]
+        if want == got:
+            continue
+        try:
+            if json.loads(want) == json.loads(got):
+                continue
+        except (TypeError, ValueError):
+            pass
+        return True
+    return False
+
+
 def compare_scenarios(python: str, binary: str) -> int:
     """Run both engines over every scenario and diff them, live.
 
@@ -1215,7 +1529,7 @@ def compare_scenarios(python: str, binary: str) -> int:
                     f"{name}: exit {expected['exit_code']} (python) != "
                     f"{actual['exit_code']} (rust)"
                 )
-            if expected["files"] != actual["files"]:
+            if files_differ(expected["files"], actual["files"]):
                 mismatches.append(
                     f"{name}: written files differ\n  python: {json.dumps(expected['files'])}\n"
                     f"  rust:   {json.dumps(actual['files'])}"
