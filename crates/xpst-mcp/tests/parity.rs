@@ -285,6 +285,7 @@ fn the_ported_surface_is_exactly_the_read_only_network_free_set() {
         vec![
             "kb_areas",
             "kb_query",
+            "messenger_set_rules",
             "xpst_activity",
             "xpst_analytics",
             "xpst_auth_start",
@@ -295,6 +296,7 @@ fn the_ported_surface_is_exactly_the_read_only_network_free_set() {
             "xpst_chat",
             "xpst_config_show",
             "xpst_cross_post_analytics",
+            "xpst_disconnect",
             "xpst_followers",
             "xpst_generate_ideas",
             "xpst_preflight",

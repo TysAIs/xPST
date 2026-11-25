@@ -380,8 +380,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_disconnect",
         Consent::Mutating,
-        Implementation::Stub {
-            reason: "removes stored credentials through Python services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::disconnect::run,
+            render: Render::Pretty,
         },
     ),
     (
@@ -401,9 +402,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "messenger_set_rules",
         Consent::Mutating,
-        Implementation::Stub {
-            reason:
-                "writes the Messenger rules through Python config services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::messenger_rules::run,
+            render: Render::Pretty,
         },
     ),
     (

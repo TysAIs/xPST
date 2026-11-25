@@ -65,6 +65,8 @@ safe).
 | `xpst_analytics` | `analytics.db`, `state.json` | `_handle_analytics()` with `live=false`: `build_outcome_report()` over the ledger and the publish records, the ownership gate (YouTube fails closed — its check is a network call) and `_collection_status` from the persisted run ledger. `totals` is `null` for a platform with no metric-bearing owned post, and a row recorded during a failed collection stays visible but out of the totals. `live: true` answers `not_implemented`. |
 | `xpst_suggest_caption` | nothing (pure string algorithm) | `generate_caption_deterministic()` over the `video_path` argument, which the shipped handler passes as the **transcript text** rather than reading the file. The LLM path is unreachable over MCP: `asyncio.run` inside the server's event loop always raises, so the deterministic branch is the contract. |
 | `xpst_generate_ideas` | nothing (pure string algorithm) | `generate_ideas_deterministic()`: the shipped template rotation, `count` clamped to 1–10 after Python's `int()`. Same `asyncio.run` fallback, so no LLM is required or reachable. |
+| `messenger_set_rules` | writes `config.yaml` | `_handle_messenger_set_rules`: `rules or {}` (truthiness, so a truthy non-object is Python's `'<type>' object has no attribute 'items'`), `bool(args.get("auto_reply", True))`, `str()` on both sides of the map, then `config.save()` — the whole-file rewrite in `xpst_surface::config_save`, byte-compared against the shipped engine over nine profiles and 70 `XPST_*` overrides. |
+| `xpst_disconnect` | credential store, `credentials/`, `sessions/`, `config.yaml` | `disconnect_platform()`: the platform's encrypted-store keys, its library-native plaintext file and its `sessions/*<platform>*` artifacts are removed, `accounts.<platform>.enabled` flips to false and the config is saved. An unknown platform returns the failure document before anything is touched. No platform-side revoke — Python does not call one either. |
 
 Thirty-three ported, thirteen stubbed. Nothing is half-implemented: a tool is
 either answering from a real local store or saying `not_implemented` with the
@@ -85,10 +87,8 @@ ledger), or it writes through an engine service that does not exist in Rust yet.
 | `xpst_health` | probes every platform over the network |
 | `xpst_backfill` | re-posts through provider adapters, which are not ported |
 | `xpst_auth_status` | probes platform credentials, which needs the network |
-| `xpst_disconnect` | removes stored credentials through Python services, which are not ported |
 | `xpst_delete` | deletes posts on the platform, which needs provider adapters |
 | `messenger_send` | sends through the Meta Graph API |
-| `messenger_set_rules` | writes the Messenger rules through Python config services, which are not ported |
 | `xpst_messenger_check_comments` | reads and replies on the Meta Graph API |
 | `kb_add` | ingests into the knowledge store, which is not ported |
 | `kb_organize` | writes the knowledge store, which is not ported |
@@ -198,6 +198,40 @@ of scope for this crate.
   a code) is still a stub, and this tool never claims otherwise.
 - The served schemas come from the captured fixture, so they track Python by
   regeneration rather than by parallel hand-editing.
+- `messenger_set_rules` and `xpst_disconnect` both persist through
+  `XPSTConfig.save()`, which rebuilds the WHOLE `config.yaml` from the dataclass
+  model. The writer is `xpst_surface::config_save`, byte-compared against the
+  shipped engine over nine profiles and 70 `XPST_*` overrides
+  (`crates/xpst-surface/tests/fixtures/config_save.json`). Three consequences an
+  operator can see:
+  - **`save()` drops fields the model has and it does not serialize.**
+    `accounts.messenger.comment_reply_enabled`/`comment_platforms`,
+    `accounts.rumble`, `accounts.x.api_key`/`api_secret`/`access_token`/
+    `access_token_secret`/`bearer_token`/`password`, the app secrets and
+    `video.encoding.youtube.two_pass`/`hw_encoder` are all in that set
+    (`config_save::DROPPED_BY_SAVE`). So calling `messenger_set_rules` on a
+    profile with comment auto-reply configured LOSES that setting, and the
+    `XPST_*` override for any of those fields is silently discarded on the next
+    save. That is the shipped behaviour, reproduced rather than fixed: the file
+    the Python engine writes is the contract.
+  - **A partial nested block resets its siblings.** `video.encoding.<p>`,
+    `reliability`, `monitoring` and `schedule` are rebuilt as
+    `ClassName(**block)`, so a `video.encoding.youtube: {resolution: 1080}`
+    block saves every other encoding field as `null` — the dataclass default,
+    not the shipped preset.
+  - **`bool()` is truthiness, not parsing.** `first_run_complete: "false"` and
+    `anti_bot.caption_variation: "false"` both save as `true`.
+- `xpst_disconnect` sorts the `sessions/*<platform>*` matches before removing
+  them. Python's `Path.glob` yields in directory order, so its `removed` list
+  order is not reproducible; a single match is identical.
+- `xpst_disconnect` does not revoke anything platform-side. Python does not call
+  a revoke endpoint either, so a token already handed to a vendor stays valid
+  until it expires — the tool removes the LOCAL credentials and disables the
+  account, which is what its description says.
+- `config_save`'s `_validate` runs at save time and reports Python's
+  `Configuration errors:` sentence. Python validates in `load()`, so an invalid
+  config fails the server at STARTUP there and fails the call here. The fixture
+  never holds an invalid config, so the two engines agree on every scenario.
 
 ## Dependencies
 

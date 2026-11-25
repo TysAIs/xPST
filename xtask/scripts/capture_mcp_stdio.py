@@ -795,6 +795,84 @@ ANALYTICS_CALLS = [
     ("xpst_analytics", {"live": False}),
 ]
 
+# The `writers` scenario's starting profile. YouTube is connected (so
+# `xpst_disconnect` has something to remove) and Messenger has comment
+# auto-reply configured — a setting `config.save()` does NOT serialize, so the
+# first `messenger_set_rules` call drops it. That is the shipped behaviour and
+# the scenario exists to pin it.
+WRITERS_CONFIG = """\
+version: 4
+accounts:
+  youtube:
+    enabled: true
+    channel_id: chan-parity
+  x:
+    enabled: true
+  messenger:
+    enabled: true
+    page_id: '1234567890'
+    auto_reply: false
+    reply_rules:
+      old: stale rule
+    comment_reply_enabled: true
+    comment_platforms:
+    - instagram
+rate_limits:
+  youtube: 9
+"""
+
+# The credential-store keys and plain files a connected YouTube profile holds.
+# `sessions/x-parity.json` is NOT YouTube's and must survive the disconnect.
+WRITERS_CREDENTIALS = {
+    "youtube_token": '{"token": "parity-token"}',
+    "messenger_page_token": "parity-page-token",
+}
+WRITERS_FILES = [
+    "credentials/youtube_token.json",
+    "sessions/youtube-parity.json",
+    "sessions/x-parity.json",
+]
+
+# The two local writers. Every call is a local file write under the scratch
+# profile — no network, no provider, no posting. The order matters: the rules
+# calls rewrite `config.yaml` (dropping `comment_reply_enabled`), then the
+# disconnects read the rewritten file, and the second YouTube disconnect finds
+# nothing left to remove.
+WRITER_CALLS = [
+    # ── messenger_set_rules ─────────────────────────────────────────────────
+    # The happy path: a keyword map plus the catch-all.
+    (
+        "messenger_set_rules",
+        {"rules": {"price": "Here is the price list", "*": "Thanks for reaching out"}},
+    ),
+    # A non-string reply is `str()`-coerced, and `auto_reply: false` is written.
+    ("messenger_set_rules", {"rules": {"price": 5}, "auto_reply": False}),
+    # An empty map is falsy, so `rules or {}` keeps it empty; the absent
+    # `auto_reply` defaults to True.
+    ("messenger_set_rules", {"rules": {}}),
+    # A truthy non-object reaches `.items()` and raises.
+    ("messenger_set_rules", {"rules": "abc"}),
+    # No `rules` at all: the same empty map, `auto_reply` still defaults true.
+    ("messenger_set_rules", {}),
+    # ── xpst_disconnect ─────────────────────────────────────────────────────
+    # The real removal: the store key, the plaintext token file and the
+    # `sessions/youtube-*` artifact go; `sessions/x-parity.json` stays.
+    ("xpst_disconnect", {"platform": "youtube"}),
+    # The same platform again: nothing left to remove, `disabled` is false
+    # because the config already says `enabled: false`.
+    ("xpst_disconnect", {"platform": "youtube"}),
+    # An unknown platform returns the failure document BEFORE touching anything.
+    ("xpst_disconnect", {"platform": "nope"}),
+    # `args["platform"]` is a hard index: a missing key is a KeyError.
+    ("xpst_disconnect", {}),
+    # A non-string is simply not a key in `_PLATFORM_CRED_KEYS`, and the failure
+    # document interpolates it with `str()`.
+    ("xpst_disconnect", {"platform": 5}),
+    # Messenger has no plaintext file and no session artifact: only the store
+    # key is removed.
+    ("xpst_disconnect", {"platform": "messenger"}),
+]
+
 SCENARIOS = [
     # `XPST_MEDIA_ROOTS` is a fixed media root so the `xpst_suggest_caption`
     # rows are a function of a path whose words are identical on both engines.
@@ -842,6 +920,21 @@ SCENARIOS = [
         "seed": {"state.json": json.dumps(ANALYTICS_STATE, indent=2)},
         "snapshots": ANALYTICS_SNAPSHOTS,
         "collection_runs": ANALYTICS_COLLECTION_RUNS,
+    },
+    # The two local writers. Both are consent-gated, so the scenario allows
+    # mutations; both rewrite `config.yaml`, so the profile starts from a seeded
+    # one and the resulting bytes are recorded (`config_yaml_after`) for the
+    # Rust test to compare after it replays the same calls.
+    {
+        "name": "writers",
+        "env": {"XPST_MCP_ALLOW_MUTATIONS": "1"},
+        "seed": {"config.yaml": WRITERS_CONFIG},
+        "credentials": WRITERS_CREDENTIALS,
+        "files": WRITERS_FILES,
+        # Only this scenario's config is a SAVE document. Every other scenario
+        # has the first-run `DEFAULT_CONFIG` the Python server materializes at
+        # startup, which is a different document with a different key order.
+        "record_config": True,
     },
 ]
 
@@ -953,6 +1046,16 @@ def requests_for(scenario: str) -> list[dict]:
                     "params": {"name": tool, "arguments": arguments},
                 }
             )
+    elif scenario == "writers":
+        for index, (tool, arguments) in enumerate(WRITER_CALLS, start=400):
+            steps.append(
+                {
+                    "jsonrpc": "2.0",
+                    "id": index,
+                    "method": "tools/call",
+                    "params": {"name": tool, "arguments": arguments},
+                }
+            )
     elif scenario == "analytics":
         # `live=false` only: `live=true` would run a real collection against
         # every platform API.
@@ -1026,6 +1129,17 @@ def run_scenario(python: str, scenario: dict) -> dict:
     # the fixture records exactly what both engines start from.
     for name, body in scenario.get("seed", {}).items():
         (profile / name).write_text(body, encoding="utf-8")
+    # The encrypted store the `writers` scenario disconnects from, written
+    # through the shipped `CredentialStore` so the key derivation is the
+    # engine's.
+    for key, value in scenario.get("credentials", {}).items():
+        from xpst.utils.credentials import CredentialStore
+
+        CredentialStore(str(profile)).store(key, value)
+    for name in scenario.get("files", []):
+        path = profile / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("parity", encoding="utf-8")
 
     # The knowledge workspace (`~/.xpst/knowledge/default`, since HOME is the
     # profile) and its transcripts.
@@ -1223,6 +1337,15 @@ def run_scenario(python: str, scenario: dict) -> dict:
             }
         )
 
+    # The config the scenario left behind. A writer's real effect is the FILE,
+    # not the payload: `messenger_set_rules` answers `{ok, auto_reply,
+    # reply_rules}` whether or not it wrote anything, so the bytes are what
+    # prove the write happened and matched.
+    config_after = None
+    config_path = profile / "config.yaml"
+    if scenario.get("record_config") and config_path.is_file():
+        config_after = scrub_profile(config_path.read_text(encoding="utf-8"), profile)
+
     recorded_env = dict(scenario["env"])
     recorded_env["XPST_FFMPEG_PATH"] = "<PROFILE>/bin/ffmpeg"
     recorded_env["XPST_FFPROBE_PATH"] = "<PROFILE>/bin/ffprobe"
@@ -1238,6 +1361,9 @@ def run_scenario(python: str, scenario: dict) -> dict:
             list(row) for row in scenario.get("snapshots", METRIC_SNAPSHOTS)
         ],
         "collection_runs": [list(run) for run in scenario.get("collection_runs", [])],
+        "credentials": scenario.get("credentials", {}),
+        "files": scenario.get("files", []),
+        "config_yaml_after": config_after,
         "steps": recorded,
     }
 

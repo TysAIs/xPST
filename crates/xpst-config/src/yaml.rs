@@ -121,6 +121,14 @@ impl Mapping {
     pub fn values(&self) -> impl Iterator<Item = &Value> {
         self.0.iter().map(|(_, value)| value)
     }
+
+    /// Entries in document order, mutably.
+    ///
+    /// A key is never mutated through this — the document's key order and key
+    /// text are part of the output contract — so only the value is exposed.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&Value, &mut Value)> {
+        self.0.iter_mut().map(|(key, value)| (&*key, value))
+    }
 }
 
 impl<'a> IntoIterator for &'a Mapping {
