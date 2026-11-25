@@ -242,6 +242,41 @@ KB_MANIFEST = (
     '"aliases": {}}'
 )
 
+#: The `analytics.db` rows `best-time` is held to. `2026-01-01` is a Thursday
+#: (weekday 3) and `2026-01-02` a Friday (4); the timestamps carry explicit
+#: offsets so the wall-clock fields are machine-independent.
+ANALYTICS_STATEMENTS = [
+    "CREATE TABLE metric_snapshots ("
+    "platform TEXT NOT NULL, post_id TEXT NOT NULL, captured_at TEXT NOT NULL, "
+    "views INTEGER, likes INTEGER, comments INTEGER, shares INTEGER, "
+    "reposts INTEGER, saves INTEGER, extra TEXT, "
+    "collection_status TEXT, collection_error TEXT, "
+    "PRIMARY KEY (platform, post_id, captured_at))",
+    "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, "
+    "comments, shares) VALUES ('youtube', 'p1', '2026-01-01T10:00:00+00:00', 1000, 40, 5, 2)",
+    # Same (platform, captured_at) as p1: the first snapshot is the one that counts.
+    "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, "
+    "comments, shares) VALUES ('youtube', 'p1b', '2026-01-01T10:00:00+00:00', 1000, 40, 5, 2)",
+    "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, "
+    "comments, shares) VALUES ('youtube', 'p2', '2026-01-01T10:00:00+00:00', 500, 10, 1, 0)",
+    "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, "
+    "comments, shares) VALUES ('x', 'p3', '2026-01-02T11:30:00Z', 200, 30, 3, 1)",
+    # Zero views: skipped, not a 0% bucket.
+    "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, "
+    "comments, shares) VALUES ('x', 'p4', '2026-01-02T11:30:00Z', 0, 0, 0, 0)",
+    # A failed collection is not a measurement.
+    "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, "
+    "comments, shares, collection_status) VALUES "
+    "('x', 'p5', '2026-01-03T09:00:00', 100, 5, 0, 0, 'failed')",
+    "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, "
+    "comments, shares) VALUES ('instagram', 'p6', '2026-01-04T18:00:00+00:00', 300, 12, 2, 1)",
+    "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, "
+    "comments, shares) VALUES ('instagram', 'p7', '2026-01-04T18:00:00+00:00', 300, 6, 1, 0)",
+    # An unparseable timestamp is dropped.
+    "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, "
+    "comments, shares) VALUES ('tiktok', 'p8', 'not a timestamp', 100, 5, 0, 0)",
+]
+
 KB_STORE = {
     "config.yaml": "version: 4\n",
     "knowledge/default/nuggets.json": KB_NUGGETS,
@@ -1350,6 +1385,129 @@ SCENARIOS = [
         "files": ["schedule.json"],
         "compare": "json",
     },
+    # ── tranche 4: best-time, generate, byo set, kb migrate-store ──────────
+    {
+        "name": "best_time_empty",
+        "argv": ["best-time", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        # The ledger rows cover the four rules that change the answer: the
+        # first snapshot per (platform, captured_at) wins, a `failed`
+        # collection is not a measurement, a zero-view row is skipped, and a
+        # timestamp that will not parse is dropped.
+        "name": "best_time_seeded",
+        "argv": ["best-time", "--json"],
+        "seed": {},
+        "sqlite": {"analytics.db": ANALYTICS_STATEMENTS},
+        "compare": "stdout",
+    },
+    {
+        "name": "best_time_platform",
+        "argv": ["best-time", "--platform", "x", "--json"],
+        "seed": {},
+        "sqlite": {"analytics.db": ANALYTICS_STATEMENTS},
+        "compare": "stdout",
+    },
+    {
+        "name": "best_time_platform_missing",
+        "argv": ["best-time", "-p", "threads", "--json"],
+        "seed": {},
+        "sqlite": {"analytics.db": ANALYTICS_STATEMENTS},
+        "compare": "stdout",
+    },
+    {
+        "name": "generate_caption_x",
+        "argv": [
+            "generate", "caption", "--text",
+            "Routing is hard. Concurrency tuning matters a lot for throughput. "
+            "Learn caching today.",
+            "--platform", "x", "--json",
+        ],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        # No sentence survives the `len > 10` filter, so the generator returns
+        # the three fixed captions — which carry no `style` key at all.
+        "name": "generate_caption_fallback",
+        "argv": ["generate", "caption", "--text", "Hi there.", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        # `` is Unicode-aware, so `ünïcode` contributes no `code` keyword.
+        "name": "generate_caption_unicode",
+        "argv": [
+            "generate", "caption", "--text",
+            "Café culture is booming. Ünïcode matters a lot here. Learn more today.",
+            "--platform", "threads", "--json",
+        ],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        "name": "generate_ideas",
+        "argv": ["generate", "ideas", "--topic", "rust engines", "--count", "3", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        # The payload echoes the raw `--topic`; the templates use the default.
+        "name": "generate_ideas_blank_topic",
+        "argv": ["generate", "ideas", "--topic", "   ", "--count", "1", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        "name": "byo_set_ok",
+        "argv": ["byo", "set", "instagram", "--app-id", "1234567890", "--json"],
+        "seed": {},
+        "env": {"XPST_INSTAGRAM_APP_SECRET": "SYNTHETIC_instagram_app_secret_0001"},
+        "compare": "stdout",
+    },
+    {
+        "name": "byo_set_tiktok",
+        "argv": ["byo", "set", "tiktok", "--app-id", "awabc123def", "--json"],
+        "seed": {},
+        "env": {"XPST_TIKTOK_CLIENT_SECRET": "secret-value-1"},
+        "compare": "stdout",
+    },
+    {
+        "name": "byo_set_rejected",
+        "argv": ["byo", "set", "instagram", "--app-id", "12", "--app-secret", "short", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        "name": "byo_set_unknown_platform",
+        "argv": ["byo", "set", "nope", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        "name": "byo_set_not_configurable",
+        "argv": ["byo", "set", "messenger", "--json"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        "name": "kb_migrate_store_empty",
+        "argv": ["kb", "migrate-store", "--json"],
+        "seed": {},
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
+    },
+    {
+        # Python raises an uncaught `ValueError` (empty stdout, exit 1); the
+        # Rust engine prints the exception line on stderr and exits 1.
+        "name": "kb_migrate_store_bad_workspace",
+        "argv": ["kb", "migrate-store", "--workspace", "../escape", "--json"],
+        "seed": {},
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "exit",
+    },
 ]
 
 
@@ -1358,6 +1516,19 @@ def seed_profile(scenario: dict, profile: Path) -> None:
         target = profile / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
+    # A SQLite ledger (`analytics.db`) cannot be seeded as text. The statements
+    # are recorded in the fixture and replayed by the Rust test, so both engines
+    # read a database built from the same DDL and rows.
+    for relative, statements in (scenario.get("sqlite") or {}).items():
+        import sqlite3
+
+        target = profile / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(target)
+        for statement in statements:
+            connection.execute(statement)
+        connection.commit()
+        connection.close()
     # A credential the command reads from the encrypted store (the dashboard API
     # token `bio` masks) is written with the REAL Python store, so both engines
     # read the same value instead of each generating its own.
@@ -1628,6 +1799,8 @@ def run_scenario(scenario: dict, python: str) -> dict:
     }
     if scenario.get("substitutions"):
         record["substitutions"] = scenario["substitutions"]
+    if scenario.get("sqlite"):
+        record["sqlite"] = scenario["sqlite"]
     if scenario.get("env"):
         record["env"] = scenario["env"]
     if scenario.get("config_dir"):

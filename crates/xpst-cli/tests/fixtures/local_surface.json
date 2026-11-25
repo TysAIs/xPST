@@ -11,7 +11,7 @@
     "PYTHONHASHSEED": "0"
   },
   "note": "Captured by running the shipped Python CLI against scratch profiles. `environment` is the block both engines are run under (a scenario's `env` overrides it); scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent, and an entry without one renders in the pinned TZ; snapshot modified_at is stripped and its epoch recorded instead.",
-  "scenario_count": 117,
+  "scenario_count": 133,
   "scenarios": [
     {
       "name": "status_empty_profile",
@@ -3957,7 +3957,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616656.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616679.\n",
       "stderr": "[<TIME>] ERROR    XPST config file at cfg/config.yaml is corrupted; a\n                             copy was saved to                                  \n                             cfg/backups/config.yaml.corrupt_<EPOCH>         \n",
       "normalize_clock": true,
       "backups": [
@@ -3984,7 +3984,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616656.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616679.\n",
       "stderr": "[<TIME>] ERROR    XPST config file at cfg/config.yaml is corrupted; a\n                             copy was saved to                                  \n                             cfg/backups/config.yaml.corrupt_<EPOCH>         \n",
       "normalize_clock": true,
       "backups": [
@@ -4012,7 +4012,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616656.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616679.\n",
       "stderr": "[<TIME>] ERROR    XPST config file at cfg/config.yaml is corrupted; a\n                             copy was saved to                                  \n                             cfg/backups/config.yaml.corrupt_<EPOCH>         \n",
       "normalize_clock": true,
       "backups": [
@@ -4039,7 +4039,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616656.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616679.\n",
       "stderr": "[<TIME>] ERROR    XPST config file at cfg/config.yaml is corrupted; a\n                             copy was saved to                                  \n                             cfg/backups/config.yaml.corrupt_<EPOCH>         \n",
       "normalize_clock": true,
       "backups": [
@@ -4067,7 +4067,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616656.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616679.\n",
       "stderr": "[<TIME>] ERROR    XPST config file at cfg/config.yaml is corrupted; a\n                             copy was saved to                                  \n                             cfg/backups/config.yaml.corrupt_<EPOCH>         \n",
       "normalize_clock": true,
       "backups": [
@@ -4095,7 +4095,7 @@
       "cwd": "PROFILE",
       "backup_dir": "cfg/backups",
       "allow_nonzero": true,
-      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616656.\n",
+      "stdout": "Configuration error: XPST config file is empty or invalid: cfg/config.yaml. It \nmay have been truncated by a crash or a full disk \u2014 the original file was backed\nup to: cfg/backups/config.yaml.corrupt_1795616679.\n",
       "stderr": "[<TIME>] ERROR    XPST config file at cfg/config.yaml is corrupted; a\n                             copy was saved to                                  \n                             cfg/backups/config.yaml.corrupt_<EPOCH>         \n",
       "normalize_clock": true,
       "backups": [
@@ -5598,6 +5598,284 @@
         },
         "error": null,
         "removed": "id-1"
+      }
+    },
+    {
+      "name": "best_time_empty",
+      "argv": [
+        "best-time",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 0,
+      "stdout": "{\n  \"best_times\": {}\n}\n"
+    },
+    {
+      "name": "best_time_seeded",
+      "argv": [
+        "best-time",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 0,
+      "sqlite": {
+        "analytics.db": [
+          "CREATE TABLE metric_snapshots (platform TEXT NOT NULL, post_id TEXT NOT NULL, captured_at TEXT NOT NULL, views INTEGER, likes INTEGER, comments INTEGER, shares INTEGER, reposts INTEGER, saves INTEGER, extra TEXT, collection_status TEXT, collection_error TEXT, PRIMARY KEY (platform, post_id, captured_at))",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('youtube', 'p1', '2026-01-01T10:00:00+00:00', 1000, 40, 5, 2)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('youtube', 'p1b', '2026-01-01T10:00:00+00:00', 1000, 40, 5, 2)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('youtube', 'p2', '2026-01-01T10:00:00+00:00', 500, 10, 1, 0)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('x', 'p3', '2026-01-02T11:30:00Z', 200, 30, 3, 1)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('x', 'p4', '2026-01-02T11:30:00Z', 0, 0, 0, 0)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares, collection_status) VALUES ('x', 'p5', '2026-01-03T09:00:00', 100, 5, 0, 0, 'failed')",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('instagram', 'p6', '2026-01-04T18:00:00+00:00', 300, 12, 2, 1)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('instagram', 'p7', '2026-01-04T18:00:00+00:00', 300, 6, 1, 0)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('tiktok', 'p8', 'not a timestamp', 100, 5, 0, 0)"
+        ]
+      },
+      "stdout": "{\n  \"best_times\": {\n    \"x\": [\n      {\n        \"platform\": \"x\",\n        \"day_of_week\": 4,\n        \"day_name\": \"Friday\",\n        \"hour\": 11,\n        \"avg_engagement_rate\": 17.0,\n        \"post_count\": 1\n      }\n    ],\n    \"instagram\": [\n      {\n        \"platform\": \"instagram\",\n        \"day_of_week\": 6,\n        \"day_name\": \"Sunday\",\n        \"hour\": 18,\n        \"avg_engagement_rate\": 5.0,\n        \"post_count\": 1\n      }\n    ],\n    \"youtube\": [\n      {\n        \"platform\": \"youtube\",\n        \"day_of_week\": 3,\n        \"day_name\": \"Thursday\",\n        \"hour\": 10,\n        \"avg_engagement_rate\": 4.7,\n        \"post_count\": 1\n      }\n    ]\n  }\n}\n"
+    },
+    {
+      "name": "best_time_platform",
+      "argv": [
+        "best-time",
+        "--platform",
+        "x",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 0,
+      "sqlite": {
+        "analytics.db": [
+          "CREATE TABLE metric_snapshots (platform TEXT NOT NULL, post_id TEXT NOT NULL, captured_at TEXT NOT NULL, views INTEGER, likes INTEGER, comments INTEGER, shares INTEGER, reposts INTEGER, saves INTEGER, extra TEXT, collection_status TEXT, collection_error TEXT, PRIMARY KEY (platform, post_id, captured_at))",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('youtube', 'p1', '2026-01-01T10:00:00+00:00', 1000, 40, 5, 2)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('youtube', 'p1b', '2026-01-01T10:00:00+00:00', 1000, 40, 5, 2)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('youtube', 'p2', '2026-01-01T10:00:00+00:00', 500, 10, 1, 0)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('x', 'p3', '2026-01-02T11:30:00Z', 200, 30, 3, 1)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('x', 'p4', '2026-01-02T11:30:00Z', 0, 0, 0, 0)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares, collection_status) VALUES ('x', 'p5', '2026-01-03T09:00:00', 100, 5, 0, 0, 'failed')",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('instagram', 'p6', '2026-01-04T18:00:00+00:00', 300, 12, 2, 1)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('instagram', 'p7', '2026-01-04T18:00:00+00:00', 300, 6, 1, 0)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('tiktok', 'p8', 'not a timestamp', 100, 5, 0, 0)"
+        ]
+      },
+      "stdout": "{\n  \"platform\": \"x\",\n  \"best_time\": {\n    \"platform\": \"x\",\n    \"day_of_week\": 4,\n    \"day_name\": \"Friday\",\n    \"hour\": 11,\n    \"avg_engagement_rate\": 17.0,\n    \"post_count\": 1\n  }\n}\n"
+    },
+    {
+      "name": "best_time_platform_missing",
+      "argv": [
+        "best-time",
+        "-p",
+        "threads",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 0,
+      "sqlite": {
+        "analytics.db": [
+          "CREATE TABLE metric_snapshots (platform TEXT NOT NULL, post_id TEXT NOT NULL, captured_at TEXT NOT NULL, views INTEGER, likes INTEGER, comments INTEGER, shares INTEGER, reposts INTEGER, saves INTEGER, extra TEXT, collection_status TEXT, collection_error TEXT, PRIMARY KEY (platform, post_id, captured_at))",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('youtube', 'p1', '2026-01-01T10:00:00+00:00', 1000, 40, 5, 2)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('youtube', 'p1b', '2026-01-01T10:00:00+00:00', 1000, 40, 5, 2)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('youtube', 'p2', '2026-01-01T10:00:00+00:00', 500, 10, 1, 0)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('x', 'p3', '2026-01-02T11:30:00Z', 200, 30, 3, 1)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('x', 'p4', '2026-01-02T11:30:00Z', 0, 0, 0, 0)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares, collection_status) VALUES ('x', 'p5', '2026-01-03T09:00:00', 100, 5, 0, 0, 'failed')",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('instagram', 'p6', '2026-01-04T18:00:00+00:00', 300, 12, 2, 1)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('instagram', 'p7', '2026-01-04T18:00:00+00:00', 300, 6, 1, 0)",
+          "INSERT INTO metric_snapshots (platform, post_id, captured_at, views, likes, comments, shares) VALUES ('tiktok', 'p8', 'not a timestamp', 100, 5, 0, 0)"
+        ]
+      },
+      "stdout": "{\n  \"platform\": \"threads\",\n  \"best_time\": null\n}\n"
+    },
+    {
+      "name": "generate_caption_x",
+      "argv": [
+        "generate",
+        "caption",
+        "--text",
+        "Routing is hard. Concurrency tuning matters a lot for throughput. Learn caching today.",
+        "--platform",
+        "x",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 0,
+      "stdout": "{\n  \"text\": \"Routing is hard. Concurrency tuning matters a lot for throughput. Learn caching today.\",\n  \"platform\": \"x\",\n  \"char_limit\": 280,\n  \"suggestions\": [\n    {\n      \"caption\": \"Routing is hard Concurrency tuning matters a lot for throughput\\n\\n#Routing #Hard #Concurrency\",\n      \"hashtags\": \"#Routing #Hard #Concurrency\",\n      \"style\": \"direct\"\n    },\n    {\n      \"caption\": \"This changed everything: Concurrency tuning matters a lot for throughput\\n\\n#Routing #Hard #Concurrency #Tuning\",\n      \"hashtags\": \"#Routing #Hard #Concurrency #Tuning\",\n      \"style\": \"hook\"\n    },\n    {\n      \"caption\": \"Learn caching today\\n\\nFollow for more! #Routing #Hard #Concurrency #Tuning #Matters\",\n      \"hashtags\": \"#Routing #Hard #Concurrency #Tuning #Matters\",\n      \"style\": \"summary\"\n    }\n  ]\n}\n"
+    },
+    {
+      "name": "generate_caption_fallback",
+      "argv": [
+        "generate",
+        "caption",
+        "--text",
+        "Hi there.",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 0,
+      "stdout": "{\n  \"text\": \"Hi there.\",\n  \"platform\": \"instagram\",\n  \"char_limit\": 2200,\n  \"suggestions\": [\n    {\n      \"caption\": \"Check out this video!\",\n      \"hashtags\": \"#video #content\"\n    },\n    {\n      \"caption\": \"New content alert!\",\n      \"hashtags\": \"#new #content\"\n    },\n    {\n      \"caption\": \"Watch this!\",\n      \"hashtags\": \"#watch #video\"\n    }\n  ]\n}\n"
+    },
+    {
+      "name": "generate_caption_unicode",
+      "argv": [
+        "generate",
+        "caption",
+        "--text",
+        "Caf\u00e9 culture is booming. \u00dcn\u00efcode matters a lot here. Learn more today.",
+        "--platform",
+        "threads",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 0,
+      "stdout": "{\n  \"text\": \"Caf\\u00e9 culture is booming. \\u00dcn\\u00efcode matters a lot here. Learn more today.\",\n  \"platform\": \"threads\",\n  \"char_limit\": 500,\n  \"suggestions\": [\n    {\n      \"caption\": \"Caf\\u00e9 culture is booming \\u00dcn\\u00efcode matters a lot here\\n\\n#Culture #Booming #Matters\",\n      \"hashtags\": \"#Culture #Booming #Matters\",\n      \"style\": \"direct\"\n    },\n    {\n      \"caption\": \"This changed everything: \\u00dcn\\u00efcode matters a lot here\\n\\n#Culture #Booming #Matters #Here\",\n      \"hashtags\": \"#Culture #Booming #Matters #Here\",\n      \"style\": \"hook\"\n    },\n    {\n      \"caption\": \"Learn more today\\n\\nFollow for more! #Culture #Booming #Matters #Here #Learn\",\n      \"hashtags\": \"#Culture #Booming #Matters #Here #Learn\",\n      \"style\": \"summary\"\n    }\n  ]\n}\n"
+    },
+    {
+      "name": "generate_ideas",
+      "argv": [
+        "generate",
+        "ideas",
+        "--topic",
+        "rust engines",
+        "--count",
+        "3",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 0,
+      "stdout": "{\n  \"topic\": \"rust engines\",\n  \"count\": 3,\n  \"ideas\": [\n    {\n      \"idea\": \"5 things nobody tells you about rust engines\",\n      \"hook\": \"listicle\",\n      \"source\": \"deterministic\"\n    },\n    {\n      \"idea\": \"The rust engines mistake that costs you the most\",\n      \"hook\": \"mistake\",\n      \"source\": \"deterministic\"\n    },\n    {\n      \"idea\": \"How I turned rust engines into a daily habit\",\n      \"hook\": \"story\",\n      \"source\": \"deterministic\"\n    }\n  ]\n}\n"
+    },
+    {
+      "name": "generate_ideas_blank_topic",
+      "argv": [
+        "generate",
+        "ideas",
+        "--topic",
+        "   ",
+        "--count",
+        "1",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 0,
+      "stdout": "{\n  \"topic\": \"   \",\n  \"count\": 1,\n  \"ideas\": [\n    {\n      \"idea\": \"5 things nobody tells you about content creation\",\n      \"hook\": \"listicle\",\n      \"source\": \"deterministic\"\n    }\n  ]\n}\n"
+    },
+    {
+      "name": "byo_set_ok",
+      "argv": [
+        "byo",
+        "set",
+        "instagram",
+        "--app-id",
+        "1234567890",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_INSTAGRAM_APP_SECRET": "SYNTHETIC_instagram_app_secret_0001"
+      },
+      "stdout": "{\"ok\": true, \"platform\": \"instagram\", \"display_name\": \"Instagram Reels\", \"configurable\": true, \"configured\": true, \"half_configured\": false, \"app_id_masked\": \"\u20267890\", \"source\": \"encrypted-store\", \"id_label\": \"Meta App ID\", \"secret_label\": \"Meta App Secret\", \"redirect_uri\": \"http://localhost:8888/callback\", \"scopes\": [\"instagram_basic\", \"instagram_content_publish\", \"pages_show_list\", \"pages_read_engagement\"], \"create_url\": \"https://developers.facebook.com/apps\", \"docs_url\": \"https://developers.facebook.com/docs/graph-api/get-started/getting-access-tokens/about-user-access-tokens#standard-access\", \"enables\": \"Publishing Reels to your own account through the official Instagram Platform API. As the app owner you stay in Meta's Standard Access: no App Review and no Business Verification.\", \"sign_in_available\": true, \"env_vars\": [\"XPST_INSTAGRAM_APP_ID\", \"XPST_INSTAGRAM_APP_SECRET\"]}\n"
+    },
+    {
+      "name": "byo_set_tiktok",
+      "argv": [
+        "byo",
+        "set",
+        "tiktok",
+        "--app-id",
+        "awabc123def",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_TIKTOK_CLIENT_SECRET": "secret-value-1"
+      },
+      "stdout": "{\"ok\": true, \"platform\": \"tiktok\", \"display_name\": \"TikTok\", \"configurable\": true, \"configured\": true, \"half_configured\": false, \"app_id_masked\": \"\u20263def\", \"source\": \"encrypted-store\", \"id_label\": \"Client Key\", \"secret_label\": \"Client Secret\", \"redirect_uri\": \"http://localhost:8085/callback\", \"scopes\": [\"video.publish\", \"video.upload\", \"user.info.stats\"], \"create_url\": \"https://developers.tiktok.com/manage/apps\", \"docs_url\": \"https://developers.tiktok.com/doc/content-posting-api-get-started\", \"enables\": \"Direct-posting to your own TikTok account through the official Content Posting API. Unaudited apps post SELF_ONLY (private) until TikTok audits the app \u2014 xPST never claims public reach it does not have.\", \"sign_in_available\": true, \"env_vars\": [\"XPST_TIKTOK_CLIENT_KEY\", \"XPST_TIKTOK_CLIENT_SECRET\"]}\n"
+    },
+    {
+      "name": "byo_set_rejected",
+      "argv": [
+        "byo",
+        "set",
+        "instagram",
+        "--app-id",
+        "12",
+        "--app-secret",
+        "short",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 2,
+      "stdout": "{\"ok\": false, \"error\": \"Those app credentials were not accepted.\", \"errors\": {\"app_id\": \"Meta App ID looks wrong (must be digits).\", \"app_secret\": \"Meta App Secret looks wrong (8\u2013256 chars, no spaces).\"}}\n"
+    },
+    {
+      "name": "byo_set_unknown_platform",
+      "argv": [
+        "byo",
+        "set",
+        "nope",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 2,
+      "stdout": "Unknown platform: nope (options: facebook, instagram, messenger, threads, \ntiktok)\n"
+    },
+    {
+      "name": "byo_set_not_configurable",
+      "argv": [
+        "byo",
+        "set",
+        "messenger",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 0,
+      "stdout": "Messenger keeps its app credential in its own connect flow.\nhttps://developers.facebook.com/docs/messenger-platform/get-started\n"
+    },
+    {
+      "name": "kb_migrate_store_empty",
+      "argv": [
+        "kb",
+        "migrate-store",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_HOME": "PROFILE"
+      },
+      "stdout": "{\"ok\": true, \"migrated\": 0, \"reason\": \"no JSON store found\"}\n"
+    },
+    {
+      "name": "kb_migrate_store_bad_workspace",
+      "argv": [
+        "kb",
+        "migrate-store",
+        "--workspace",
+        "../escape",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "exit",
+      "exit_code": 1,
+      "env": {
+        "XPST_HOME": "PROFILE"
       }
     }
   ]

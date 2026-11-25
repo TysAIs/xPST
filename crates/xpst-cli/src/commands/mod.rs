@@ -8,6 +8,7 @@
 //! `not implemented in the Rust engine yet` (see `crate::not_implemented`).
 
 pub mod app;
+pub mod best_time;
 pub mod bio;
 pub mod bootstrap;
 pub mod byo;
@@ -18,6 +19,7 @@ pub mod config_view;
 pub mod devices;
 pub mod doctor;
 pub mod failures;
+pub mod generate;
 pub mod kb;
 pub mod kb_store;
 pub mod logs;

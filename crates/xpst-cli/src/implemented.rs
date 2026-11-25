@@ -46,6 +46,12 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         byo_clear,
     ),
     implemented(
+        "byo set",
+        "xpst-auth",
+        "Validates the app id/secret with Python's two patterns, stores the pair in the Fernet credential store, mirrors the id into `accounts.<platform>` and reports the masked `byo status` view; payload byte-compared with the Python CLI (the config file is edited in place, not rewritten from the model).",
+        byo_set,
+    ),
+    implemented(
         "byo status",
         "xpst-auth",
         "Reads the Fernet credential store the Python engine writes (scrypt + AES-128-CBC + HMAC-SHA256) and the config/env fallbacks; payload byte-compared with the Python CLI.",
@@ -154,6 +160,18 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         failures_list,
     ),
     implemented(
+        "generate caption",
+        "xpst-core",
+        "The deterministic caption generator (`generate_caption_deterministic`): sentence split, keyword hashtags, three variants and Python's per-platform truncation; payload byte-compared with the Python CLI. The LLM path is not ported, so a configured `XPST_KB_LLM_ENABLED` endpoint is a named divergence.",
+        generate_caption,
+    ),
+    implemented(
+        "generate ideas",
+        "xpst-core",
+        "The deterministic idea templates (`generate_ideas_deterministic`) with the shipped rotation, and the payload echoing the raw `--topic`; payload byte-compared with the Python CLI. The LLM path is not ported (named divergence).",
+        generate_ideas,
+    ),
+    implemented(
         "failures clear",
         "xpst-state",
         "Clears the dead-letter queue through the same tolerant loader `status` uses (v1 migration included) and writes Python's `json.dump` separators, keeping `errors: {}` for the per-video form; payload byte-compared with the Python CLI (written keys keep the read order).",
@@ -256,6 +274,12 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         app,
     ),
     implemented(
+        "best-time",
+        "xpst-store",
+        "Hour-of-week engagement buckets from `analytics.db` (`BestTimeAnalyzer.analyze`), ranked by Python's rounded average with the first snapshot per post and `collection_status: failed` rows excluded; payload byte-compared with the Python CLI on empty, seeded and platform-filtered ledgers.",
+        best_time,
+    ),
+    implemented(
         "kb areas",
         "xpst-store",
         "Discovered knowledge areas in course order (`order_index`, label, id) with their nugget counts, read from the workspace's `areas.json`; payload byte-compared with the Python CLI. The reader reproduces `JsonKnowledgeStore._load_file`: a decode failure, an unknown key or a missing required key renames the file to `<name>.corrupt` and starts empty, while a non-object document escapes as Python's `AttributeError`. An invalid `--workspace` reproduces Python's uncaught `ValueError` contract — empty stdout, exit 1 — with the exception line on stderr instead of the traceback frames.",
@@ -278,6 +302,12 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         "xpst-store",
         "The read-only health report (`doctor.diagnose`): dependency probe, store integrity, embedding widths, orphaned areas/nuggets, queue counts and the manifest source count, with the same severities, messages and exit code; payload byte-compared with the Python CLI. The optional-dependency probe asks an interpreter out-of-process (`XPST_PYTHON`, else `python3`), because a Rust binary has no `sys.path`.",
         kb_doctor,
+    ),
+    implemented(
+        "kb migrate-store",
+        "xpst-store",
+        "The JSON-store probe and the honest LanceDB refusal (`{\"ok\": false, \"error\": \"lancedb is not installed\"}`, exit 1) plus the `no JSON store found` answer; payload byte-compared with the Python CLI. The vector store is not ported, so a machine with the knowledge extra would migrate in Python (named divergence).",
+        kb_migrate_store,
     ),
     implemented(
         "kb query",
@@ -709,6 +739,51 @@ fn search(
     err: &mut dyn Write,
 ) -> i32 {
     commands::kb::search(global, leaf, out, err)
+}
+
+fn best_time(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::best_time::run(global, leaf, out, err)
+}
+
+fn byo_set(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::byo::set(global, leaf, out, err)
+}
+
+fn generate_caption(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::generate::caption(global, leaf, out, err)
+}
+
+fn generate_ideas(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::generate::ideas(global, leaf, out, err)
+}
+
+fn kb_migrate_store(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::kb::migrate_store(global, leaf, out, err)
 }
 
 #[cfg(test)]

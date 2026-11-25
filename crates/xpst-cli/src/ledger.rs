@@ -269,6 +269,25 @@ pub const DEVIATIONS: &[&str] = &[
      the rate limits. The renderer is shared (Python's `json.dumps` separators and insertion \
      order), so the difference is the payload itself; porting the live doctor and the full \
      validate check list are separate slices.",
+    "`generate caption` and `generate ideas` always take the deterministic path. Python tries \
+     the KB LLM first (`XPST_KB_LLM_ENABLED` plus a base URL) and only falls back to the \
+     templates when none is configured; the LLM client is not ported, so a machine with the \
+     knowledge extra and an endpoint gets model-written text from Python and template text \
+     here. The templates, hashtag table, character limits, truncation rules and payload shape \
+     are the shipped behaviour.",
+    "`kb migrate-store` always answers `{\"ok\": false, \"error\": \"lancedb is not installed\"}` \
+     (exit 1) when a JSON store exists: the vector store is not ported. On a machine without the \
+     knowledge extra that is exactly Python's answer; with it installed Python migrates the \
+     nuggets and areas and reports the counts. The `no JSON store found` branch is identical.",
+    "`byo set` edits the app-id field in the raw `config.yaml` instead of rewriting the whole \
+     document from the Pydantic model (the same choice `byo clear` makes), so the file differs \
+     from Python's while the payload does not. Its interactive secret prompt reads a line from \
+     stdin rather than `getpass`, so the secret is echoed; the non-interactive path (`--app-id` \
+     plus the platform's `XPST_*_APP_SECRET`) is identical.",
+    "`best-time` skips a `metric_snapshots` row whose `views`/`likes`/`comments`/`shares` column \
+     holds text, where Python raises `TypeError` out of `analyze()` (its `try` only wraps the \
+     query) and exits 1. A ledger the shipped writer produced is integer-typed, so only a \
+     hand-edited database can observe the difference.",
     "`kb query` and `search` always take `query_nuggets`' substring path: the embedding stack \
      (fastembed + the vector stores) is not ported, so `mode` is always `substring` and `score` \
      is always null. That is the same answer Python gives without the knowledge extra and on any \
