@@ -331,6 +331,10 @@ MASK_KEYS = {
     "xpst_schedule_list": ["id", "operation_id", "idempotency_key", "created_at", "paused_at"],
     # `pause()` stamps `datetime.now(timezone.utc)`; the reason is compared.
     "xpst_schedule_pause": ["paused_at"],
+    # `generated_at` is the report's own clock reading and `staleness_hours` is
+    # measured from it; `last_captured` and `staleness` are fixture values and
+    # stay compared.
+    "xpst_analytics": ["generated_at", "staleness_hours"],
 }
 
 # Helper scripts the readiness and security checks probe. Pinned so the
@@ -636,6 +640,161 @@ SCHEDULE_WRITE_CALLS = [
     ("xpst_schedule_list", {}),
 ]
 
+# The `analytics` scenario's state: publish records that exercise every outcome
+# branch the report has. `youtube` ids are recorded but ownership cannot be
+# verified (the check is a network call), so they are dropped; `x` carries a
+# published post, a deleted one, a legacy `post_id` with no metrics, a post whose
+# snapshot came from a FAILED collection, one with no id at all (a failed
+# upload) and one whose id is not in the ownership set (a foreign post).
+ANALYTICS_STATE = {
+    "version": 2,
+    "posted_videos": {
+        "vid-alpha": {
+            "source_url": "https://example.invalid/vid-alpha",
+            "downloaded_at": "2026-11-10T00:00:00+00:00",
+            "posted_to": {
+                "youtube": {
+                    "id": "yt-1",
+                    "url": "https://example.invalid/yt-1",
+                    "timestamp": "2026-11-10T01:00:00+00:00",
+                },
+                "x": {
+                    "id": "x-1",
+                    "url": "https://example.invalid/x-1",
+                    "timestamp": "2026-11-10T01:00:00+00:00",
+                },
+            },
+        },
+        "vid-beta": {
+            "downloaded_at": "2026-11-11T00:00:00+00:00",
+            "posted_to": {
+                "youtube": {
+                    "id": "yt-2",
+                    "soft_hidden": True,
+                    "timestamp": "2026-11-11T01:00:00+00:00",
+                },
+                "instagram": {
+                    "id": "ig-2",
+                    "url": "https://example.invalid/ig-2",
+                    "timestamp": "2026-11-11T01:00:00+00:00",
+                },
+            },
+        },
+        "vid-gamma": {
+            "posted_to": {
+                "x": {"id": "x-3", "deleted": True, "timestamp": "2026-11-12T01:00:00+00:00"},
+            },
+        },
+        # The legacy `post_id` key, and an error that does NOT make it failed
+        # (the id resolved, so the publish is recorded).
+        "vid-delta": {
+            "posted_to": {
+                "x": {"post_id": "x-4", "timestamp": "2026-11-13T01:00:00+00:00"},
+            },
+            "errors": {"x": {"error": "rate limited", "retryable": True}},
+        },
+        "vid-epsilon": {
+            "posted_to": {
+                "threads": {"id": "th-5", "timestamp": "2026-11-14T01:00:00+00:00"},
+            },
+        },
+        "vid-zeta": {
+            "posted_to": {
+                "x": {
+                    "id": "x-6",
+                    "url": "https://example.invalid/x-6",
+                    "timestamp": "2026-11-15T01:00:00+00:00",
+                },
+            },
+        },
+        # No platform id and an error: the publish FAILED, so the outcome is
+        # `failed` and the id-less record is dropped as unowned.
+        "vid-eta": {
+            "posted_to": {"x": {"timestamp": "2026-11-16T01:00:00+00:00"}},
+            "errors": {"x": {"error": "upload failed", "retryable": False}},
+        },
+        # An id that is not in the verified ownership set: a foreign post.
+        "vid-theta": {
+            "posted_to": {
+                "x": {"id": "x-foreign", "timestamp": "2026-11-17T01:00:00+00:00"},
+            },
+        },
+    },
+}
+
+# `(platform, post_id, captured_at, views, likes, comments, shares,
+# collection_status, extra_json)`. `x-6` was recorded during a FAILED
+# collection, so its numbers stay visible but out of the totals; `th-5` has a
+# row with every metric NULL, which is "not reported" rather than zero.
+ANALYTICS_SNAPSHOTS = [
+    ("youtube", "yt-1", "2026-11-20T00:00:00+00:00", 1000, 50, 10, 5, None, None),
+    (
+        "x",
+        "x-1",
+        "2026-11-20T00:00:00+00:00",
+        2000,
+        40,
+        20,
+        10,
+        "ok",
+        # X's `quotes`/`bookmarks` are capability metrics but not canonical
+        # families, so they survive in the raw `posts` row and never reach
+        # `metrics`.
+        '{"quotes": 3, "bookmarks": 7}',
+    ),
+    ("instagram", "ig-2", "2026-11-19T00:00:00+00:00", 800, 20, 4, 1, None, None),
+    ("x", "x-3", "2026-11-18T00:00:00+00:00", 0, 0, 0, 0, "ok", None),
+    ("x", "x-6", "2026-11-17T00:00:00+00:00", 999, 9, 9, 9, "failed", None),
+    ("threads", "th-5", "2026-11-16T00:00:00+00:00", None, None, None, None, None, None),
+]
+
+# `(platform, captured_at, status, error, reason, detail, attempted, failures,
+# requested, collected)`. `youtube`'s last attempt FAILED, so its recorded
+# numbers (none, because ownership is unverified) are labelled untrusted;
+# `instagram`, `tiktok` and `threads` have no run at all and report `unknown`.
+ANALYTICS_COLLECTION_RUNS = [
+    (
+        "youtube",
+        "2026-11-21T00:00:00+00:00",
+        "failed",
+        "quota exceeded",
+        "quota_exceeded",
+        None,
+        1,
+        1,
+        1,
+        0,
+    ),
+    (
+        "x",
+        "2026-11-21T00:00:00+00:00",
+        "ok",
+        None,
+        None,
+        None,
+        2,
+        0,
+        2,
+        2,
+    ),
+]
+
+# `xpst_analytics` with `live=false`. `live: true` is the network half and is
+# NOT captured: it would run a real collection against every platform API.
+ANALYTICS_CALLS = [
+    ("xpst_analytics", {}),
+    # The filter narrows `posts` and `platforms`; the outcome report still
+    # covers every platform.
+    ("xpst_analytics", {"platform": "x"}),
+    ("xpst_analytics", {"platform": "nope"}),
+    # An empty string is falsy, so it does not filter.
+    ("xpst_analytics", {"platform": ""}),
+    # A truthy non-string becomes a SQLite bind parameter that matches no TEXT
+    # column, so the filtered view is empty.
+    ("xpst_analytics", {"platform": 5}),
+    ("xpst_analytics", {"live": False}),
+]
+
 SCENARIOS = [
     # `XPST_MEDIA_ROOTS` is a fixed media root so the `xpst_suggest_caption`
     # rows are a function of a path whose words are identical on both engines.
@@ -673,18 +832,31 @@ SCENARIOS = [
         },
         "seed": {"schedule.json": SEEDED_SCHEDULE},
     },
+    # `xpst_analytics` reads the ledger and `state.json` only. The scenario has
+    # its own publish records, snapshots and collection runs so every branch of
+    # the outcome report is reachable: an unverified platform, a deleted post, a
+    # legacy id, a failed collection, a foreign id and a platform with no data.
+    {
+        "name": "analytics",
+        "env": {},
+        "seed": {"state.json": json.dumps(ANALYTICS_STATE, indent=2)},
+        "snapshots": ANALYTICS_SNAPSHOTS,
+        "collection_runs": ANALYTICS_COLLECTION_RUNS,
+    },
 ]
 
 
 def mask_clock(value, keys: list[str]):
-    """Replace the STRING value of any named key, at any depth, with `<CLOCK>`.
+    """Replace the value of any named key, at any depth, with `<CLOCK>`.
 
     A `null` is left alone: "never stamped" is a fact worth comparing, and
-    masking it would hide a step that stopped being touched.
+    masking it would hide a step that stopped being touched. A non-string is
+    masked too — `xpst_analytics` reports `staleness_hours` as a float measured
+    from the wall clock, and a string-only mask would leave it drifting.
     """
     if isinstance(value, dict):
         return {
-            key: ("<CLOCK>" if key in keys and isinstance(item, str) else mask_clock(item, keys))
+            key: ("<CLOCK>" if key in keys and item is not None else mask_clock(item, keys))
             for key, item in value.items()
         }
     if isinstance(value, list):
@@ -781,6 +953,18 @@ def requests_for(scenario: str) -> list[dict]:
                     "params": {"name": tool, "arguments": arguments},
                 }
             )
+    elif scenario == "analytics":
+        # `live=false` only: `live=true` would run a real collection against
+        # every platform API.
+        for index, (tool, arguments) in enumerate(ANALYTICS_CALLS, start=300):
+            steps.append(
+                {
+                    "jsonrpc": "2.0",
+                    "id": index,
+                    "method": "tools/call",
+                    "params": {"name": tool, "arguments": arguments},
+                }
+            )
     else:
         steps.append(
             {
@@ -867,12 +1051,31 @@ def run_scenario(python: str, scenario: dict) -> dict:
                 "(platform, count, captured_at) VALUES (?, ?, ?)",
                 (platform, count, captured_at),
             )
-        for platform, post_id, captured_at, views, likes, comments, shares in METRIC_SNAPSHOTS:
+        # The scenario's snapshot rows, or the shared set. A scenario that
+        # carries its own (`analytics`) REPLACES the shared rows rather than
+        # adding to them, so its ledger is exactly what it declares.
+        # `(platform, post_id, captured_at, views, likes, comments, shares,
+        # collection_status, extra)` — the status and the `extra` JSON are what
+        # make the failed-collection and capability-metric branches reachable.
+        for row in scenario.get("snapshots", METRIC_SNAPSHOTS):
+            platform, post_id, captured_at, views, likes, comments, shares = row[:7]
+            status = row[7] if len(row) > 7 else None
+            extra = row[8] if len(row) > 8 else None
             connection.execute(
                 "INSERT OR REPLACE INTO metric_snapshots "
-                "(platform, post_id, captured_at, views, likes, comments, shares) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (platform, post_id, captured_at, views, likes, comments, shares),
+                "(platform, post_id, captured_at, views, likes, comments, shares, "
+                "collection_status, extra) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (platform, post_id, captured_at, views, likes, comments, shares, status, extra),
+            )
+        # `(platform, captured_at, status, error, reason, detail, attempted,
+        # failures, requested, collected)` — the persisted collection ledger
+        # `_collection_status` reads when this process has not collected.
+        for run in scenario.get("collection_runs", []):
+            connection.execute(
+                "INSERT OR REPLACE INTO analytics_collection_runs "
+                "(platform, captured_at, status, error, reason, detail, attempted, "
+                "failures, requested, collected) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                run,
             )
     for content_hash, video_id, caption, source_url, created_at, platforms in CROSS_POST_GROUPS:
         with store._connect() as connection:
@@ -1028,6 +1231,13 @@ def run_scenario(python: str, scenario: dict) -> dict:
         "name": scenario["name"],
         "env": recorded_env,
         "seed": scenario.get("seed", {}),
+        # The ledger rows this scenario starts from, recorded so the Rust test
+        # replays exactly what the Python server read. A scenario without its
+        # own `snapshots` gets the shared set.
+        "snapshots": [
+            list(row) for row in scenario.get("snapshots", METRIC_SNAPSHOTS)
+        ],
+        "collection_runs": [list(run) for run in scenario.get("collection_runs", [])],
         "steps": recorded,
     }
 

@@ -62,10 +62,11 @@ safe).
 | `xpst_setup_resume` | `setup_transaction.json` | `resume_json()`: step state, `step_updates`, caller-verified `readiness`, `finish_later` and an allowlisted `error` code. Completion is derived from readiness, never trusted from disk. |
 | `xpst_setup_reset` | `setup_transaction.json` | `reset_json()`: deletes the transaction and every recovery copy, answering the `state: reset` document with the old id. |
 | `xpst_cross_post_analytics` | `analytics.db` | `get_cross_post_analytics()`: one entry per source video with its per-platform breakdown, aggregated totals, engagement rate and tier. A missing metric keeps the total `null` and the group rate `null` — never a rate computed from a fabricated zero. |
+| `xpst_analytics` | `analytics.db`, `state.json` | `_handle_analytics()` with `live=false`: `build_outcome_report()` over the ledger and the publish records, the ownership gate (YouTube fails closed — its check is a network call) and `_collection_status` from the persisted run ledger. `totals` is `null` for a platform with no metric-bearing owned post, and a row recorded during a failed collection stays visible but out of the totals. `live: true` answers `not_implemented`. |
 | `xpst_suggest_caption` | nothing (pure string algorithm) | `generate_caption_deterministic()` over the `video_path` argument, which the shipped handler passes as the **transcript text** rather than reading the file. The LLM path is unreachable over MCP: `asyncio.run` inside the server's event loop always raises, so the deterministic branch is the contract. |
 | `xpst_generate_ideas` | nothing (pure string algorithm) | `generate_ideas_deterministic()`: the shipped template rotation, `count` clamped to 1–10 after Python's `int()`. Same `asyncio.run` fallback, so no LLM is required or reachable. |
 
-Twenty-eight ported, eighteen stubbed. Nothing is half-implemented: a tool is
+Thirty-three ported, thirteen stubbed. Nothing is half-implemented: a tool is
 either answering from a real local store or saying `not_implemented` with the
 reason.
 
@@ -80,7 +81,6 @@ ledger), or it writes through an engine service that does not exist in Rust yet.
 |---|---|
 | `xpst_run` | runs the posting pipeline, which is not ported |
 | `xpst_post` | publishes through provider adapters, which are not ported |
-| `xpst_analytics` | reads analytics.db and can refresh from platform APIs |
 | `xpst_failures_retry` | re-uploads through provider adapters, which are not ported |
 | `xpst_health` | probes every platform over the network |
 | `xpst_backfill` | re-posts through provider adapters, which are not ported |

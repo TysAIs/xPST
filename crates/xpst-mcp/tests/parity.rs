@@ -286,6 +286,7 @@ fn the_ported_surface_is_exactly_the_read_only_network_free_set() {
             "kb_areas",
             "kb_query",
             "xpst_activity",
+            "xpst_analytics",
             "xpst_auth_start",
             "xpst_best_time",
             "xpst_bio_get",

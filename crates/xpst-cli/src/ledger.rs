@@ -416,4 +416,16 @@ pub const DEVIATIONS: &[&str] = &[
      invalid `config.yaml` starts the server here where Python refuses with `Configuration \
      errors:`. The tools read the same document either way; `xpst config validate` is the \
      surface that reports the blockers.",
+    "`xpst_analytics` (the local half) answers `unverifiable` ownership for YouTube: the shipped \
+     check is `channels.list` plus a fully paginated `playlistItems` walk, so it needs the \
+     network. Python reaches the same verdict when the check cannot run (no token, or a failed \
+     call), and this build reaches it always — on a profile that holds a YouTube token Python \
+     verifies the channel's uploads playlist and shows its numbers, while this build shows none \
+     until the network tranche lands. X/Instagram/TikTok/Threads ownership is read from \
+     `state.json` and is ported whole. `live: true` answers a typed `not_implemented`.",
+    "`xpst_analytics`'s `platform` argument is a SQLite bind parameter in Python: a truthy \
+     non-string (a number, `true`) matches no TEXT column and a truthy list/dict raises \
+     `sqlite3.InterfaceError`. This build answers the empty filtered document for both instead \
+     of reproducing the exception. A falsy value (absent, `null`, `false`, `0`, `\"\"`, `[]`, \
+     `{}`) means \"no filter\" in both engines.",
 ];
