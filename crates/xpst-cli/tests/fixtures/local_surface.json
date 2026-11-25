@@ -5,7 +5,7 @@
     "source": "src/xpst/cli.py"
   },
   "note": "Captured by running the shipped Python CLI against scratch profiles. scheduled_time values carry an explicit offset plus a timezone field so the local rendering is machine-independent; snapshot modified_at is stripped and its epoch recorded instead.",
-  "scenario_count": 202,
+  "scenario_count": 207,
   "scenarios": [
     {
       "name": "status_empty_profile",
@@ -5606,6 +5606,103 @@
       "compare": "stdout",
       "exit_code": 0,
       "stdout": "{\n  \"topic\": \"   \",\n  \"count\": 1,\n  \"ideas\": [\n    {\n      \"idea\": \"5 things nobody tells you about content creation\",\n      \"hook\": \"listicle\",\n      \"source\": \"deterministic\"\n    }\n  ]\n}\n"
+    },
+    {
+      "name": "suggest_caption_stem_fallback",
+      "argv": [
+        "suggest-caption",
+        "PROFILE/media/my_clip-final.mp4",
+        "--json"
+      ],
+      "seed": {
+        "media/my_clip-final.mp4": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_KB_WHISPER_MODEL": "xpst-parity-no-such-model",
+        "HF_HUB_OFFLINE": "1",
+        "HF_HOME": "PROFILE/hf-empty"
+      },
+      "stdout": "{\n  \"video_path\": \"<PROFILE>/media/my_clip-final.mp4\",\n  \"platform\": \"instagram\",\n  \"char_limit\": 2200,\n  \"suggestions\": [\n    {\n      \"caption\": \"my clip final\\n\\n#Clip #Final\",\n      \"hashtags\": \"#Clip #Final\",\n      \"style\": \"direct\"\n    },\n    {\n      \"caption\": \"Here's the thing: my clip final\\n\\n#Clip #Final\",\n      \"hashtags\": \"#Clip #Final\",\n      \"style\": \"hook\"\n    },\n    {\n      \"caption\": \"my clip final\\n\\nFollow for more! #Clip #Final\",\n      \"hashtags\": \"#Clip #Final\",\n      \"style\": \"summary\"\n    }\n  ]\n}\n"
+    },
+    {
+      "name": "suggest_caption_x",
+      "argv": [
+        "suggest-caption",
+        "PROFILE/media/rust_engine_tour.v2.mp4",
+        "--platform",
+        "x",
+        "--json"
+      ],
+      "seed": {
+        "media/rust_engine_tour.v2.mp4": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_KB_WHISPER_MODEL": "xpst-parity-no-such-model",
+        "HF_HUB_OFFLINE": "1",
+        "HF_HOME": "PROFILE/hf-empty"
+      },
+      "stdout": "{\n  \"video_path\": \"<PROFILE>/media/rust_engine_tour.v2.mp4\",\n  \"platform\": \"x\",\n  \"char_limit\": 280,\n  \"suggestions\": [\n    {\n      \"caption\": \"rust engine tour\\n\\n#Rust #Engine #Tour\",\n      \"hashtags\": \"#Rust #Engine #Tour\",\n      \"style\": \"direct\"\n    },\n    {\n      \"caption\": \"Here's the thing: rust engine tour\\n\\n#Rust #Engine #Tour\",\n      \"hashtags\": \"#Rust #Engine #Tour\",\n      \"style\": \"hook\"\n    },\n    {\n      \"caption\": \"rust engine tour\\n\\nFollow for more! #Rust #Engine #Tour\",\n      \"hashtags\": \"#Rust #Engine #Tour\",\n      \"style\": \"summary\"\n    }\n  ]\n}\n"
+    },
+    {
+      "name": "suggest_caption_unknown_platform",
+      "argv": [
+        "suggest-caption",
+        "PROFILE/media/my_clip-final.mp4",
+        "--platform",
+        "mastodon",
+        "--json"
+      ],
+      "seed": {
+        "media/my_clip-final.mp4": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_KB_WHISPER_MODEL": "xpst-parity-no-such-model",
+        "HF_HUB_OFFLINE": "1",
+        "HF_HOME": "PROFILE/hf-empty"
+      },
+      "stdout": "{\n  \"video_path\": \"<PROFILE>/media/my_clip-final.mp4\",\n  \"platform\": \"mastodon\",\n  \"char_limit\": 2200,\n  \"suggestions\": [\n    {\n      \"caption\": \"my clip final\\n\\n#Clip #Final\",\n      \"hashtags\": \"#Clip #Final\",\n      \"style\": \"direct\"\n    },\n    {\n      \"caption\": \"Here's the thing: my clip final\\n\\n#Clip #Final\",\n      \"hashtags\": \"#Clip #Final\",\n      \"style\": \"hook\"\n    },\n    {\n      \"caption\": \"my clip final\\n\\nFollow for more! #Clip #Final\",\n      \"hashtags\": \"#Clip #Final\",\n      \"style\": \"summary\"\n    }\n  ]\n}\n"
+    },
+    {
+      "name": "suggest_caption_no_sentences",
+      "argv": [
+        "suggest-caption",
+        "PROFILE/media/hi.mp4",
+        "--json"
+      ],
+      "seed": {
+        "media/hi.mp4": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "compare": "stdout",
+      "exit_code": 0,
+      "env": {
+        "XPST_KB_WHISPER_MODEL": "xpst-parity-no-such-model",
+        "HF_HUB_OFFLINE": "1",
+        "HF_HOME": "PROFILE/hf-empty"
+      },
+      "stdout": "{\n  \"video_path\": \"<PROFILE>/media/hi.mp4\",\n  \"platform\": \"instagram\",\n  \"char_limit\": 2200,\n  \"suggestions\": [\n    {\n      \"caption\": \"Check out this video!\",\n      \"hashtags\": \"#video #content\"\n    },\n    {\n      \"caption\": \"New content alert!\",\n      \"hashtags\": \"#new #content\"\n    },\n    {\n      \"caption\": \"Watch this!\",\n      \"hashtags\": \"#watch #video\"\n    }\n  ]\n}\n"
+    },
+    {
+      "name": "suggest_caption_missing_file",
+      "argv": [
+        "suggest-caption",
+        "PROFILE/media/nope.mp4",
+        "--json"
+      ],
+      "seed": {},
+      "compare": "stdout",
+      "exit_code": 2,
+      "env": {
+        "XPST_KB_WHISPER_MODEL": "xpst-parity-no-such-model",
+        "HF_HUB_OFFLINE": "1",
+        "HF_HOME": "PROFILE/hf-empty"
+      },
+      "stdout": ""
     },
     {
       "name": "byo_set_ok",

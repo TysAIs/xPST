@@ -1406,6 +1406,85 @@ SCENARIOS = [
         "seed": {},
         "compare": "stdout",
     },
+    # ── suggest-caption ────────────────────────────────────────────────────
+    #
+    # The seed is the filename stem, and the fixture pins the FALLBACK branch:
+    # `XPST_KB_WHISPER_MODEL` names a model faster-whisper rejects, so the
+    # transcriber raises before it can download anything, on a venv with the
+    # `knowledge` extra and on one without. `HF_HUB_OFFLINE=1` plus an empty
+    # `HF_HOME` inside the scratch profile make that a property of the fixture
+    # rather than of the host's network and cache. The Rust engine has no ASR
+    # path, so it always answers this branch — the ledger records the
+    # divergence for a machine that does have a resolvable model.
+    {
+        "name": "suggest_caption_stem_fallback",
+        "argv": ["suggest-caption", "PROFILE/media/my_clip-final.mp4", "--json"],
+        "seed": {"media/my_clip-final.mp4": "x" * 64},
+        "env": {
+            "XPST_KB_WHISPER_MODEL": "xpst-parity-no-such-model",
+            "HF_HUB_OFFLINE": "1",
+            "HF_HOME": "PROFILE/hf-empty",
+        },
+        "compare": "stdout",
+    },
+    {
+        # `--platform x` narrows the character limit to 280.
+        "name": "suggest_caption_x",
+        "argv": [
+            "suggest-caption", "PROFILE/media/rust_engine_tour.v2.mp4",
+            "--platform", "x", "--json",
+        ],
+        "seed": {"media/rust_engine_tour.v2.mp4": "x" * 64},
+        "env": {
+            "XPST_KB_WHISPER_MODEL": "xpst-parity-no-such-model",
+            "HF_HUB_OFFLINE": "1",
+            "HF_HOME": "PROFILE/hf-empty",
+        },
+        "compare": "stdout",
+    },
+    {
+        # An unknown platform falls back to 2200 in `PLATFORM_CHAR_LIMITS.get`.
+        "name": "suggest_caption_unknown_platform",
+        "argv": [
+            "suggest-caption", "PROFILE/media/my_clip-final.mp4",
+            "--platform", "mastodon", "--json",
+        ],
+        "seed": {"media/my_clip-final.mp4": "x" * 64},
+        "env": {
+            "XPST_KB_WHISPER_MODEL": "xpst-parity-no-such-model",
+            "HF_HUB_OFFLINE": "1",
+            "HF_HOME": "PROFILE/hf-empty",
+        },
+        "compare": "stdout",
+    },
+    {
+        # A stem with no sentence longer than 10 characters takes the
+        # generator's fixed-caption branch, whose dicts carry no `style` key.
+        "name": "suggest_caption_no_sentences",
+        "argv": ["suggest-caption", "PROFILE/media/hi.mp4", "--json"],
+        "seed": {"media/hi.mp4": "x" * 64},
+        "env": {
+            "XPST_KB_WHISPER_MODEL": "xpst-parity-no-such-model",
+            "HF_HUB_OFFLINE": "1",
+            "HF_HOME": "PROFILE/hf-empty",
+        },
+        "compare": "stdout",
+    },
+    {
+        # `click.Path(exists=True)` rejects the argument before the body runs:
+        # exit 2, empty stdout. The sentence itself is pinned by the handler's
+        # own unit test (`a_missing_video_path_is_clicks_usage_error`), because
+        # the harness compares stdout and the exit code, not stderr.
+        "name": "suggest_caption_missing_file",
+        "argv": ["suggest-caption", "PROFILE/media/nope.mp4", "--json"],
+        "seed": {},
+        "env": {
+            "XPST_KB_WHISPER_MODEL": "xpst-parity-no-such-model",
+            "HF_HUB_OFFLINE": "1",
+            "HF_HOME": "PROFILE/hf-empty",
+        },
+        "compare": "stdout",
+    },
     {
         "name": "byo_set_ok",
         "argv": ["byo", "set", "instagram", "--app-id", "1234567890", "--json"],
