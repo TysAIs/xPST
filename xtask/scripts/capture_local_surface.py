@@ -4209,8 +4209,12 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
         env = env_for(scenario, profile)
         if scenario.get("network_probe"):
             listener = network_probe_env(env)
+        # A scenario may narrow PATH (the `crontab` rows do, so the engine cannot
+        # find a real crontab). That must not hide the engine itself, so resolve
+        # the interpreter/binary to an absolute path before the child runs.
+        resolved = shutil.which(prefix[0]) or prefix[0]
         proc = subprocess.run(
-            [*prefix, *argv_for(scenario, profile)],
+            [resolved, *prefix[1:], *argv_for(scenario, profile)],
             # A `cwd` scenario runs from the scratch profile so the config path
             # in the message is relative and therefore machine-independent.
             cwd=str(profile) if scenario.get("cwd") == "PROFILE" else str(REPO),
