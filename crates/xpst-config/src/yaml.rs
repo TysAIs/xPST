@@ -240,6 +240,15 @@ impl Value {
         }
     }
 
+    /// The mapping behind this value, mutably.
+    #[must_use]
+    pub fn as_mapping_mut(&mut self) -> Option<&mut Mapping> {
+        match self {
+            Value::Mapping(map) => Some(map),
+            _ => None,
+        }
+    }
+
     /// The sequence behind this value.
     #[must_use]
     pub fn as_sequence(&self) -> Option<&[Value]> {

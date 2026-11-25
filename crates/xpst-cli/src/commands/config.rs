@@ -12,6 +12,7 @@ use clap::ArgMatches;
 use serde_json::json;
 use xpst_config::{ConfigDocument, ConfigError};
 
+use crate::commands::config_view::python_str;
 use crate::output::{error_payload_with, write_json, write_text};
 use crate::{exit, flag, paths, string_value, GlobalOptions};
 
@@ -316,25 +317,6 @@ fn python_float(text: &str) -> Option<f64> {
     // `f64::from_str` accepts `inf`/`infinity`/`nan` case-insensitively, which
     // is what Python's `float()` accepts too.
     cleaned.parse::<f64>().ok()
-}
-
-/// Python's `str()` for the values a config document holds — used by the
-/// human-readable half of `config set`.
-fn python_str(value: &YamlValue) -> String {
-    match value {
-        YamlValue::Null => "None".to_string(),
-        YamlValue::Bool(true) => "True".to_string(),
-        YamlValue::Bool(false) => "False".to_string(),
-        YamlValue::Number(number) => match number.as_i64() {
-            Some(integer) => integer.to_string(),
-            None => number
-                .as_f64()
-                .map(pyyaml::python_float_repr)
-                .unwrap_or_else(|| number.to_string()),
-        },
-        YamlValue::String(text) => text.clone(),
-        other => pyyaml::dump(other).trim_end().to_string(),
-    }
 }
 
 /// Python's `==` for two YAML values: numbers compare numerically (`1 == 1.0`)

@@ -27,7 +27,7 @@ const FIXTURE: &str = include_str!("fixtures/local_surface.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing,
 /// so the count is pinned here as well as in the capture script.
-const EXPECTED_SCENARIOS: usize = 47;
+const EXPECTED_SCENARIOS: usize = 67;
 
 /// The environment both engines are run under, whatever the caller inherited.
 ///
@@ -135,8 +135,17 @@ fn run(
 ) -> (i32, String, String) {
     let mut command = Command::new(binary);
     command.args(argv).env("XPST_CONFIG_DIR", config_dir);
-    // The pinned environment first; the scenario's own `env` is applied after
-    // and therefore wins.
+    // The capture strips inherited `XPST_*` overrides so the fixture is
+    // machine-independent; the replay must do the same or a developer with
+    // `XPST_X_AUTH_MODE` exported would see a spurious failure.
+    for (name, _) in std::env::vars() {
+        if name.starts_with("XPST_") {
+            command.env_remove(&name);
+        }
+    }
+    command.env("XPST_CONFIG_DIR", config_dir);
+    // The pinned environment after the purge; the scenario's own `env` is
+    // applied after and therefore wins.
     for (name, value) in PINNED_ENV {
         command.env(name, value);
     }
@@ -203,6 +212,20 @@ fn normalize(value: &mut Value, profile: &Profile, mask: &[String]) {
             }
         }
     }
+}
+
+/// FNV-1a 64-bit, the same digest `capture_local_surface.py` records.
+///
+/// Dependency-free on purpose: this is a regression guard, not a security
+/// boundary, and adding a hashing crate to the workspace for a test would be a
+/// dependency decision the card does not need.
+fn fnv1a64(text: &str) -> String {
+    let mut value: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in text.as_bytes() {
+        value ^= u64::from(*byte);
+        value = value.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{value:016x}")
 }
 
 fn mask_for(row: &Value) -> Vec<String> {
@@ -388,6 +411,34 @@ fn every_recorded_scenario_matches_the_python_engine() {
                     .expect("stdout scenarios record the text");
                 let actual = stdout.replace(&profile.path().display().to_string(), "<PROFILE>");
                 assert_eq!(actual, expected, "scenario `{name}` stdout drifted");
+            }
+            "digest" => {
+                // `providers` prints ~54 kB; the fixture pins a digest of the
+                // exact stdout instead of the document. Any byte change fails,
+                // and `capture_local_surface.py --check-with` prints the real
+                // diff in CI.
+                assert_eq!(
+                    code,
+                    row["exit_code"].as_i64().unwrap_or(-1) as i32,
+                    "scenario `{name}` exit code drifted: {stderr}"
+                );
+                let actual = stdout.replace(&profile.path().display().to_string(), "<PROFILE>");
+                let expected = row["stdout_digest"]
+                    .as_str()
+                    .expect("digest scenarios record the digest");
+                assert_eq!(
+                    fnv1a64(&actual),
+                    expected,
+                    "scenario `{name}` stdout drifted ({} bytes, expected {}):\n{}",
+                    actual.len(),
+                    row["stdout_bytes"].as_u64().unwrap_or(0),
+                    actual.chars().take(400).collect::<String>()
+                );
+                assert_eq!(
+                    actual.len() as u64,
+                    row["stdout_bytes"].as_u64().unwrap_or(0),
+                    "scenario `{name}` stdout length drifted"
+                );
             }
             "exit" => {
                 assert_eq!(

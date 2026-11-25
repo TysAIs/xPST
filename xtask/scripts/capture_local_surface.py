@@ -538,6 +538,211 @@ SCENARIOS = [
         "seed": {"schedule.json": json.dumps(SCHEDULE_ENTRIES[:1])},
         "compare": "json",
     },
+    # ── the provider surface (t_53b960e8) ─────────────────────────────────
+    #
+    # `providers` prints ~54 kB, so the fixture records a digest of the exact
+    # stdout plus a summary instead of the whole document: any byte change
+    # fails the test, and `--check-with` prints the real diff in CI. The
+    # summary is what a reader needs to see what the row covers.
+    {
+        "name": "providers_pristine",
+        "argv": ["providers", "--json"],
+        "seed": {},
+        "compare": "digest",
+    },
+    {
+        "name": "providers_community_mode",
+        "argv": ["providers", "--json"],
+        "seed": {"config.yaml": "version: 4\nprovider_mode: community\n"},
+        "compare": "digest",
+    },
+    {
+        "name": "providers_x_api_v2",
+        "argv": ["providers", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  x:\n    auth_mode: api_v2\n"
+                "    bearer_token: synthetic-bearer-token\n"
+            )
+        },
+        "compare": "digest",
+    },
+    {
+        "name": "providers_instagram_session",
+        "argv": ["providers", "--json"],
+        "seed": {"config.yaml": "version: 4\naccounts:\n  instagram:\n    auth_mode: session\n"},
+        "compare": "digest",
+    },
+    {
+        "name": "providers_tiktok_zernio",
+        "argv": ["providers", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  tiktok:\n    provider: zernio\n"
+                "    aggregator:\n      account_id: 'acct-1'\n"
+            )
+        },
+        "compare": "digest",
+    },
+    {
+        "name": "providers_tiktok_browser",
+        "argv": ["providers", "--json"],
+        "seed": {"config.yaml": "version: 4\naccounts:\n  tiktok:\n    publish_mode: browser\n"},
+        "compare": "digest",
+    },
+    {
+        "name": "providers_youtube_shorts",
+        "argv": ["providers", "--json"],
+        "seed": {"config.yaml": "version: 4\naccounts:\n  youtube:\n    video_mode: shorts\n"},
+        "compare": "digest",
+    },
+    {
+        "name": "providers_rumble_key",
+        "argv": ["providers", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  rumble:\n    enabled: true\n"
+                "    api_key: synthetic-rumble-key\n"
+            )
+        },
+        "compare": "digest",
+    },
+    {
+        "name": "providers_disabled_accounts",
+        "argv": ["providers", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  youtube:\n    enabled: false\n"
+                "  x:\n    enabled: false\n"
+            )
+        },
+        "compare": "digest",
+    },
+    {
+        "name": "providers_x_duration_cap",
+        # The account's verified ceiling replaces the destination manifest's
+        # default; the *source* manifest must not gain the key.
+        "argv": ["providers", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  x:\n    max_video_duration_seconds: 300\n"
+            )
+        },
+        "compare": "digest",
+    },
+    {
+        "name": "providers_env_override",
+        "argv": ["providers", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "env": {"XPST_X_AUTH_MODE": "api_v2", "XPST_PROVIDER_MODE": "community"},
+        "compare": "digest",
+    },
+    {
+        "name": "providers_legacy_crosspstr_path",
+        # `_fix_legacy_paths` rewrites `.crosspstr` → `.xpst` before the rebase,
+        # so the shipped path resolves inside the profile and the credential
+        # file beside it is found.
+        "argv": ["providers", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  x:\n"
+                "    cookies_file: ~/.crosspstr/credentials/x_cookies.json\n"
+            ),
+            "credentials/x_cookies.json": "synthetic\n",
+        },
+        "env": {"HOME": "PROFILE"},
+        "compare": "digest",
+    },
+    {
+        "name": "providers_config_flag_rebases_onto_the_config_directory",
+        # `--config` and `XPST_CONFIG_DIR` name different directories: the
+        # rebase root is the config file's parent, not the env value.
+        "argv": ["--config", "ALT", "providers", "--json"],
+        "substitutions": {"ALT": "alt/config.yaml"},
+        "seed": {
+            "alt/config.yaml": "version: 4\n",
+            "alt/credentials/x_cookies.json": "synthetic\n",
+        },
+        "env": {"HOME": "PROFILE"},
+        "compare": "digest",
+    },
+    {
+        "name": "providers_config_set_numeric_modes",
+        # `xpst config set provider_mode 5` and `... accounts.x.auth_mode 2`
+        # write unquoted numbers. Python's `_merge_config` stores
+        # `str(provider_mode)` and `_auth_mode()` stores `str(auth_mode)`, so the
+        # payload carries "5"/"2" rather than the enum defaults.
+        "argv": ["providers", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\nprovider_mode: 5\naccounts:\n  x:\n"
+                "    auth_mode: 2\n    enabled: true\n"
+            )
+        },
+        "compare": "digest",
+    },
+    {
+        "name": "messenger_status_config_set_numeric_page_id",
+        # `xpst config set accounts.messenger.page_id 1234567890` writes an int.
+        # Python's payload is `page_id or None` (raw), so the page reports
+        # configured; `webhook_path` and the `comment_platforms` elements are
+        # emitted verbatim too.
+        "argv": ["messenger", "status", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  messenger:\n    enabled: true\n"
+                "    page_id: 1234567890\n    webhook_path: 12345\n"
+                "    comment_platforms: [instagram, 2]\n"
+            )
+        },
+        "compare": "json",
+    },
+    {
+        "name": "messenger_status_env_reply_rules",
+        "argv": ["messenger", "status", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "env": {"XPST_MESSENGER_REPLY_RULES": '{"hi": "hello", "*": "yo"}'},
+        "compare": "json",
+    },
+    {
+        "name": "messenger_status_env_comment_platforms",
+        "argv": ["messenger", "status", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "env": {"XPST_MESSENGER_COMMENT_PLATFORMS": "instagram"},
+        "compare": "json",
+    },
+    {
+        "name": "messenger_status_unconfigured",
+        "argv": ["messenger", "status", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "compare": "json",
+    },
+    {
+        "name": "messenger_status_configured",
+        "argv": ["messenger", "status", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  messenger:\n    enabled: true\n"
+                "    page_id: '1234567890'\n"
+                "    page_access_token: synthetic-page-token-0123456789\n"
+                "    auto_reply: true\n    comment_reply_enabled: true\n"
+                "    comment_platforms:\n    - instagram\n"
+                "    reply_rules:\n      hi: hello\n"
+            )
+        },
+        "compare": "json",
+    },
+    {
+        "name": "messenger_status_short_token",
+        "argv": ["messenger", "status", "--json"],
+        "seed": {
+            "config.yaml": (
+                "version: 4\naccounts:\n  messenger:\n    page_id: '1'\n"
+                "    page_access_token: short\n"
+            )
+        },
+        "compare": "json",
+    },
     # ── the environment the harness pins (t_d919ab2e) ─────────────────────
     {
         # No `timezone` field, no per-scenario override: the rendering is the
@@ -599,8 +804,15 @@ def config_dir_for(scenario: dict, profile: Path) -> Path:
 
 def env_for(scenario: dict, profile: Path) -> dict[str, str]:
     env = dict(os.environ)
-    # Pin the rendering variables first; a scenario's own `env` is applied last
-    # so a row can deliberately vary one of them.
+    # Inherited `XPST_*` overrides would make the fixture machine-dependent:
+    # `XPSTConfig.load` applies them above the file, so a developer with
+    # `XPST_X_AUTH_MODE` exported would capture a different payload than CI.
+    # `XPST_CONFIG_DIR` is set below, and a scenario's own `env` block is
+    # applied after this, so both still win.
+    for name in [name for name in env if name.startswith("XPST_")]:
+        del env[name]
+    # Pin the rendering variables after the purge; a scenario's own `env` is
+    # applied last so a row can deliberately vary one of them.
     env.update(PINNED_ENV)
     env["XPST_CONFIG_DIR"] = str(config_dir_for(scenario, profile))
     env["PYTHONPATH"] = str(REPO / "src")
@@ -663,7 +875,7 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
             timeout=180,
         )
         payload = None
-        if scenario["compare"] == "json":
+        if scenario["compare"] in ("json", "digest"):
             try:
                 payload = normalize(
                     json.loads(proc.stdout.strip()), profile, scenario.get("mask")
@@ -687,6 +899,43 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
         }
     finally:
         shutil.rmtree(profile, ignore_errors=True)
+
+
+def digest(text: str) -> str:
+    """FNV-1a 64-bit over the exact stdout.
+
+    Dependency-free on purpose: this is a regression guard, not a security
+    boundary, and the Rust test has to compute the same value without adding a
+    hashing crate to the workspace.
+    """
+    value = 0xCBF29CE484222325
+    for byte in text.encode("utf-8"):
+        value ^= byte
+        value = (value * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return f"{value:016x}"
+
+
+def providers_summary(payload: dict) -> dict:
+    """What a reader needs to see which behaviour a digest row covers."""
+    return {
+        "provider_mode": payload.get("provider_mode"),
+        "providers": {item["name"]: item["state"] for item in payload.get("providers", [])},
+        "destinations": {
+            item["name"]: [item.get("provider_mode"), item.get("visible")]
+            for item in payload.get("destinations", [])
+        },
+        "counts": {
+            key: len(payload.get(key) or [])
+            for key in (
+                "sources",
+                "destinations",
+                "providers",
+                "video_destinations",
+                "messaging",
+                "analytics",
+            )
+        },
+    }
 
 
 def run_scenario(scenario: dict, python: str) -> dict:
@@ -718,6 +967,16 @@ def run_scenario(scenario: dict, python: str) -> dict:
         return record
     if scenario["compare"] == "stdout":
         record["stdout"] = observed["stdout_normalized"]
+        return record
+    if scenario["compare"] == "digest":
+        if observed["payload"] is None:
+            raise SystemExit(
+                f"scenario {scenario['name']}: stdout is not JSON:\n"
+                f"{observed['stdout']}\n{observed['stderr']}"
+            )
+        record["stdout_digest"] = digest(observed["stdout_normalized"])
+        record["stdout_bytes"] = len(observed["stdout_normalized"].encode("utf-8"))
+        record["summary"] = providers_summary(observed["payload"])
         return record
     if scenario["compare"] == "json":
         if observed["payload"] is None:
@@ -768,6 +1027,20 @@ def compare_scenarios(python: str, binary: str) -> int:
                 mismatches.append(
                     f"{name}: payload differs\n  python: {json.dumps(expected['payload'])}\n"
                     f"  rust:   {json.dumps(actual['payload'])}"
+                )
+        elif mode == "digest":
+            if expected["exit_code"] != actual["exit_code"]:
+                mismatches.append(
+                    f"{name}: exit {expected['exit_code']} (python) != "
+                    f"{actual['exit_code']} (rust)"
+                )
+            want = digest(expected["stdout_normalized"])
+            got = digest(actual["stdout_normalized"])
+            if want != got:
+                mismatches.append(
+                    f"{name}: stdout digest {want} (python) != {got} (rust)\n"
+                    f"  python: {expected['stdout_normalized'][:400]}\n"
+                    f"  rust:   {actual['stdout_normalized'][:400]}"
                 )
         elif mode == "stdout":
             if expected["exit_code"] != actual["exit_code"]:
@@ -830,7 +1103,7 @@ def main() -> None:
         raise SystemExit("refusing to write an empty fixture")
     for record in records:
         if (
-            record["compare"] == "json"
+            record["compare"] in ("json", "digest")
             and record["exit_code"] != 0
             and not record.get("allow_nonzero")
         ):
