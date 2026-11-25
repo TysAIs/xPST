@@ -127,6 +127,10 @@ pub fn with_local_view(mut entry: Value) -> Value {
 }
 
 /// `ScheduleManager.local_time(entry).isoformat()`.
+///
+/// `isoformat()` drops the fraction when the microsecond field is zero and
+/// prints exactly six digits otherwise — jiff's `%.f` trims trailing zeros
+/// (`.5` for half a second), which is a different string for the same instant.
 fn local_time(entry: &Value) -> Option<String> {
     let raw = entry.get("scheduled_time")?.as_str()?;
     let entry_zone = entry
@@ -137,12 +141,12 @@ fn local_time(entry: &Value) -> Option<String> {
     let system = jiff::tz::TimeZone::system();
     let zone = entry_zone.unwrap_or(system.clone());
     let instant = parse_instant(raw)?;
-    Some(
-        instant
-            .to_zoned_datetime(zone)
-            .strftime("%Y-%m-%dT%H:%M:%S%.f%:z")
-            .to_string(),
-    )
+    let zoned = instant.to_zoned_datetime(zone);
+    Some(if zoned.subsec_nanosecond() / 1_000 == 0 {
+        zoned.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string()
+    } else {
+        zoned.strftime("%Y-%m-%dT%H:%M:%S%.6f%:z").to_string()
+    })
 }
 
 // ── `schedule add` ──────────────────────────────────────────────────────────

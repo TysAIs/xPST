@@ -239,29 +239,33 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_schedule_add",
         Consent::Mutating,
-        Implementation::Stub {
-            reason: "writes the schedule store through Python services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::schedule::add,
+            render: Render::Compact,
         },
     ),
     (
         "xpst_schedule_cancel",
         Consent::Mutating,
-        Implementation::Stub {
-            reason: "mutates the schedule store through Python services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::schedule::cancel,
+            render: Render::Compact,
         },
     ),
     (
         "xpst_schedule_pause",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "writes the pause marker through Python services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::schedule::pause,
+            render: Render::Compact,
         },
     ),
     (
         "xpst_schedule_resume",
         Consent::Mutating,
-        Implementation::Stub {
-            reason: "releases the pause marker through Python services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::schedule::resume,
+            render: Render::Compact,
         },
     ),
     (

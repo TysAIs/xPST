@@ -46,7 +46,7 @@ use serde_json::{json, Value};
 const FIXTURE: &str = include_str!("fixtures/mcp_stdio.json");
 
 /// The fixture's scenario count. A loop over an emptied array asserts nothing.
-const EXPECTED_SCENARIOS: usize = 3;
+const EXPECTED_SCENARIOS: usize = 4;
 
 /// The state file every scenario starts from, byte-identical to `STATE` in the
 /// capture script. It carries two recorded failures so `xpst_activity` answers a
@@ -310,7 +310,7 @@ fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_xpst")
 }
 
-fn profile(name: &str) -> PathBuf {
+fn profile(name: &str, seed: &Value) -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("mcp-stdio-{name}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("scratch profile");
@@ -330,6 +330,14 @@ fn profile(name: &str) -> PathBuf {
     }
     for (name, body) in SEED_FILES {
         std::fs::write(dir.join(name), body).expect("seed file");
+    }
+    // Scenario-specific seed files (the `mutations` queue), byte-identical to
+    // the capture script's `seed` block.
+    if let Some(files) = seed.as_object() {
+        for (name, body) in files {
+            std::fs::write(dir.join(name), body.as_str().unwrap_or_default())
+                .expect("seed scenario file");
+        }
     }
 
     // The knowledge workspace (`~/.xpst/knowledge/default`, since HOME is the
@@ -531,7 +539,7 @@ fn scenarios() -> Vec<Value> {
 fn the_rust_server_speaks_the_python_wire() {
     for scenario in scenarios() {
         let name = scenario["name"].as_str().expect("scenario name");
-        let dir = profile(name);
+        let dir = profile(name, &scenario["seed"]);
         let root = dir.display().to_string();
         // The fixture records the helper paths as `<PROFILE>/bin/...`; this
         // run's profile is a different directory.
@@ -653,7 +661,7 @@ fn the_rust_server_speaks_the_python_wire() {
 /// stdio entry point. The Rust group used to print usage instead.
 #[test]
 fn a_bare_mcp_group_starts_the_server() {
-    let dir = profile("bare");
+    let dir = profile("bare", &json!({}));
     let mut server = Server::start(binary(), &["mcp"], &dir, &json!({}));
     let response = server.request(
         1,
@@ -672,7 +680,7 @@ fn a_bare_mcp_group_starts_the_server() {
 /// (the desktop shell, an agent host) can stop it without a signal.
 #[test]
 fn the_server_exits_zero_when_stdin_closes() {
-    let dir = profile("exit");
+    let dir = profile("exit", &json!({}));
     let mut child = Command::new(binary())
         .args(["mcp", "start"])
         .env("XPST_CONFIG_DIR", &dir)

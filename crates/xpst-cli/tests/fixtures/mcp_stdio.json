@@ -10,6 +10,7 @@
         "XPST_FFPROBE_PATH": "<PROFILE>/bin/ffprobe",
         "XPST_YTDLP_PATH": "<PROFILE>/bin/yt-dlp"
       },
+      "seed": {},
       "steps": [
         {
           "id": 1,
@@ -163,7 +164,13 @@
           "is_error": false,
           "mask_checks": [],
           "mask_fields": [],
-          "mask_keys": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at",
+            "paused_at"
+          ],
           "multiline": false,
           "text": "{\"schedules\": [], \"paused\": {\"paused\": false, \"paused_at\": null, \"reason\": \"\"}}"
         },
@@ -1441,6 +1448,7 @@
         "XPST_FFPROBE_PATH": "<PROFILE>/bin/ffprobe",
         "XPST_YTDLP_PATH": "<PROFILE>/bin/yt-dlp"
       },
+      "seed": {},
       "steps": [
         {
           "id": 1,
@@ -1576,6 +1584,7 @@
         "XPST_FFPROBE_PATH": "<PROFILE>/bin/ffprobe",
         "XPST_YTDLP_PATH": "<PROFILE>/bin/yt-dlp"
       },
+      "seed": {},
       "steps": [
         {
           "id": 1,
@@ -1664,6 +1673,625 @@
           "mask_keys": [],
           "multiline": false,
           "text": "xpst_post posts to or mutates REAL accounts and XPST_MCP_REQUIRE_CONFIRM is set. Re-call with \"confirm\": true to proceed."
+        }
+      ]
+    },
+    {
+      "name": "mutations",
+      "env": {
+        "XPST_MCP_ALLOW_MUTATIONS": "1",
+        "XPST_MEDIA_ROOTS": "/tmp/xpst-parity-media",
+        "TZ": "America/Denver",
+        "XPST_FFMPEG_PATH": "<PROFILE>/bin/ffmpeg",
+        "XPST_FFPROBE_PATH": "<PROFILE>/bin/ffprobe",
+        "XPST_YTDLP_PATH": "<PROFILE>/bin/yt-dlp"
+      },
+      "seed": {
+        "schedule.json": "[\n  {\n    \"id\": \"seed-parity-1\",\n    \"operation_id\": \"seed-operation-1\",\n    \"idempotency_key\": \"seed-operation-1\",\n    \"video_path\": \"\",\n    \"caption\": \"seeded parity entry\",\n    \"per_platform_captions\": {},\n    \"platforms\": [\n      \"x\"\n    ],\n    \"scheduled_time\": \"2026-12-05T15:00:00+00:00\",\n    \"timezone\": \"America/Denver\",\n    \"status\": \"pending\",\n    \"created_at\": \"2026-11-01T00:00:00\",\n    \"completed_at\": null,\n    \"error\": null,\n    \"post_results\": {},\n    \"repeat_rule\": null,\n    \"content_type\": \"text\"\n  }\n]"
+      },
+      "steps": [
+        {
+          "id": 1,
+          "method": "initialize",
+          "result": {
+            "capabilities": {
+              "tools": {
+                "listChanged": false
+              }
+            },
+            "protocolVersion": "2024-11-05",
+            "serverInfo": {
+              "name": "xpst-mcp",
+              "version": "1.3.0"
+            }
+          }
+        },
+        {
+          "id": 2,
+          "method": "tools/list",
+          "count": 46,
+          "names": [
+            "xpst_run",
+            "xpst_post",
+            "xpst_analytics",
+            "xpst_cross_post_analytics",
+            "xpst_followers",
+            "xpst_best_time",
+            "xpst_security_audit",
+            "xpst_suggest_caption",
+            "xpst_generate_ideas",
+            "xpst_transcript",
+            "xpst_search",
+            "xpst_activity",
+            "xpst_schedule_list",
+            "xpst_schedule_add",
+            "xpst_schedule_cancel",
+            "xpst_schedule_pause",
+            "xpst_schedule_resume",
+            "xpst_failures_retry",
+            "xpst_health",
+            "xpst_status",
+            "xpst_rate_limit_status",
+            "xpst_backfill",
+            "xpst_config_show",
+            "xpst_auth_status",
+            "xpst_byo_app",
+            "xpst_bio_get",
+            "xpst_capabilities",
+            "xpst_preflight",
+            "xpst_readiness",
+            "xpst_auth_start",
+            "xpst_providers",
+            "xpst_disconnect",
+            "xpst_delete",
+            "messenger_send",
+            "messenger_set_rules",
+            "xpst_messenger_check_comments",
+            "kb_add",
+            "kb_query",
+            "kb_organize",
+            "kb_areas",
+            "xpst_setup_start",
+            "xpst_setup_status",
+            "xpst_setup_resume",
+            "xpst_setup_reset",
+            "xpst_stream",
+            "xpst_chat"
+          ],
+          "digest": "2f1d723594eed7ae"
+        },
+        {
+          "id": 200,
+          "method": "tools/call",
+          "tool": "xpst_schedule_list",
+          "arguments": {},
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at",
+            "paused_at"
+          ],
+          "multiline": false,
+          "text": "{\"schedules\": [{\"id\": \"<CLOCK>\", \"operation_id\": \"<CLOCK>\", \"idempotency_key\": \"<CLOCK>\", \"video_path\": \"\", \"caption\": \"seeded parity entry\", \"per_platform_captions\": {}, \"platforms\": [\"x\"], \"scheduled_time\": \"2026-12-05T15:00:00+00:00\", \"timezone\": \"America/Denver\", \"status\": \"pending\", \"created_at\": \"<CLOCK>\", \"completed_at\": null, \"error\": null, \"post_results\": {}, \"repeat_rule\": null, \"content_type\": \"text\", \"scheduled_time_local\": \"2026-12-05T08:00:00-07:00\"}], \"paused\": {\"paused\": false, \"paused_at\": null, \"reason\": \"\"}}"
+        },
+        {
+          "id": 201,
+          "method": "tools/call",
+          "tool": "xpst_schedule_pause",
+          "arguments": {
+            "reason": "parity pause"
+          },
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "paused_at"
+          ],
+          "multiline": false,
+          "text": "{\"paused\": true, \"already_paused\": false, \"paused_at\": \"<CLOCK>\", \"reason\": \"parity pause\"}"
+        },
+        {
+          "id": 202,
+          "method": "tools/call",
+          "tool": "xpst_schedule_pause",
+          "arguments": {},
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "paused_at"
+          ],
+          "multiline": false,
+          "text": "{\"paused\": true, \"already_paused\": true, \"paused_at\": \"<CLOCK>\", \"reason\": \"parity pause\"}"
+        },
+        {
+          "id": 203,
+          "method": "tools/call",
+          "tool": "xpst_schedule_list",
+          "arguments": {},
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at",
+            "paused_at"
+          ],
+          "multiline": false,
+          "text": "{\"schedules\": [{\"id\": \"<CLOCK>\", \"operation_id\": \"<CLOCK>\", \"idempotency_key\": \"<CLOCK>\", \"video_path\": \"\", \"caption\": \"seeded parity entry\", \"per_platform_captions\": {}, \"platforms\": [\"x\"], \"scheduled_time\": \"2026-12-05T15:00:00+00:00\", \"timezone\": \"America/Denver\", \"status\": \"pending\", \"created_at\": \"<CLOCK>\", \"completed_at\": null, \"error\": null, \"post_results\": {}, \"repeat_rule\": null, \"content_type\": \"text\", \"scheduled_time_local\": \"2026-12-05T08:00:00-07:00\"}], \"paused\": {\"paused\": true, \"paused_at\": \"<CLOCK>\", \"reason\": \"parity pause\"}}"
+        },
+        {
+          "id": 204,
+          "method": "tools/call",
+          "tool": "xpst_schedule_resume",
+          "arguments": {},
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "{\"paused\": false, \"was_paused\": true}"
+        },
+        {
+          "id": 205,
+          "method": "tools/call",
+          "tool": "xpst_schedule_resume",
+          "arguments": {},
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "{\"paused\": false, \"was_paused\": false}"
+        },
+        {
+          "id": 206,
+          "method": "tools/call",
+          "tool": "xpst_schedule_add",
+          "arguments": {
+            "caption": "parity text",
+            "scheduled_time": "2026-12-01T09:30:00"
+          },
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at"
+          ],
+          "multiline": false,
+          "text": "{\"scheduled\": {\"id\": \"<CLOCK>\", \"operation_id\": \"<CLOCK>\", \"idempotency_key\": \"<CLOCK>\", \"video_path\": \"\", \"caption\": \"parity text\", \"per_platform_captions\": {}, \"platforms\": [\"x\"], \"scheduled_time\": \"2026-12-01T16:30:00+00:00\", \"timezone\": \"America/Denver\", \"status\": \"pending\", \"created_at\": \"<CLOCK>\", \"completed_at\": null, \"error\": null, \"post_results\": {}, \"repeat_rule\": null, \"content_type\": \"text\", \"scheduled_time_local\": \"2026-12-01T09:30:00-07:00\"}, \"route_plan\": {\"content_type\": \"text\", \"source\": \"format_route\", \"ready\": true, \"ok\": true, \"posting_destinations\": [\"x\"], \"skipped_unconnected\": [], \"unsupported_format\": [], \"failed\": [], \"destinations\": [{\"platform\": \"x\", \"state\": \"posted\", \"will_post\": true, \"is_failure\": false, \"reason\": \"will publish\", \"content_type\": \"text\", \"connected\": true, \"connect_command\": null, \"envelope\": {\"platform\": \"x\", \"display_name\": \"X\", \"publishing\": true, \"content_types\": {\"implemented\": [\"carousel\", \"image\", \"text\", \"video\"], \"declared\": [\"carousel\", \"image\", \"text\", \"video\"]}, \"caption\": {\"max_characters\": 280}, \"media_transport\": \"local_upload\", \"media_transport_requirement\": null, \"video\": {\"max_duration_seconds\": 140, \"containers\": [\".mp4\", \".mov\"], \"video_codec\": \"h264\", \"pix_fmt\": \"yuv420p\", \"max_bytes\": 536870912, \"max_long_edge\": 1920, \"fps_cap\": 60, \"audio_codec\": \"aac\"}, \"image\": {\"containers\": [\".jpg\", \".jpeg\", \".png\", \".webp\"], \"max_bytes\": 5242880, \"aspect_min\": 0.3333333333333333, \"aspect_max\": 3.0}}, \"caption\": \"parity text\", \"caption_length\": 11, \"constraints\": {\"duration\": {\"observed_seconds\": null, \"max_seconds\": 140}, \"aspect\": {\"observed_ratio\": null, \"constraint\": \"orientation-preserving; no fixed aspect ratio\", \"max_long_edge\": 1920}, \"size\": {\"observed_bytes\": null, \"max_bytes\": 536870912}, \"containers\": [\".mp4\", \".mov\"], \"caption\": {\"observed_characters\": 11, \"max_characters\": 280}}, \"blockers\": [], \"warnings\": [{\"code\": \"UNOFFICIAL_WEB_CLIENT\", \"message\": \"X is on its unofficial auth path (auth_mode: 'cookies', ban_risk: unofficial_web_client): twikit replays the logged-in web session: X rate-limits and can suspend automated clients that use it at volume. The ban-safe path is X API v2 (auth_mode: 'api_v2'); it needs X API v2 access (free tier: 17 posts/day). Switch with 'xpst connect x'. Nothing has recorded that the operator accepted this risk.\"}], \"transform\": null, \"transforms\": [], \"visibility\": null}], \"errors\": [], \"request_blockers\": [], \"error\": null, \"network_calls\": false}}"
+        },
+        {
+          "id": 207,
+          "method": "tools/call",
+          "tool": "xpst_schedule_add",
+          "arguments": {
+            "video_path": "<PROFILE>/clip.mp4",
+            "caption": "parity video",
+            "scheduled_time": "2026-12-02T09:30:00+00:00",
+            "platforms": [
+              "youtube"
+            ],
+            "repeat_rule": "weekly"
+          },
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at"
+          ],
+          "multiline": false,
+          "text": "{\"scheduled\": {\"id\": \"<CLOCK>\", \"operation_id\": \"<CLOCK>\", \"idempotency_key\": \"<CLOCK>\", \"video_path\": \"<PROFILE>/clip.mp4\", \"caption\": \"parity video\", \"per_platform_captions\": {}, \"platforms\": [\"youtube\"], \"scheduled_time\": \"2026-12-02T09:30:00+00:00\", \"timezone\": \"America/Denver\", \"status\": \"pending\", \"created_at\": \"<CLOCK>\", \"completed_at\": null, \"error\": null, \"post_results\": {}, \"repeat_rule\": \"weekly\", \"scheduled_time_local\": \"2026-12-02T02:30:00-07:00\"}, \"route_plan\": {\"content_type\": \"video\", \"source\": \"explicit\", \"ready\": true, \"ok\": true, \"posting_destinations\": [\"youtube\"], \"skipped_unconnected\": [], \"unsupported_format\": [], \"failed\": [], \"destinations\": [{\"platform\": \"youtube\", \"state\": \"posted\", \"will_post\": true, \"is_failure\": false, \"reason\": \"will publish\", \"content_type\": \"video\", \"connected\": true, \"connect_command\": null, \"envelope\": {\"platform\": \"youtube\", \"display_name\": \"YouTube\", \"publishing\": true, \"content_types\": {\"implemented\": [\"video\"], \"declared\": [\"video\"]}, \"caption\": {\"max_characters\": null}, \"media_transport\": \"local_upload\", \"media_transport_requirement\": null, \"video\": {\"max_duration_seconds\": 43200, \"containers\": [\".mp4\", \".mov\"], \"video_codec\": \"h264\", \"pix_fmt\": \"yuv420p\", \"max_bytes\": 274877906944, \"max_long_edge\": 1920, \"fps_cap\": 60, \"audio_codec\": \"aac\"}, \"image\": null}, \"caption\": \"parity video\", \"caption_length\": 12, \"constraints\": {\"duration\": {\"observed_seconds\": 12.5, \"max_seconds\": 43200}, \"aspect\": {\"observed_ratio\": 0.5625, \"constraint\": \"orientation-preserving; no fixed aspect ratio\", \"max_long_edge\": 1920}, \"size\": {\"observed_bytes\": 64, \"max_bytes\": 274877906944}, \"containers\": [\".mp4\", \".mov\"], \"caption\": {\"observed_characters\": 12, \"max_characters\": null}}, \"blockers\": [], \"warnings\": [{\"code\": \"MEDIA_SPEC_AUDIO_RATE\", \"message\": \"44100 Hz vs 48000 Hz target \\u2014 advisory only: YouTube resamples audio, so the file is accepted\"}], \"transform\": null, \"transforms\": [], \"visibility\": null}], \"errors\": [], \"request_blockers\": [], \"error\": null, \"network_calls\": false}}"
+        },
+        {
+          "id": 208,
+          "method": "tools/call",
+          "tool": "xpst_schedule_add",
+          "arguments": {
+            "video_path": "<PROFILE>/clip.mp4/",
+            "caption": "parity slash",
+            "scheduled_time": "2026-12-03T09:30:00"
+          },
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at"
+          ],
+          "multiline": false,
+          "text": "{\"scheduled\": {\"id\": \"<CLOCK>\", \"operation_id\": \"<CLOCK>\", \"idempotency_key\": \"<CLOCK>\", \"video_path\": \"<PROFILE>/clip.mp4\", \"caption\": \"parity slash\", \"per_platform_captions\": {}, \"platforms\": [\"youtube\", \"x\", \"instagram\", \"tiktok\"], \"scheduled_time\": \"2026-12-03T16:30:00+00:00\", \"timezone\": \"America/Denver\", \"status\": \"pending\", \"created_at\": \"<CLOCK>\", \"completed_at\": null, \"error\": null, \"post_results\": {}, \"repeat_rule\": null, \"scheduled_time_local\": \"2026-12-03T09:30:00-07:00\"}, \"route_plan\": {\"content_type\": \"video\", \"source\": \"format_route\", \"ready\": true, \"ok\": true, \"posting_destinations\": [\"youtube\", \"x\", \"instagram\", \"tiktok\"], \"skipped_unconnected\": [], \"unsupported_format\": [], \"failed\": [], \"destinations\": [{\"platform\": \"youtube\", \"state\": \"posted\", \"will_post\": true, \"is_failure\": false, \"reason\": \"will publish\", \"content_type\": \"video\", \"connected\": true, \"connect_command\": null, \"envelope\": {\"platform\": \"youtube\", \"display_name\": \"YouTube\", \"publishing\": true, \"content_types\": {\"implemented\": [\"video\"], \"declared\": [\"video\"]}, \"caption\": {\"max_characters\": null}, \"media_transport\": \"local_upload\", \"media_transport_requirement\": null, \"video\": {\"max_duration_seconds\": 43200, \"containers\": [\".mp4\", \".mov\"], \"video_codec\": \"h264\", \"pix_fmt\": \"yuv420p\", \"max_bytes\": 274877906944, \"max_long_edge\": 1920, \"fps_cap\": 60, \"audio_codec\": \"aac\"}, \"image\": null}, \"caption\": \"parity slash\", \"caption_length\": 12, \"constraints\": {\"duration\": {\"observed_seconds\": 12.5, \"max_seconds\": 43200}, \"aspect\": {\"observed_ratio\": 0.5625, \"constraint\": \"orientation-preserving; no fixed aspect ratio\", \"max_long_edge\": 1920}, \"size\": {\"observed_bytes\": 64, \"max_bytes\": 274877906944}, \"containers\": [\".mp4\", \".mov\"], \"caption\": {\"observed_characters\": 12, \"max_characters\": null}}, \"blockers\": [], \"warnings\": [{\"code\": \"MEDIA_SPEC_AUDIO_RATE\", \"message\": \"44100 Hz vs 48000 Hz target \\u2014 advisory only: YouTube resamples audio, so the file is accepted\"}], \"transform\": null, \"transforms\": [], \"visibility\": null}, {\"platform\": \"x\", \"state\": \"posted\", \"will_post\": true, \"is_failure\": false, \"reason\": \"will publish\", \"content_type\": \"video\", \"connected\": true, \"connect_command\": null, \"envelope\": {\"platform\": \"x\", \"display_name\": \"X\", \"publishing\": true, \"content_types\": {\"implemented\": [\"carousel\", \"image\", \"text\", \"video\"], \"declared\": [\"carousel\", \"image\", \"text\", \"video\"]}, \"caption\": {\"max_characters\": 280}, \"media_transport\": \"local_upload\", \"media_transport_requirement\": null, \"video\": {\"max_duration_seconds\": 140, \"containers\": [\".mp4\", \".mov\"], \"video_codec\": \"h264\", \"pix_fmt\": \"yuv420p\", \"max_bytes\": 536870912, \"max_long_edge\": 1920, \"fps_cap\": 60, \"audio_codec\": \"aac\"}, \"image\": {\"containers\": [\".jpg\", \".jpeg\", \".png\", \".webp\"], \"max_bytes\": 5242880, \"aspect_min\": 0.3333333333333333, \"aspect_max\": 3.0}}, \"caption\": \"parity slash\", \"caption_length\": 12, \"constraints\": {\"duration\": {\"observed_seconds\": 12.5, \"max_seconds\": 140}, \"aspect\": {\"observed_ratio\": 0.5625, \"constraint\": \"orientation-preserving; no fixed aspect ratio\", \"max_long_edge\": 1920}, \"size\": {\"observed_bytes\": 64, \"max_bytes\": 536870912}, \"containers\": [\".mp4\", \".mov\"], \"caption\": {\"observed_characters\": 12, \"max_characters\": 280}}, \"blockers\": [], \"warnings\": [{\"code\": \"UNOFFICIAL_WEB_CLIENT\", \"message\": \"X is on its unofficial auth path (auth_mode: 'cookies', ban_risk: unofficial_web_client): twikit replays the logged-in web session: X rate-limits and can suspend automated clients that use it at volume. The ban-safe path is X API v2 (auth_mode: 'api_v2'); it needs X API v2 access (free tier: 17 posts/day). Switch with 'xpst connect x'. Nothing has recorded that the operator accepted this risk.\"}], \"transform\": null, \"transforms\": [], \"visibility\": null}, {\"platform\": \"instagram\", \"state\": \"posted\", \"will_post\": true, \"is_failure\": false, \"reason\": \"will publish\", \"content_type\": \"video\", \"connected\": true, \"connect_command\": null, \"envelope\": {\"platform\": \"instagram\", \"display_name\": \"Instagram Reels\", \"publishing\": true, \"content_types\": {\"implemented\": [\"carousel\", \"image\", \"video\"], \"declared\": [\"carousel\", \"image\", \"video\"]}, \"caption\": {\"max_characters\": 2200}, \"media_transport\": \"local_upload\", \"media_transport_requirement\": null, \"video\": {\"max_duration_seconds\": 900, \"containers\": [\".mp4\", \".mov\"], \"video_codec\": \"h264\", \"pix_fmt\": \"yuv420p\", \"max_bytes\": 4294967296, \"max_long_edge\": 1920, \"fps_cap\": 60, \"audio_codec\": \"aac\"}, \"image\": {\"containers\": [\".jpg\", \".jpeg\"], \"max_bytes\": 8388608, \"aspect_min\": 0.8, \"aspect_max\": 1.91}}, \"caption\": \"parity slash\", \"caption_length\": 12, \"constraints\": {\"duration\": {\"observed_seconds\": 12.5, \"max_seconds\": 900}, \"aspect\": {\"observed_ratio\": 0.5625, \"constraint\": \"orientation-preserving; no fixed aspect ratio\", \"max_long_edge\": 1920}, \"size\": {\"observed_bytes\": 64, \"max_bytes\": 4294967296}, \"containers\": [\".mp4\", \".mov\"], \"caption\": {\"observed_characters\": 12, \"max_characters\": 2200}}, \"blockers\": [], \"warnings\": [], \"transform\": null, \"transforms\": [], \"visibility\": null}, {\"platform\": \"tiktok\", \"state\": \"posted\", \"will_post\": true, \"is_failure\": false, \"reason\": \"will publish\", \"content_type\": \"video\", \"connected\": true, \"connect_command\": null, \"envelope\": {\"platform\": \"tiktok\", \"display_name\": \"TikTok\", \"publishing\": true, \"content_types\": {\"implemented\": [\"video\"], \"declared\": [\"video\"]}, \"caption\": {\"max_characters\": 2200}, \"media_transport\": \"local_upload\", \"media_transport_requirement\": null, \"video\": {\"max_duration_seconds\": 600, \"containers\": [\".mp4\", \".mov\"], \"video_codec\": \"h264\", \"pix_fmt\": \"yuv420p\", \"max_bytes\": 1073741824, \"max_long_edge\": 1920, \"fps_cap\": 60, \"audio_codec\": \"aac\"}, \"image\": null}, \"caption\": \"parity slash\", \"caption_length\": 12, \"constraints\": {\"duration\": {\"observed_seconds\": 12.5, \"max_seconds\": 600}, \"aspect\": {\"observed_ratio\": 0.5625, \"constraint\": \"orientation-preserving; no fixed aspect ratio\", \"max_long_edge\": 1920}, \"size\": {\"observed_bytes\": 64, \"max_bytes\": 1073741824}, \"containers\": [\".mp4\", \".mov\"], \"caption\": {\"observed_characters\": 12, \"max_characters\": 2200}}, \"blockers\": [], \"warnings\": [], \"transform\": null, \"transforms\": [], \"visibility\": null}], \"errors\": [], \"request_blockers\": [], \"error\": null, \"network_calls\": false}}"
+        },
+        {
+          "id": 209,
+          "method": "tools/call",
+          "tool": "xpst_schedule_add",
+          "arguments": {
+            "caption": "parity overrides",
+            "scheduled_time": "2026-12-04T09:30:00",
+            "overrides": {
+              "x": "short",
+              "youtube": {
+                "text": "long"
+              }
+            }
+          },
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at"
+          ],
+          "multiline": false,
+          "text": "{\"scheduled\": {\"id\": \"<CLOCK>\", \"operation_id\": \"<CLOCK>\", \"idempotency_key\": \"<CLOCK>\", \"video_path\": \"\", \"caption\": \"parity overrides\", \"per_platform_captions\": {\"x\": \"short\", \"youtube\": \"long\"}, \"platforms\": [\"x\"], \"scheduled_time\": \"2026-12-04T16:30:00+00:00\", \"timezone\": \"America/Denver\", \"status\": \"pending\", \"created_at\": \"<CLOCK>\", \"completed_at\": null, \"error\": null, \"post_results\": {}, \"repeat_rule\": null, \"content_type\": \"text\", \"scheduled_time_local\": \"2026-12-04T09:30:00-07:00\"}, \"route_plan\": {\"content_type\": \"text\", \"source\": \"format_route\", \"ready\": true, \"ok\": true, \"posting_destinations\": [\"x\"], \"skipped_unconnected\": [], \"unsupported_format\": [], \"failed\": [], \"destinations\": [{\"platform\": \"x\", \"state\": \"posted\", \"will_post\": true, \"is_failure\": false, \"reason\": \"will publish\", \"content_type\": \"text\", \"connected\": true, \"connect_command\": null, \"envelope\": {\"platform\": \"x\", \"display_name\": \"X\", \"publishing\": true, \"content_types\": {\"implemented\": [\"carousel\", \"image\", \"text\", \"video\"], \"declared\": [\"carousel\", \"image\", \"text\", \"video\"]}, \"caption\": {\"max_characters\": 280}, \"media_transport\": \"local_upload\", \"media_transport_requirement\": null, \"video\": {\"max_duration_seconds\": 140, \"containers\": [\".mp4\", \".mov\"], \"video_codec\": \"h264\", \"pix_fmt\": \"yuv420p\", \"max_bytes\": 536870912, \"max_long_edge\": 1920, \"fps_cap\": 60, \"audio_codec\": \"aac\"}, \"image\": {\"containers\": [\".jpg\", \".jpeg\", \".png\", \".webp\"], \"max_bytes\": 5242880, \"aspect_min\": 0.3333333333333333, \"aspect_max\": 3.0}}, \"caption\": \"short\", \"caption_length\": 5, \"constraints\": {\"duration\": {\"observed_seconds\": null, \"max_seconds\": 140}, \"aspect\": {\"observed_ratio\": null, \"constraint\": \"orientation-preserving; no fixed aspect ratio\", \"max_long_edge\": 1920}, \"size\": {\"observed_bytes\": null, \"max_bytes\": 536870912}, \"containers\": [\".mp4\", \".mov\"], \"caption\": {\"observed_characters\": 5, \"max_characters\": 280}}, \"blockers\": [], \"warnings\": [{\"code\": \"UNOFFICIAL_WEB_CLIENT\", \"message\": \"X is on its unofficial auth path (auth_mode: 'cookies', ban_risk: unofficial_web_client): twikit replays the logged-in web session: X rate-limits and can suspend automated clients that use it at volume. The ban-safe path is X API v2 (auth_mode: 'api_v2'); it needs X API v2 access (free tier: 17 posts/day). Switch with 'xpst connect x'. Nothing has recorded that the operator accepted this risk.\"}], \"transform\": null, \"transforms\": [], \"visibility\": null}], \"errors\": [], \"request_blockers\": [], \"error\": null, \"network_calls\": false}}"
+        },
+        {
+          "id": 210,
+          "method": "tools/call",
+          "tool": "xpst_schedule_add",
+          "arguments": {
+            "caption": "c",
+            "scheduled_time": "not-a-time"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at"
+          ],
+          "multiline": false,
+          "text": "Bad scheduled_time (need ISO-8601): Invalid isoformat string: 'not-a-time'"
+        },
+        {
+          "id": 211,
+          "method": "tools/call",
+          "tool": "xpst_schedule_add",
+          "arguments": {
+            "caption": "c",
+            "scheduled_time": "2026-12-01T09:30:00",
+            "video_path": "<PROFILE>/nope.mp4"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at"
+          ],
+          "multiline": false,
+          "text": "Video not found: <PROFILE>/nope.mp4"
+        },
+        {
+          "id": 212,
+          "method": "tools/call",
+          "tool": "xpst_schedule_add",
+          "arguments": {
+            "caption": "c",
+            "scheduled_time": "2026-12-01T09:30:00",
+            "overrides": {
+              "x": 5
+            }
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at"
+          ],
+          "multiline": false,
+          "text": "{\"ok\": false, \"error\": \"Invalid overrides payload: per-destination override must be an object, got int\", \"overrides_accepted\": \"{\\\"x\\\": \\\"caption\\\"} or {\\\"x\\\": {\\\"text\\\": \\\"caption\\\"}}\"}"
+        },
+        {
+          "id": 213,
+          "method": "tools/call",
+          "tool": "xpst_schedule_add",
+          "arguments": {
+            "caption": "c",
+            "scheduled_time": "2026-12-01T09:30:00",
+            "platforms": [
+              "nope"
+            ]
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at"
+          ],
+          "multiline": false,
+          "text": "{\"ok\": false, \"error\": {\"code\": \"NO_DESTINATIONS\", \"message\": \"No destination would publish this entry.\"}, \"route_plan\": {\"content_type\": \"text\", \"source\": \"explicit\", \"ready\": false, \"ok\": false, \"posting_destinations\": [], \"skipped_unconnected\": [], \"unsupported_format\": [\"nope\"], \"failed\": [], \"destinations\": [{\"platform\": \"nope\", \"state\": \"unsupported_format\", \"will_post\": false, \"is_failure\": false, \"reason\": \"nope is not a known publishing destination.\", \"content_type\": \"text\", \"connected\": false, \"connect_command\": \"xpst connect nope\", \"envelope\": null, \"caption\": \"c\", \"caption_length\": 1, \"constraints\": {}, \"blockers\": [{\"code\": \"UNKNOWN_PLATFORM\", \"message\": \"No media preflight specification exists for 'nope'.\"}], \"warnings\": [], \"transform\": null, \"transforms\": [], \"visibility\": null}], \"errors\": [], \"request_blockers\": [], \"error\": null, \"network_calls\": false}}"
+        },
+        {
+          "id": 214,
+          "method": "tools/call",
+          "tool": "xpst_schedule_add",
+          "arguments": {
+            "caption": "c",
+            "scheduled_time": "2026-12-01T09:30:00",
+            "platforms": []
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at"
+          ],
+          "multiline": false,
+          "text": "{\"ok\": false, \"error\": {\"code\": \"NO_DESTINATIONS\", \"message\": \"Choose at least one destination platform.\"}, \"route_plan\": {\"content_type\": \"text\", \"source\": \"explicit\", \"ready\": false, \"ok\": false, \"posting_destinations\": [], \"skipped_unconnected\": [], \"unsupported_format\": [], \"failed\": [], \"destinations\": [], \"errors\": [{\"code\": \"NO_DESTINATIONS\", \"message\": \"Choose at least one destination platform.\"}], \"request_blockers\": [], \"error\": {\"code\": \"NO_DESTINATIONS\", \"message\": \"Choose at least one destination platform.\"}, \"network_calls\": false}}"
+        },
+        {
+          "id": 215,
+          "method": "tools/call",
+          "tool": "xpst_schedule_add",
+          "arguments": {
+            "caption": "c",
+            "scheduled_time": "2026-12-01T09:30:00",
+            "platforms": "youtube"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at"
+          ],
+          "multiline": false,
+          "text": "{\"ok\": false, \"error\": {\"code\": \"NO_DESTINATIONS\", \"message\": \"No destination would publish this entry.\"}, \"route_plan\": {\"content_type\": \"text\", \"source\": \"explicit\", \"ready\": false, \"ok\": false, \"posting_destinations\": [], \"skipped_unconnected\": [], \"unsupported_format\": [\"y\", \"o\", \"u\", \"t\", \"b\", \"e\"], \"failed\": [], \"destinations\": [{\"platform\": \"y\", \"state\": \"unsupported_format\", \"will_post\": false, \"is_failure\": false, \"reason\": \"y is not a known publishing destination.\", \"content_type\": \"text\", \"connected\": false, \"connect_command\": \"xpst connect y\", \"envelope\": null, \"caption\": \"c\", \"caption_length\": 1, \"constraints\": {}, \"blockers\": [{\"code\": \"UNKNOWN_PLATFORM\", \"message\": \"No media preflight specification exists for 'y'.\"}], \"warnings\": [], \"transform\": null, \"transforms\": [], \"visibility\": null}, {\"platform\": \"o\", \"state\": \"unsupported_format\", \"will_post\": false, \"is_failure\": false, \"reason\": \"o is not a known publishing destination.\", \"content_type\": \"text\", \"connected\": false, \"connect_command\": \"xpst connect o\", \"envelope\": null, \"caption\": \"c\", \"caption_length\": 1, \"constraints\": {}, \"blockers\": [{\"code\": \"UNKNOWN_PLATFORM\", \"message\": \"No media preflight specification exists for 'o'.\"}], \"warnings\": [], \"transform\": null, \"transforms\": [], \"visibility\": null}, {\"platform\": \"u\", \"state\": \"unsupported_format\", \"will_post\": false, \"is_failure\": false, \"reason\": \"u is not a known publishing destination.\", \"content_type\": \"text\", \"connected\": false, \"connect_command\": \"xpst connect u\", \"envelope\": null, \"caption\": \"c\", \"caption_length\": 1, \"constraints\": {}, \"blockers\": [{\"code\": \"UNKNOWN_PLATFORM\", \"message\": \"No media preflight specification exists for 'u'.\"}], \"warnings\": [], \"transform\": null, \"transforms\": [], \"visibility\": null}, {\"platform\": \"t\", \"state\": \"unsupported_format\", \"will_post\": false, \"is_failure\": false, \"reason\": \"t is not a known publishing destination.\", \"content_type\": \"text\", \"connected\": false, \"connect_command\": \"xpst connect t\", \"envelope\": null, \"caption\": \"c\", \"caption_length\": 1, \"constraints\": {}, \"blockers\": [{\"code\": \"UNKNOWN_PLATFORM\", \"message\": \"No media preflight specification exists for 't'.\"}], \"warnings\": [], \"transform\": null, \"transforms\": [], \"visibility\": null}, {\"platform\": \"b\", \"state\": \"unsupported_format\", \"will_post\": false, \"is_failure\": false, \"reason\": \"b is not a known publishing destination.\", \"content_type\": \"text\", \"connected\": false, \"connect_command\": \"xpst connect b\", \"envelope\": null, \"caption\": \"c\", \"caption_length\": 1, \"constraints\": {}, \"blockers\": [{\"code\": \"UNKNOWN_PLATFORM\", \"message\": \"No media preflight specification exists for 'b'.\"}], \"warnings\": [], \"transform\": null, \"transforms\": [], \"visibility\": null}, {\"platform\": \"e\", \"state\": \"unsupported_format\", \"will_post\": false, \"is_failure\": false, \"reason\": \"e is not a known publishing destination.\", \"content_type\": \"text\", \"connected\": false, \"connect_command\": \"xpst connect e\", \"envelope\": null, \"caption\": \"c\", \"caption_length\": 1, \"constraints\": {}, \"blockers\": [{\"code\": \"UNKNOWN_PLATFORM\", \"message\": \"No media preflight specification exists for 'e'.\"}], \"warnings\": [], \"transform\": null, \"transforms\": [], \"visibility\": null}], \"errors\": [], \"request_blockers\": [], \"error\": null, \"network_calls\": false}}"
+        },
+        {
+          "id": 216,
+          "method": "tools/call",
+          "tool": "xpst_schedule_add",
+          "arguments": {
+            "caption": "c",
+            "scheduled_time": "2026-12-01T09:30:00",
+            "repeat_rule": "hourly"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at"
+          ],
+          "multiline": false,
+          "text": "{\"ok\": false, \"error\": \"Invalid repeat_rule: 'hourly'. Must be one of: None, 'daily', 'weekly', 'monthly'\"}"
+        },
+        {
+          "id": 217,
+          "method": "tools/call",
+          "tool": "xpst_schedule_add",
+          "arguments": {
+            "scheduled_time": "2026-12-01T09:30:00"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at"
+          ],
+          "multiline": false,
+          "text": "Error: 'caption'"
+        },
+        {
+          "id": 218,
+          "method": "tools/call",
+          "tool": "xpst_schedule_add",
+          "arguments": {
+            "caption": "c"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at"
+          ],
+          "multiline": false,
+          "text": "Error: 'scheduled_time'"
+        },
+        {
+          "id": 219,
+          "method": "tools/call",
+          "tool": "xpst_schedule_add",
+          "arguments": {
+            "caption": 5,
+            "scheduled_time": "2026-12-01T09:30:00"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at"
+          ],
+          "multiline": false,
+          "text": "Error: object of type 'int' has no len()"
+        },
+        {
+          "id": 220,
+          "method": "tools/call",
+          "tool": "xpst_schedule_add",
+          "arguments": {
+            "caption": "c",
+            "scheduled_time": 5
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at"
+          ],
+          "multiline": false,
+          "text": "Error: fromisoformat: argument must be str"
+        },
+        {
+          "id": 221,
+          "method": "tools/call",
+          "tool": "xpst_schedule_add",
+          "arguments": {
+            "caption": "c",
+            "scheduled_time": "2026-12-01T09:30:00",
+            "video_path": 5
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at"
+          ],
+          "multiline": false,
+          "text": "Error: argument should be a str or an os.PathLike object where __fspath__ returns a str, not 'int'"
+        },
+        {
+          "id": 222,
+          "method": "tools/call",
+          "tool": "xpst_schedule_cancel",
+          "arguments": {
+            "entry_id": "nope"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "{\"ok\": false, \"operation\": \"schedule_cancel\", \"scope\": \"local_schedule_store\", \"dry_run\": false, \"entry_id\": \"nope\", \"found\": false, \"cancelled\": false, \"entry\": null, \"error\": {\"code\": \"POST_NOT_FOUND\", \"message\": \"Scheduled post not found: nope\"}}"
+        },
+        {
+          "id": 223,
+          "method": "tools/call",
+          "tool": "xpst_schedule_cancel",
+          "arguments": {
+            "entry_id": "nope",
+            "dry_run": true
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "{\"ok\": false, \"operation\": \"schedule_cancel\", \"scope\": \"local_schedule_store\", \"dry_run\": true, \"entry_id\": \"nope\", \"found\": false, \"cancelled\": false, \"entry\": null, \"error\": {\"code\": \"POST_NOT_FOUND\", \"message\": \"Scheduled post not found: nope\"}}"
+        },
+        {
+          "id": 224,
+          "method": "tools/call",
+          "tool": "xpst_schedule_cancel",
+          "arguments": {
+            "entry_id": "seed-parity-1",
+            "dry_run": true
+          },
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "{\"ok\": true, \"operation\": \"schedule_cancel\", \"scope\": \"local_schedule_store\", \"dry_run\": true, \"entry_id\": \"seed-parity-1\", \"found\": true, \"cancelled\": false, \"entry\": {\"id\": \"seed-parity-1\", \"operation_id\": \"seed-operation-1\", \"idempotency_key\": \"seed-operation-1\", \"video_path\": \"\", \"caption\": \"seeded parity entry\", \"per_platform_captions\": {}, \"platforms\": [\"x\"], \"scheduled_time\": \"2026-12-05T15:00:00+00:00\", \"timezone\": \"America/Denver\", \"status\": \"pending\", \"created_at\": \"2026-11-01T00:00:00\", \"completed_at\": null, \"error\": null, \"post_results\": {}, \"repeat_rule\": null, \"content_type\": \"text\", \"scheduled_time_local\": \"2026-12-05T08:00:00-07:00\"}, \"error\": null}"
+        },
+        {
+          "id": 225,
+          "method": "tools/call",
+          "tool": "xpst_schedule_cancel",
+          "arguments": {
+            "entry_id": "seed-parity-1"
+          },
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "{\"ok\": true, \"operation\": \"schedule_cancel\", \"scope\": \"local_schedule_store\", \"dry_run\": false, \"entry_id\": \"seed-parity-1\", \"found\": true, \"cancelled\": true, \"entry\": {\"id\": \"seed-parity-1\", \"operation_id\": \"seed-operation-1\", \"idempotency_key\": \"seed-operation-1\", \"video_path\": \"\", \"caption\": \"seeded parity entry\", \"per_platform_captions\": {}, \"platforms\": [\"x\"], \"scheduled_time\": \"2026-12-05T15:00:00+00:00\", \"timezone\": \"America/Denver\", \"status\": \"pending\", \"created_at\": \"2026-11-01T00:00:00\", \"completed_at\": null, \"error\": null, \"post_results\": {}, \"repeat_rule\": null, \"content_type\": \"text\", \"scheduled_time_local\": \"2026-12-05T08:00:00-07:00\"}, \"error\": null}"
+        },
+        {
+          "id": 226,
+          "method": "tools/call",
+          "tool": "xpst_schedule_cancel",
+          "arguments": {
+            "entry_id": "seed-parity-1"
+          },
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "{\"ok\": false, \"operation\": \"schedule_cancel\", \"scope\": \"local_schedule_store\", \"dry_run\": false, \"entry_id\": \"seed-parity-1\", \"found\": false, \"cancelled\": false, \"entry\": null, \"error\": {\"code\": \"POST_NOT_FOUND\", \"message\": \"Scheduled post not found: seed-parity-1\"}}"
+        },
+        {
+          "id": 227,
+          "method": "tools/call",
+          "tool": "xpst_schedule_cancel",
+          "arguments": {},
+          "is_error": true,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [],
+          "multiline": false,
+          "text": "Error: 'entry_id'"
+        },
+        {
+          "id": 228,
+          "method": "tools/call",
+          "tool": "xpst_schedule_list",
+          "arguments": {},
+          "is_error": false,
+          "mask_checks": [],
+          "mask_fields": [],
+          "mask_keys": [
+            "id",
+            "operation_id",
+            "idempotency_key",
+            "created_at",
+            "paused_at"
+          ],
+          "multiline": false,
+          "text": "{\"schedules\": [{\"id\": \"<CLOCK>\", \"operation_id\": \"<CLOCK>\", \"idempotency_key\": \"<CLOCK>\", \"video_path\": \"\", \"caption\": \"parity text\", \"per_platform_captions\": {}, \"platforms\": [\"x\"], \"scheduled_time\": \"2026-12-01T16:30:00+00:00\", \"timezone\": \"America/Denver\", \"status\": \"pending\", \"created_at\": \"<CLOCK>\", \"completed_at\": null, \"error\": null, \"post_results\": {}, \"repeat_rule\": null, \"content_type\": \"text\", \"scheduled_time_local\": \"2026-12-01T09:30:00-07:00\"}, {\"id\": \"<CLOCK>\", \"operation_id\": \"<CLOCK>\", \"idempotency_key\": \"<CLOCK>\", \"video_path\": \"<PROFILE>/clip.mp4\", \"caption\": \"parity video\", \"per_platform_captions\": {}, \"platforms\": [\"youtube\"], \"scheduled_time\": \"2026-12-02T09:30:00+00:00\", \"timezone\": \"America/Denver\", \"status\": \"pending\", \"created_at\": \"<CLOCK>\", \"completed_at\": null, \"error\": null, \"post_results\": {}, \"repeat_rule\": \"weekly\", \"scheduled_time_local\": \"2026-12-02T02:30:00-07:00\"}, {\"id\": \"<CLOCK>\", \"operation_id\": \"<CLOCK>\", \"idempotency_key\": \"<CLOCK>\", \"video_path\": \"<PROFILE>/clip.mp4\", \"caption\": \"parity slash\", \"per_platform_captions\": {}, \"platforms\": [\"youtube\", \"x\", \"instagram\", \"tiktok\"], \"scheduled_time\": \"2026-12-03T16:30:00+00:00\", \"timezone\": \"America/Denver\", \"status\": \"pending\", \"created_at\": \"<CLOCK>\", \"completed_at\": null, \"error\": null, \"post_results\": {}, \"repeat_rule\": null, \"scheduled_time_local\": \"2026-12-03T09:30:00-07:00\"}, {\"id\": \"<CLOCK>\", \"operation_id\": \"<CLOCK>\", \"idempotency_key\": \"<CLOCK>\", \"video_path\": \"\", \"caption\": \"parity overrides\", \"per_platform_captions\": {\"x\": \"short\", \"youtube\": \"long\"}, \"platforms\": [\"x\"], \"scheduled_time\": \"2026-12-04T16:30:00+00:00\", \"timezone\": \"America/Denver\", \"status\": \"pending\", \"created_at\": \"<CLOCK>\", \"completed_at\": null, \"error\": null, \"post_results\": {}, \"repeat_rule\": null, \"content_type\": \"text\", \"scheduled_time_local\": \"2026-12-04T09:30:00-07:00\"}], \"paused\": {\"paused\": false, \"paused_at\": null, \"reason\": \"\"}}"
         }
       ]
     }

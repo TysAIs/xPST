@@ -322,6 +322,15 @@ MASK_KEYS = {
     "xpst_setup_status": ["transaction_id", "created_at", "updated_at", "started_at", "completed_at", "verified_at"],
     "xpst_setup_resume": ["transaction_id", "created_at", "updated_at", "started_at", "completed_at", "verified_at"],
     "xpst_setup_reset": ["transaction_id", "created_at", "updated_at", "started_at", "completed_at", "verified_at"],
+    # A schedule entry mints a fresh v4 id and stamps `created_at` on every add,
+    # so those four keys are the entry's bookkeeping rather than its verdict.
+    # `scheduled_time` and `scheduled_time_local` are NOT masked: the scenario
+    # pins `TZ`, so they are a property of the engine.
+    "xpst_schedule_add": ["id", "operation_id", "idempotency_key", "created_at"],
+    # `paused_at` is the marker's own clock reading, reported by the listing.
+    "xpst_schedule_list": ["id", "operation_id", "idempotency_key", "created_at", "paused_at"],
+    # `pause()` stamps `datetime.now(timezone.utc)`; the reason is compared.
+    "xpst_schedule_pause": ["paused_at"],
 }
 
 # Helper scripts the readiness and security checks probe. Pinned so the
@@ -488,6 +497,145 @@ METRIC_SNAPSHOTS = [
     ("x", "x-3", "2026-11-18T00:00:00+00:00", 0, 0, 0, 0),
 ]
 
+# The queue the `mutations` scenario starts from: one pending text entry with a
+# fixed id, an explicit zone and an explicit instant, so `xpst_schedule_cancel`
+# has a real target and `xpst_schedule_list` has a row whose rendering is a
+# property of the fixture rather than of the host's clock.
+SEEDED_SCHEDULE = json.dumps(
+    [
+        {
+            "id": "seed-parity-1",
+            "operation_id": "seed-operation-1",
+            "idempotency_key": "seed-operation-1",
+            "video_path": "",
+            "caption": "seeded parity entry",
+            "per_platform_captions": {},
+            "platforms": ["x"],
+            "scheduled_time": "2026-12-05T15:00:00+00:00",
+            "timezone": "America/Denver",
+            "status": "pending",
+            "created_at": "2026-11-01T00:00:00",
+            "completed_at": None,
+            "error": None,
+            "post_results": {},
+            "repeat_rule": None,
+            "content_type": "text",
+        }
+    ],
+    indent=2,
+    ensure_ascii=False,
+)
+
+# The schedule writers, in the `mutations` scenario only. Every one of these is
+# a local JSON write under the scratch profile — no network, no provider, no
+# posting. The order matters: the pause pair brackets a listing, the adds run
+# before the cancels, and the final listing shows what survived.
+SCHEDULE_WRITE_CALLS = [
+    # The queue as seeded: one pending entry, not paused.
+    ("xpst_schedule_list", {}),
+    # Pause: the first call creates the marker, the second reports it existed.
+    ("xpst_schedule_pause", {"reason": "parity pause"}),
+    ("xpst_schedule_pause", {}),
+    ("xpst_schedule_list", {}),
+    ("xpst_schedule_resume", {}),
+    ("xpst_schedule_resume", {}),
+    # A text post: no `video_path`, so `content_type=text` and the caption IS
+    # the post. The naive time is read in the pinned zone.
+    (
+        "xpst_schedule_add",
+        {"caption": "parity text", "scheduled_time": "2026-12-01T09:30:00"},
+    ),
+    # A video post with an explicit offset, an explicit platform and a repeat
+    # rule. `content_type` is absent from the entry: the handler passes `None`
+    # for a video, and `ScheduleManager.add` only writes the key when it is set.
+    (
+        "xpst_schedule_add",
+        {
+            "video_path": "<PROFILE>/clip.mp4",
+            "caption": "parity video",
+            "scheduled_time": "2026-12-02T09:30:00+00:00",
+            "platforms": ["youtube"],
+            "repeat_rule": "weekly",
+        },
+    ),
+    # A trailing separator is normalised away by `str(Path(...))`.
+    (
+        "xpst_schedule_add",
+        {
+            "video_path": "<PROFILE>/clip.mp4/",
+            "caption": "parity slash",
+            "scheduled_time": "2026-12-03T09:30:00",
+        },
+    ),
+    # Two overrides: the entry keeps the caller's key order, not a sorted one.
+    (
+        "xpst_schedule_add",
+        {
+            "caption": "parity overrides",
+            "scheduled_time": "2026-12-04T09:30:00",
+            "overrides": {"x": "short", "youtube": {"text": "long"}},
+        },
+    ),
+    # ── refusals ────────────────────────────────────────────────────────────
+    # `fromisoformat`'s own sentence, inside the handler's `Bad scheduled_time`.
+    ("xpst_schedule_add", {"caption": "c", "scheduled_time": "not-a-time"}),
+    # A path inside the profile passes the argument guard and then fails the
+    # handler's own existence check.
+    (
+        "xpst_schedule_add",
+        {
+            "caption": "c",
+            "scheduled_time": "2026-12-01T09:30:00",
+            "video_path": "<PROFILE>/nope.mp4",
+        },
+    ),
+    # A non-object override entry is the `Invalid overrides payload` document.
+    (
+        "xpst_schedule_add",
+        {"caption": "c", "scheduled_time": "2026-12-01T09:30:00", "overrides": {"x": 5}},
+    ),
+    # An unknown destination and an empty list are two different errors.
+    (
+        "xpst_schedule_add",
+        {"caption": "c", "scheduled_time": "2026-12-01T09:30:00", "platforms": ["nope"]},
+    ),
+    (
+        "xpst_schedule_add",
+        {"caption": "c", "scheduled_time": "2026-12-01T09:30:00", "platforms": []},
+    ),
+    # A STRING platform list is iterated character by character by Python's
+    # `normalize_platforms`, so `"youtube"` becomes six one-letter destinations.
+    (
+        "xpst_schedule_add",
+        {"caption": "c", "scheduled_time": "2026-12-01T09:30:00", "platforms": "youtube"},
+    ),
+    (
+        "xpst_schedule_add",
+        {"caption": "c", "scheduled_time": "2026-12-01T09:30:00", "repeat_rule": "hourly"},
+    ),
+    # `arguments["caption"]` and `arguments["scheduled_time"]` are hard indexes.
+    ("xpst_schedule_add", {"scheduled_time": "2026-12-01T09:30:00"}),
+    ("xpst_schedule_add", {"caption": "c"}),
+    # A non-string caption dies on `len()` inside the plan, a non-string time on
+    # `fromisoformat`, and a non-string path on `Path(...)`.
+    ("xpst_schedule_add", {"caption": 5, "scheduled_time": "2026-12-01T09:30:00"}),
+    ("xpst_schedule_add", {"caption": "c", "scheduled_time": 5}),
+    (
+        "xpst_schedule_add",
+        {"caption": "c", "scheduled_time": "2026-12-01T09:30:00", "video_path": 5},
+    ),
+    # ── cancel ──────────────────────────────────────────────────────────────
+    ("xpst_schedule_cancel", {"entry_id": "nope"}),
+    ("xpst_schedule_cancel", {"entry_id": "nope", "dry_run": True}),
+    ("xpst_schedule_cancel", {"entry_id": "seed-parity-1", "dry_run": True}),
+    ("xpst_schedule_cancel", {"entry_id": "seed-parity-1"}),
+    # The same id again: the entry is gone, so this is POST_NOT_FOUND.
+    ("xpst_schedule_cancel", {"entry_id": "seed-parity-1"}),
+    ("xpst_schedule_cancel", {}),
+    # The queue after the writes: the added entries, no seeded one.
+    ("xpst_schedule_list", {}),
+]
+
 SCENARIOS = [
     # `XPST_MEDIA_ROOTS` is a fixed media root so the `xpst_suggest_caption`
     # rows are a function of a path whose words are identical on both engines.
@@ -509,6 +657,21 @@ SCENARIOS = [
             "XPST_MCP_REQUIRE_CONFIRM": "1",
             "XPST_MEDIA_ROOTS": "/tmp/xpst-parity-media",
         },
+    },
+    # The schedule writers are consent-gated, so their real bodies only exist
+    # where mutations are allowed. `TZ` is pinned because `ScheduleManager.add`
+    # stamps the entry's own zone and renders `scheduled_time_local` in it — a
+    # fixture captured on the machine's zone would pin the host, not the engine.
+    # The queue is seeded with one deterministic entry so `cancel` has a real
+    # target and `list` has something to show.
+    {
+        "name": "mutations",
+        "env": {
+            "XPST_MCP_ALLOW_MUTATIONS": "1",
+            "XPST_MEDIA_ROOTS": "/tmp/xpst-parity-media",
+            "TZ": "America/Denver",
+        },
+        "seed": {"schedule.json": SEEDED_SCHEDULE},
     },
 ]
 
@@ -606,6 +769,18 @@ def requests_for(scenario: str) -> list[dict]:
                     "params": {"name": tool, "arguments": arguments},
                 }
             )
+    elif scenario == "mutations":
+        # The schedule writers, and nothing else: `xpst_post` would be a real
+        # upload attempt, and this scenario exists to reach the handlers.
+        for index, (tool, arguments) in enumerate(SCHEDULE_WRITE_CALLS, start=200):
+            steps.append(
+                {
+                    "jsonrpc": "2.0",
+                    "id": index,
+                    "method": "tools/call",
+                    "params": {"name": tool, "arguments": arguments},
+                }
+            )
     else:
         steps.append(
             {
@@ -662,6 +837,10 @@ def run_scenario(python: str, scenario: dict) -> dict:
         path.write_text(body, encoding="utf-8")
         path.chmod(0o755)
     for name, body in SEED_FILES.items():
+        (profile / name).write_text(body, encoding="utf-8")
+    # Scenario-specific seed files (the `mutations` queue). Written verbatim so
+    # the fixture records exactly what both engines start from.
+    for name, body in scenario.get("seed", {}).items():
         (profile / name).write_text(body, encoding="utf-8")
 
     # The knowledge workspace (`~/.xpst/knowledge/default`, since HOME is the
@@ -845,7 +1024,12 @@ def run_scenario(python: str, scenario: dict) -> dict:
     recorded_env["XPST_FFMPEG_PATH"] = "<PROFILE>/bin/ffmpeg"
     recorded_env["XPST_FFPROBE_PATH"] = "<PROFILE>/bin/ffprobe"
     recorded_env["XPST_YTDLP_PATH"] = "<PROFILE>/bin/yt-dlp"
-    return {"name": scenario["name"], "env": recorded_env, "steps": recorded}
+    return {
+        "name": scenario["name"],
+        "env": recorded_env,
+        "seed": scenario.get("seed", {}),
+        "steps": recorded,
+    }
 
 
 def main() -> int:
