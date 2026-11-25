@@ -329,11 +329,23 @@ pub const DEVIATIONS: &[&str] = &[
      `python_implemented` is the destination's capability; the route plan reads the second, so \
      the destination list, the format route and the envelope's `content_types.implemented` are \
      Python's. Nothing is published from here — the uploaders are still stubs.",
-    "`preflight`'s media verdicts come from `verify_media` without its loudness check: measuring \
-     integrated loudness needs an ffmpeg `ebur128` pass that this slice does not port. The route \
-     planner always plans with `check_loudness=False` (`build_route_plan` sets it), so no \
-     `preflight` row is affected; `verify-media` — still a stub — is the command that would \
-     notice, and it is the one place a `loudness` check would be missing.",
+    "`verify-media` and `preflight` share one `verify_media`, and the loudness check is ported: \
+     `xpst-media::loudness` runs the same `loudnorm` analysis pass and reads the same four \
+     measured keys off stderr. The route planner still plans with `check_loudness=False` \
+     (`build_route_plan` pins it), so `preflight` never pays for the extra subprocess; \
+     `verify-media` defaults it on, which is the command that needs it.",
+    "`verify-media` publishes the raw `ffprobe` document inside `--plan`'s `media_spec.probe` and \
+     `ffprobe` fields, in ffprobe's own key order: the probe text is re-parsed into an \
+     order-preserving value rather than a sorted map, so the bytes match `json.dumps`. The \
+     `reports` list itself carries no `probe` key — Python calls `to_dict()` there, not \
+     `to_dict(include_probe=True)`.",
+    "`schedule add`'s `Invalid platforms` refusal is the one branch Python prints to stdout even \
+     under `--json` (it never calls `json_output`); it is reproduced as plain text so the row \
+     still compares. Every other refusal is the `{ok:false,error:{...}}` payload.",
+    "`schedule add` generates its own `uuid4` ids and wall clock, so the fixture substitutes the \
+     four values that cannot repeat (`id`, `operation_id`, `idempotency_key`, `created_at`) in \
+     both the payload and the written `schedule.json`. Every other byte of the file — key order \
+     and `json.dump(indent=2, ensure_ascii=False)` separators — is still compared.",
     "A missing `ffprobe` binary reports the Rust `io::Error` text inside `ffprobe failed (…); spec \
      not verified` where Python reports `[Errno 2] No such file or directory`. The check, its \
      status, its position and the resulting `MEDIA_PROBE_FAILED` warning are identical; only the \

@@ -16,12 +16,19 @@
 //! container, no video stream, oversized file) mean the platform would reject or
 //! irrecoverably mangle the file.
 //!
-//! One deliberate gap, recorded in the ledger: `check_loudness` is accepted but
-//! no loudness check is produced, because measuring integrated loudness needs an
-//! ffmpeg `ebur128` pass that this slice does not port. The route planner always
-//! passes `false` (`build_route_plan` sets `check_loudness=False`), so `preflight`
-//! is unaffected; `verify-media` is the command that would notice.
-
+//! `check_loudness` runs the ffmpeg `loudnorm` analysis pass
+//! ([`crate::loudness`]) and adds the `loudness` check when the measurement
+//! succeeds, exactly as `xpst/media/specs.py` does. The route planner always
+//! passes `false` (`build_route_plan` sets `check_loudness=False`), so
+//! `preflight` never pays for the extra subprocess; `verify-media` defaults to
+//! `true`, which is the command that needs it.
+//!
+//! The probe document itself is carried on the verdict as the raw `ffprobe`
+//! stdout text. `MediaReport.to_dict(include_probe=True)` publishes it verbatim,
+//! so its key order is ffprobe's — a `serde_json::Value` round trip would sort
+//! it (`Map` is a `BTreeMap` without `preserve_order`) and change the bytes. The
+//! CLI parses the text into `xpst_config::Value`, whose `Mapping` keeps document
+//! order.
 use std::path::Path;
 use std::process::Command;
 
@@ -116,6 +123,7 @@ pub fn verify_media(path: &Path, platform: &str, check_loudness: bool) -> MediaV
                 checks,
                 duration_seconds: None,
                 aspect_ratio: None,
+                probe: None,
             };
         }
         if modality == MediaKind::Image {
@@ -148,6 +156,7 @@ pub fn verify_media(path: &Path, platform: &str, check_loudness: bool) -> MediaV
                 checks,
                 duration_seconds: None,
                 aspect_ratio: None,
+                probe: None,
             };
         }
     };
@@ -175,6 +184,7 @@ pub fn verify_media(path: &Path, platform: &str, check_loudness: bool) -> MediaV
             checks,
             duration_seconds: None,
             aspect_ratio: None,
+            probe: Some(info.document.clone()),
         };
     };
 
@@ -321,15 +331,37 @@ pub fn verify_media(path: &Path, platform: &str, check_loudness: bool) -> MediaV
         });
     }
 
-    // Loudness is not ported (see the module doc): `check_loudness` is accepted
-    // so the signature matches the Python contract, and no check is produced.
-    let _ = check_loudness;
+    // Loudness — off-target means the platform gain-stage moves it.
+    if check_loudness && audio.is_some() {
+        if let Some(measured) = crate::loudness::measure(None, path, -14.0) {
+            let lufs = measured.input_i;
+            let deviation = lufs - spec.lufs;
+            add(
+                &mut checks,
+                "loudness",
+                deviation.abs() <= 2.0,
+                &format!(
+                    "{} LUFS vs target {:.1} (\u{0394} {}{} LU)",
+                    crate::loudness::format_one_decimal(lufs),
+                    spec.lufs,
+                    if deviation.is_sign_negative() {
+                        "-"
+                    } else {
+                        "+"
+                    },
+                    crate::loudness::format_one_decimal(deviation.abs()),
+                ),
+                CheckStatus::Warn,
+            );
+        }
+    }
 
     let (duration_seconds, aspect_ratio) = probe_dimensions(&info);
     MediaVerdict {
         checks,
         duration_seconds,
         aspect_ratio,
+        probe: Some(info.document),
     }
 }
 
@@ -530,6 +562,7 @@ fn verify_image(
             checks,
             duration_seconds: None,
             aspect_ratio: None,
+            probe: probe_doc.map(|info| info.document),
         };
     };
 
@@ -554,7 +587,6 @@ fn verify_image(
     check_image_file_size(path, platform, spec, &mut checks);
 
     let _ = read_by;
-    let _ = probe_doc;
     MediaVerdict {
         checks,
         duration_seconds: None,
@@ -563,6 +595,7 @@ fn verify_image(
         } else {
             None
         },
+        probe: probe_doc.map(|info| info.document),
     }
 }
 
@@ -595,6 +628,14 @@ pub struct Format {
 pub struct Probe {
     pub streams: Vec<Stream>,
     pub format: Format,
+    /// The raw stdout text, verbatim.
+    ///
+    /// `MediaReport.to_dict(include_probe=True)` publishes the probe document
+    /// itself, so its key order is ffprobe's. Keeping the text (rather than a
+    /// `serde_json::Value`) is what makes that byte-identical: `serde_json`'s
+    /// `Map` is a `BTreeMap` unless `preserve_order` is on, which would sort
+    /// every key.
+    pub document: String,
 }
 
 /// Run ffprobe on a file.
@@ -622,7 +663,9 @@ pub fn probe(path: &Path) -> Result<Probe, String> {
     }
     let document: Value = serde_json::from_slice(&output.stdout)
         .map_err(|error| format!("ffprobe failed: {error}"))?;
-    Ok(parse_probe(&document))
+    let mut probe = parse_probe(&document);
+    probe.document = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    Ok(probe)
 }
 
 fn parse_probe(document: &Value) -> Probe {
@@ -638,6 +681,7 @@ fn parse_probe(document: &Value) -> Probe {
             duration: format.get("duration").cloned(),
             bit_rate: format.get("bit_rate").cloned(),
         },
+        document: String::new(),
     }
 }
 

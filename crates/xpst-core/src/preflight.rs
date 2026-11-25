@@ -264,6 +264,12 @@ pub struct MediaVerdict {
     pub checks: Vec<Check>,
     pub duration_seconds: Option<f64>,
     pub aspect_ratio: Option<f64>,
+    /// The raw `ffprobe` document, verbatim, when a probe succeeded.
+    ///
+    /// `MediaReport.to_dict(include_probe=True)` publishes it as-is, so the text
+    /// (not a parsed map) is what keeps ffprobe's own key order. `xpst-core` is
+    /// dependency-free, so the ordered re-parse happens in the CLI.
+    pub probe: Option<String>,
 }
 
 /// What will (or would) happen to a source file for one platform.
@@ -311,6 +317,14 @@ pub struct MediaFilePlan {
     pub size_bytes: Option<u64>,
     pub duration_seconds: Option<f64>,
     pub aspect_ratio: Option<f64>,
+    /// The ingest checks the verdict produced, in order.
+    ///
+    /// `MediaReport.to_dict()` publishes them as `media_spec.checks`, which is
+    /// what `verify-media` reports; the route plan only reads the derived
+    /// blockers and warnings.
+    pub checks: Vec<Check>,
+    /// The raw `ffprobe` document, verbatim (`media_spec.probe`).
+    pub probe: Option<String>,
     pub transform: Option<TransformPlan>,
     pub warnings: Vec<PreflightIssue>,
     pub hard_blockers: Vec<PreflightIssue>,
@@ -326,6 +340,8 @@ impl MediaFilePlan {
             size_bytes: None,
             duration_seconds: None,
             aspect_ratio: None,
+            checks: Vec::new(),
+            probe: None,
             transform: None,
             warnings: Vec::new(),
             hard_blockers: Vec::new(),
@@ -393,6 +409,84 @@ impl PostPlanResult {
     #[must_use]
     pub fn platform(&self, name: &str) -> Option<&PlatformPlan> {
         self.platforms.iter().find(|plan| plan.platform == name)
+    }
+
+    /// `PostPlanResult.ready`: no request blocker and every destination ready.
+    #[must_use]
+    pub fn ready(&self) -> bool {
+        self.request_blockers.is_empty() && self.platforms.iter().all(PlatformPlan::ready)
+    }
+
+    /// `PostPlanResult.ok` — the same verdict under the name clients read.
+    #[must_use]
+    pub fn ok(&self) -> bool {
+        self.ready()
+    }
+
+    /// Request blockers first, then every destination's, in plan order.
+    #[must_use]
+    pub fn hard_blockers(&self) -> Vec<&PreflightIssue> {
+        self.request_blockers
+            .iter()
+            .chain(
+                self.platforms
+                    .iter()
+                    .flat_map(|plan| plan.hard_blockers.iter()),
+            )
+            .collect()
+    }
+
+    /// Every destination's warnings, in plan order.
+    #[must_use]
+    pub fn warnings(&self) -> Vec<&PreflightIssue> {
+        self.platforms
+            .iter()
+            .flat_map(|plan| plan.warnings.iter())
+            .collect()
+    }
+
+    /// The first hard blocker — the stable `{code, message}` error object.
+    #[must_use]
+    pub fn error(&self) -> Option<&PreflightIssue> {
+        self.hard_blockers().into_iter().next()
+    }
+}
+
+impl PlatformPlan {
+    /// `PlatformPlan.ready`: nothing blocks it and readiness agrees.
+    #[must_use]
+    pub fn ready(&self) -> bool {
+        self.hard_blockers.is_empty() && self.readiness.ready()
+    }
+
+    /// `PlatformPlan.transform`: the single-media transform, or `None`.
+    ///
+    /// Python returns it only when the plan carries exactly one media item, so a
+    /// carousel does not report one item's decision as the whole plan's.
+    #[must_use]
+    pub fn transform(&self) -> Option<&TransformPlan> {
+        if self.media.len() == 1 {
+            self.media[0].transform.as_ref()
+        } else {
+            None
+        }
+    }
+
+    /// `PlatformPlan.transforms`: every media item's transform, in order.
+    #[must_use]
+    pub fn transforms(&self) -> Vec<&TransformPlan> {
+        self.media
+            .iter()
+            .filter_map(|item| item.transform.as_ref())
+            .collect()
+    }
+}
+
+impl MediaFilePlan {
+    /// `MediaFilePlan.ok`: nothing hard-blocks this file.
+    #[must_use]
+    pub fn ok(&self) -> bool {
+        self.hard_blockers.is_empty()
     }
 }
 
@@ -1005,6 +1099,12 @@ pub struct PlanRequest {
     pub include_readiness: bool,
     pub probe_media: bool,
     pub visibility: Option<String>,
+    /// Run the ffmpeg loudness measurement as part of each media verdict.
+    ///
+    /// `false` for the route plan (Python's `build_route_plan` passes
+    /// `check_loudness=False`, so `preflight` never spawns ffmpeg twice) and
+    /// `true` for `verify-media`, whose `PostPlanRequest` defaults it on.
+    pub check_loudness: bool,
 }
 
 impl PlanRequest {
@@ -1089,6 +1189,9 @@ pub fn build_route_plan(host: &dyn PreflightHost, request: &PlanRequest) -> Rout
         &PlanRequest {
             media_paths: plan_media,
             content_type: Some(detected.clone()),
+            // Python's `build_route_plan` pins this off: a route plan never
+            // pays for the loudness subprocess, whatever the caller asked for.
+            check_loudness: false,
             ..request.clone()
         },
         &resolution.targets,
@@ -1556,7 +1659,7 @@ fn plan_media(
         return plan;
     }
 
-    let verdict = host.verify_media(&path, platform, false);
+    let verdict = host.verify_media(&path, platform, request.check_loudness);
     let mut warnings: Vec<PreflightIssue> = Vec::new();
     let mut blockers: Vec<PreflightIssue> = Vec::new();
     let mut modality_blocked = false;
@@ -1597,6 +1700,8 @@ fn plan_media(
         size_bytes,
         duration_seconds: verdict.duration_seconds,
         aspect_ratio: verdict.aspect_ratio,
+        checks: verdict.checks,
+        probe: verdict.probe,
         transform,
         warnings,
         hard_blockers: blockers,

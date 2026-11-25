@@ -136,6 +136,12 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         status,
     ),
     implemented(
+        "schedule add",
+        "xpst-state",
+        "The add-time route resolution (`build_route_plan` with readiness off) and the persisted entry: `--text`/FILE/`--caption-for`/caption-cap/date validation in Python's order, the resolved destinations stored verbatim, the UTC `scheduled_time` plus the entry's own zone, and the `json.dump(indent=2, ensure_ascii=False)` store write under the same `.schedule.lock`; payload and `schedule.json` byte-compared with the Python CLI.",
+        schedule_add,
+    ),
+    implemented(
         "schedule list",
         "xpst-state",
         "Entries, pause marker and paused snapshots, byte-compared with `schedule_list --json` (store key order preserved, `scheduled_time_local` appended last).",
@@ -328,9 +334,15 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         readiness,
     ),
     implemented(
+        "verify-media",
+        "xpst-media",
+        "The per-destination ingest verdict (`PostPreflightService.plan` with readiness off): `-p all` resolved through `enabled_destinations`, the `media_spec` check list and the raw ffprobe document in ffprobe's own key order, the `--plan` post plan and transform plans, and the exit-1-on-error contract; payload byte-compared with the Python CLI.",
+        verify_media,
+    ),
+    implemented(
         "preflight",
         "xpst-core",
-        "The config-aware route plan (`build_route_plan`): target resolution from the config's enabled flags, the per-destination state/reason/envelope/constraints/blockers/warnings/transform/visibility payload, the ban-risk advisory and the read-only quota gate; payload byte-compared with the Python CLI. `verify_media`'s loudness check is not ported (preflight always plans with `check_loudness=False`).",
+        "The config-aware route plan (`build_route_plan`): target resolution from the config's enabled flags, the per-destination state/reason/envelope/constraints/blockers/warnings/transform/visibility payload, the ban-risk advisory and the read-only quota gate; payload byte-compared with the Python CLI. `verify_media`'s loudness check is ported but the route plan pins `check_loudness=False`, so `preflight` never spawns the extra ffmpeg pass.",
         preflight,
     ),
 ];
@@ -387,6 +399,15 @@ fn media_status(
     err: &mut dyn Write,
 ) -> i32 {
     commands::media::status(global, leaf, out, err)
+}
+
+fn verify_media(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::media::verify_media(global, leaf, out, err)
 }
 
 fn messenger_status(
@@ -508,6 +529,15 @@ fn status(
     err: &mut dyn Write,
 ) -> i32 {
     commands::status::run(global, leaf, out, err)
+}
+
+fn schedule_add(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::schedule::add(global, leaf, out, err)
 }
 
 fn schedule_list(

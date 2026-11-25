@@ -130,6 +130,26 @@ FFPROBE_NONCOMPLIANT_STUB = (
     "JSON\n"
 )
 
+# `verify-media` measures integrated loudness with an ffmpeg `loudnorm` pass and
+# reads the filter's JSON block off stderr. A stand-in that prints a fixed block
+# makes the `loudness` check a property of the fixture instead of of the host's
+# codecs: -13.5 LUFS is 0.5 LU off YouTube's -14.0 target, so the check is `ok`
+# and the detail carries the signed deviation.
+FFMPEG_LOUDNESS_STUB = (
+    "#!/bin/sh\n"
+    "cat >&2 <<'JSON'\n"
+    "[Parsed_loudnorm_0 @ 0x1]\n"
+    "{\n"
+    '\t"input_i" : "-13.50",\n'
+    '\t"input_tp" : "-1.20",\n'
+    '\t"input_lra" : "3.10",\n'
+    '\t"input_thresh" : "-24.00",\n'
+    '\t"output_i" : "-14.00"\n'
+    "}\n"
+    "JSON\n"
+    "exit 0\n"
+)
+
 # A 1080x1920 PNG header: the still-image path reads the size from the file
 # itself, so this row exercises the header reader rather than ffprobe.
 PNG_HEADER_B64 = "iVBORw0KGgoAAAANSUhEUgAABDgAAAeA"
@@ -2062,6 +2082,311 @@ SCENARIOS = [
         },
         "compare": "stdout",
     },
+    # ── verify-media ───────────────────────────────────────────────────────
+    {
+        # `-p all` is the enabled destinations (youtube/x/instagram/tiktok on a
+        # fresh profile), each verified against its own ingest spec. The probe
+        # document is ffprobe's, so the row pins the raw key order too.
+        "name": "verify_media_pristine",
+        "argv": ["verify-media", "--json", "PROFILE/clip.mp4"],
+        "seed": {"bin/ffprobe": FFPROBE_STUB, "clip.mp4": "x" * 64},
+        "executable": ["bin/ffprobe"],
+        "env": {"XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe"},
+        "compare": "stdout",
+    },
+    {
+        # `--plan` adds the whole `PostPlanResult.to_dict()` document and the
+        # per-destination transform plans.
+        "name": "verify_media_plan",
+        "argv": ["verify-media", "--json", "--plan", "PROFILE/clip.mp4"],
+        "seed": {
+            "bin/ffprobe": FFPROBE_STUB,
+            "bin/ffmpeg": FFMPEG_STUB,
+            "clip.mp4": "x" * 64,
+        },
+        "executable": ["bin/ffprobe", "bin/ffmpeg"],
+        "env": {
+            "XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe",
+            "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+        },
+        "compare": "stdout",
+    },
+    {
+        # An explicit `-p <disabled>` still verifies, and says the destination is
+        # switched off. Threads also needs a public URL, so the row exits 1.
+        "name": "verify_media_platform_disabled",
+        "argv": ["verify-media", "--json", "-p", "threads", "PROFILE/clip.mp4"],
+        "seed": {"bin/ffprobe": FFPROBE_STUB, "clip.mp4": "x" * 64},
+        "executable": ["bin/ffprobe"],
+        "env": {"XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe"},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # A container the destination rejects: one hard error, exit 1.
+        "name": "verify_media_container_error",
+        "argv": ["verify-media", "--json", "-p", "youtube", "PROFILE/clip.mkv"],
+        "seed": {"bin/ffprobe": FFPROBE_STUB, "clip.mkv": "x" * 64},
+        "executable": ["bin/ffprobe"],
+        "env": {"XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe"},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # A still image at a destination that publishes images: the modality
+        # split runs the image rules (header read, aspect, size), never the
+        # video ones.
+        "name": "verify_media_image",
+        "argv": ["verify-media", "--json", "-p", "instagram", "PROFILE/pic.png"],
+        "seed": {"bin/ffprobe": FFPROBE_STUB},
+        "binary": {"pic.png": PNG_HEADER_B64},
+        "executable": ["bin/ffprobe"],
+        "env": {"XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe"},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # The loudness check: `verify-media` defaults `check_loudness` on, and
+        # the measurement is the ffmpeg `loudnorm` analysis pass.
+        "name": "verify_media_loudness",
+        "argv": ["verify-media", "--json", "-p", "youtube", "PROFILE/clip.mp4"],
+        "seed": {
+            "bin/ffprobe": FFPROBE_STUB,
+            "bin/ffmpeg": FFMPEG_LOUDNESS_STUB,
+            "clip.mp4": "x" * 64,
+        },
+        "executable": ["bin/ffprobe", "bin/ffmpeg"],
+        "env": {
+            "XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe",
+            "XPST_FFMPEG_PATH": "PROFILE/bin/ffmpeg",
+        },
+        "compare": "stdout",
+    },
+    {
+        # `click.Path(exists=True)` refuses before the command body runs: a
+        # usage error on stderr, exit 2, nothing on stdout.
+        "name": "verify_media_missing_file",
+        "argv": ["verify-media", "--json", "PROFILE/nope.mp4"],
+        "seed": {},
+        "compare": "stdout",
+    },
+    {
+        # No `--json` flag: the payload is automatic on a non-TTY, so this row
+        # pins the auto-JSON rule rather than the text renderer (which is a
+        # recorded divergence — plain lines, no Rich colour).
+        "name": "verify_media_auto_json",
+        "argv": ["verify-media", "-p", "youtube", "PROFILE/clip.mp4"],
+        "seed": {"bin/ffprobe": FFPROBE_STUB, "clip.mp4": "x" * 64},
+        "executable": ["bin/ffprobe"],
+        "env": {"XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe"},
+        "compare": "stdout",
+    },
+    # ── schedule add ───────────────────────────────────────────────────────
+    {
+        # The entry document and the written store. `id`, `operation_id`,
+        # `idempotency_key` and `created_at` are random/wall-clock, so those four
+        # values are substituted in both the payload and the file; every other
+        # byte (key order, `json.dump(indent=2)` separators) is compared.
+        "name": "schedule_add_basic",
+        "argv": [
+            "schedule", "add", "PROFILE/clip.mp4",
+            "--caption", "hello world",
+            "--at", "2026-06-08 10:00",
+            "--json",
+        ],
+        "seed": {"bin/ffprobe": FFPROBE_STUB, "clip.mp4": "x" * 64},
+        "executable": ["bin/ffprobe"],
+        "env": {
+            "XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe",
+            "TZ": "America/Denver",
+        },
+        "mask": ["id", "operation_id", "idempotency_key", "created_at"],
+        "mask_file_keys": ["id", "operation_id", "idempotency_key", "created_at"],
+        "files": ["schedule.json"],
+        "compare": "json",
+    },
+    {
+        # `--dry-run` validates and prints without writing: no `schedule.json`.
+        "name": "schedule_add_dry_run",
+        "argv": [
+            "schedule", "add", "PROFILE/clip.mp4",
+            "--caption", "hello",
+            "--at", "2026-06-08T10:00:00",
+            "--dry-run",
+            "--json",
+        ],
+        "seed": {"bin/ffprobe": FFPROBE_STUB, "clip.mp4": "x" * 64},
+        "executable": ["bin/ffprobe"],
+        "env": {
+            "XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe",
+            "TZ": "America/Denver",
+        },
+        "compare": "stdout",
+    },
+    {
+        # A text-only entry: no media path, `content_type: text`, and the route
+        # resolved from an explicit `-p`.
+        "name": "schedule_add_text",
+        "argv": [
+            "schedule", "add", "--text",
+            "--caption", "a text post",
+            "--at", "2026-06-08 10:00",
+            "-p", "x",
+            "--json",
+        ],
+        "seed": {},
+        "env": {"TZ": "America/Denver"},
+        "mask": ["id", "operation_id", "idempotency_key", "created_at"],
+        "mask_file_keys": ["id", "operation_id", "idempotency_key", "created_at"],
+        "files": ["schedule.json"],
+        "compare": "json",
+    },
+    {
+        # Per-destination captions and a repeat rule, persisted with the entry.
+        "name": "schedule_add_caption_for_repeat",
+        "argv": [
+            "schedule", "add", "PROFILE/clip.mp4",
+            "--caption", "hello",
+            "--caption-for", "x=short",
+            "--caption-for", "youtube=long copy",
+            "--at", "2026-06-08 10:00",
+            "--repeat", "daily",
+            "--json",
+        ],
+        "seed": {"bin/ffprobe": FFPROBE_STUB, "clip.mp4": "x" * 64},
+        "executable": ["bin/ffprobe"],
+        "env": {
+            "XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe",
+            "TZ": "America/Denver",
+        },
+        "mask": ["id", "operation_id", "idempotency_key", "created_at"],
+        "mask_file_keys": ["id", "operation_id", "idempotency_key", "created_at"],
+        "files": ["schedule.json"],
+        "compare": "json",
+    },
+    {
+        # Appending to an existing store: the new entry lands after the old one,
+        # and the old entry keeps its own key order.
+        "name": "schedule_add_append",
+        "argv": [
+            "schedule", "add", "PROFILE/clip.mp4",
+            "--caption", "second",
+            "--at", "2026-07-01 09:30",
+            "--json",
+        ],
+        "seed": {
+            "bin/ffprobe": FFPROBE_STUB,
+            "clip.mp4": "x" * 64,
+            "schedule.json": json.dumps(SCHEDULE_ENTRIES[:1]),
+        },
+        "executable": ["bin/ffprobe"],
+        "env": {
+            "XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe",
+            "TZ": "America/Denver",
+        },
+        "mask": ["id", "operation_id", "idempotency_key", "created_at"],
+        "mask_file_keys": ["id", "operation_id", "idempotency_key", "created_at"],
+        "files": ["schedule.json"],
+        "compare": "json",
+    },
+    {
+        # `--text` plus a FILE is a usage error (exit 2).
+        "name": "schedule_add_invalid_text_entry",
+        "argv": [
+            "schedule", "add", "PROFILE/clip.mp4", "--text",
+            "--caption", "hi",
+            "--at", "2026-06-08 10:00",
+            "--json",
+        ],
+        "seed": {"clip.mp4": "x" * 64},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # A missing FILE is a general error (exit 1), not a usage error.
+        "name": "schedule_add_file_not_found",
+        "argv": [
+            "schedule", "add", "PROFILE/nope.mp4",
+            "--caption", "hi",
+            "--at", "2026-06-08 10:00",
+            "--json",
+        ],
+        "seed": {},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # A caption past `MAX_CAPTION_LENGTH` fails fast with the two numbers.
+        "name": "schedule_add_caption_too_long",
+        "argv": [
+            "schedule", "add", "PROFILE/clip.mp4",
+            "--caption", "a" * 100_001,
+            "--at", "2026-06-08 10:00",
+            "--json",
+        ],
+        "seed": {"clip.mp4": "x" * 64},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # A malformed `--caption-for` is a usage error (exit 2).
+        "name": "schedule_add_invalid_caption_for",
+        "argv": [
+            "schedule", "add", "PROFILE/clip.mp4",
+            "--caption", "hi",
+            "--caption-for", "nope",
+            "--at", "2026-06-08 10:00",
+            "--json",
+        ],
+        "seed": {"clip.mp4": "x" * 64},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # An unparseable `--at` is a usage error (exit 2).
+        "name": "schedule_add_invalid_date",
+        "argv": [
+            "schedule", "add", "PROFILE/clip.mp4",
+            "--caption", "hi",
+            "--at", "nope",
+            "--json",
+        ],
+        "seed": {"clip.mp4": "x" * 64},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # A destination that would not publish the entry: the refusal carries the
+        # whole route plan, so the caller can see why.
+        "name": "schedule_add_no_destinations",
+        "argv": [
+            "schedule", "add", "PROFILE/clip.mp4",
+            "--caption", "hi",
+            "--at", "2026-06-08 10:00",
+            "-p", "bluesky",
+            "--json",
+        ],
+        "seed": {"bin/ffprobe": FFPROBE_STUB, "clip.mp4": "x" * 64},
+        "executable": ["bin/ffprobe"],
+        "env": {"XPST_FFPROBE_PATH": "PROFILE/bin/ffprobe"},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
+    {
+        # `-p ,` parses to no usable names: Python prints this to stdout even
+        # under `--json`, so the row is a text row.
+        "name": "schedule_add_invalid_platforms",
+        "argv": [
+            "schedule", "add", "PROFILE/clip.mp4",
+            "--caption", "hi",
+            "--at", "2026-06-08 10:00",
+            "-p", ",",
+            "--json",
+        ],
+        "seed": {"clip.mp4": "x" * 64},
+        "allow_nonzero": True,
+        "compare": "stdout",
+    },
 ]
 
 
@@ -2251,6 +2576,29 @@ def normalize_clock(text: str) -> str:
     """
     for pattern, replacement in CLOCK_PATTERNS:
         text = pattern.sub(replacement, text)
+def mask_file_keys(text: str, keys: list[str] | None) -> str:
+    """Replace the *values* of named top-level keys inside a written JSON file.
+
+    `schedule add` writes a `uuid4` id, an operation id and a wall-clock
+    `created_at` into `schedule.json`; two runs never agree on them. Only those
+    values are substituted — every other byte, including the key order and the
+    `json.dump(indent=2)` separators, is still compared, which is the contract
+    the fire path reads back.
+    """
+    if not keys:
+        return text
+    try:
+        document = json.loads(text)
+    except ValueError:
+        return text
+    if not isinstance(document, list):
+        return text
+    for entry in document:
+        if not isinstance(entry, dict):
+            continue
+        for key in keys:
+            if key in entry:
+                text = text.replace(json.dumps(entry[key]), '"<TS>"')
     return text
 
 
@@ -2307,13 +2655,14 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
         for relative in scenario.get("files", []):
             path = profile / relative
             if path.exists():
-                files[relative] = normalize(
+                text = normalize(
                     path.read_text(encoding="utf-8"),
                     profile,
                     scenario.get("mask"),
                     scenario.get("mask_findings"),
                     scenario.get("mask_checks"),
                 )
+                files[relative] = mask_file_keys(text, scenario.get("mask_file_keys"))
         return {
             "exit_code": proc.returncode,
             "payload": payload,
@@ -2401,6 +2750,8 @@ def run_scenario(scenario: dict, python: str) -> dict:
         record["mask_findings"] = scenario["mask_findings"]
     if scenario.get("mask_checks"):
         record["mask_checks"] = scenario["mask_checks"]
+    if scenario.get("mask_file_keys"):
+        record["mask_file_keys"] = scenario["mask_file_keys"]
     if scenario.get("executable"):
         record["executable"] = scenario["executable"]
     if scenario.get("binary"):

@@ -9,14 +9,36 @@
 //! empty queue. The payload rules exist so that "empty" cannot be confused with
 //! "paused and emptied": once a pause marker or a snapshot exists, the payload
 //! becomes an object carrying both.
+//!
+//! `schedule add` parity target: `src/xpst/cli.py::schedule_add` →
+//! `xpst.services.route_plan.build_route_plan` → `ScheduleManager.add`. The
+//! route is resolved AT ADD TIME and the resolved destinations are persisted
+//! verbatim, so a queue entry cannot re-target itself when a new account is
+//! connected later. The entry document and the store append live in
+//! [`xpst_state::schedule`]; this module validates the request, resolves the
+//! route, and renders Python's payload.
+//!
+//! **Divergences, recorded in the ledger note:** text mode prints plain lines
+//! instead of Rich's coloured output, and the `Invalid platforms` refusal (which
+//! Python prints to stdout even under `--json`) is reproduced as plain text.
 
 use std::io::Write;
 
 use clap::ArgMatches;
 use serde_json::Value;
 
-use crate::output::{boolean, null, object, string, write_python_json_value, write_text};
+use crate::commands::bootstrap;
+use crate::commands::config_view::ConfigView;
+use crate::commands::preflight::{plan_value, Host};
+use crate::output::{
+    boolean, integer, null, object, python_repr, string, write_python_json,
+    write_python_json_value, write_text,
+};
 use crate::{exit, flag, leaf_flag, leaf_string, paths, string_value, GlobalOptions};
+
+/// `schedule_manager.MAX_CAPTION_LENGTH` — the store is re-read by every
+/// scheduler tick, so a multi-megabyte caption must fail fast.
+const MAX_CAPTION_LENGTH: usize = 100_000;
 
 /// Run `schedule list`.
 pub fn run(
@@ -119,6 +141,616 @@ fn render_text(payload: &Value, listing: &xpst_state::schedule::ScheduleListing)
         ));
     }
     text
+}
+
+// ---------------------------------------------------------------------------
+// `schedule add`
+// ---------------------------------------------------------------------------
+//
+// Parity target: `src/xpst/cli.py::schedule_add`. The validation order is
+// Python's, because the first failure is the one the user sees: `--text` with a
+// FILE, then a missing FILE, then the caption cap, then `--caption-for`, then
+// the date, then the platform list, then the route.
+//
+// The route is resolved here, at add time, and the resolved destinations are
+// persisted verbatim — a queue entry that stored "all enabled" would re-target
+// itself whenever a new account is connected later.
+
+/// Run `schedule add`.
+pub fn add(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let json_mode = global.json || leaf.is_some_and(|m| flag(m, "opt:json"));
+    let file = leaf_string(leaf, "arg:file").filter(|value| !value.is_empty());
+    let caption = leaf_string(leaf, "opt:caption").unwrap_or_default();
+    let text_post = leaf_flag(leaf, "opt:text");
+    let caption_for: Vec<String> = leaf
+        .and_then(|matches| matches.get_many::<String>("opt:caption-for"))
+        .map(|values| values.cloned().collect())
+        .unwrap_or_default();
+    let scheduled_time = leaf_string(leaf, "opt:at").unwrap_or_default();
+    let platforms_arg = leaf_string(leaf, "opt:platforms");
+    let repeat_rule = leaf_string(leaf, "opt:repeat");
+    let dry_run = leaf_flag(leaf, "opt:dry-run");
+
+    // ── 1. `--text` takes no media file ────────────────────────────────────
+    if text_post && file.is_some() {
+        let message = "--text takes no media file; drop FILE for a text-only post.";
+        if json_mode {
+            let _ = write_python_json(out, &error_payload("INVALID_TEXT_ENTRY", message, vec![]));
+        } else {
+            let _ = write_text(out, message);
+        }
+        return exit::CONFIG_ERROR;
+    }
+    let entry_content_type = if text_post { Some("text") } else { None };
+    let video_path = file.as_ref().map(std::path::PathBuf::from);
+    if let Some(path) = &video_path {
+        if !path.exists() {
+            let raw = file.clone().unwrap_or_default();
+            let message = format!("File not found: {raw}");
+            if json_mode {
+                let _ = write_python_json(
+                    out,
+                    &error_payload("FILE_NOT_FOUND", &message, vec![("file", string(raw))]),
+                );
+            } else {
+                let _ = write_text(out, &message);
+            }
+            return exit::GENERAL;
+        }
+    }
+
+    // ── 2. The caption cap ─────────────────────────────────────────────────
+    if caption.chars().count() > MAX_CAPTION_LENGTH {
+        let length = caption.chars().count();
+        let message = format!(
+            "Caption is {} characters; the limit is {}. Shorten the caption (platforms cap \
+             captions at a few thousand characters).",
+            thousands(length),
+            thousands(MAX_CAPTION_LENGTH)
+        );
+        if json_mode {
+            let _ = write_python_json(
+                out,
+                &error_payload(
+                    "CAPTION_TOO_LONG",
+                    &message,
+                    vec![
+                        ("caption_length", integer(length as i64)),
+                        ("max_caption_length", integer(MAX_CAPTION_LENGTH as i64)),
+                    ],
+                ),
+            );
+        } else {
+            let _ = write_text(out, &format!("Caption too long: {message}"));
+        }
+        return exit::GENERAL;
+    }
+
+    // ── 3. `--caption-for PLATFORM=TEXT` ───────────────────────────────────
+    let mut per_platform_captions: Vec<(String, String)> = Vec::new();
+    for raw in &caption_for {
+        let Some((platform, text)) = raw.split_once('=') else {
+            return invalid_caption_for(out, json_mode, raw);
+        };
+        let platform = platform.trim();
+        if platform.is_empty() {
+            return invalid_caption_for(out, json_mode, raw);
+        }
+        per_platform_captions.push((platform.to_lowercase(), text.to_owned()));
+    }
+    for (platform, text) in &per_platform_captions {
+        let length = text.chars().count();
+        if length > MAX_CAPTION_LENGTH {
+            let message = format!(
+                "Caption override for {} is {} characters; the limit is {}. Shorten it before \
+                 scheduling.",
+                python_repr(platform),
+                thousands(length),
+                thousands(MAX_CAPTION_LENGTH)
+            );
+            if json_mode {
+                let _ = write_python_json(
+                    out,
+                    &error_payload(
+                        "CAPTION_TOO_LONG",
+                        &message,
+                        vec![
+                            ("platform", string(platform.clone())),
+                            ("caption_length", integer(length as i64)),
+                            ("max_caption_length", integer(MAX_CAPTION_LENGTH as i64)),
+                        ],
+                    ),
+                );
+            } else {
+                let _ = write_text(out, &format!("Caption too long: {message}"));
+            }
+            return exit::GENERAL;
+        }
+    }
+
+    // ── 4. The scheduled time ──────────────────────────────────────────────
+    let Some(naive) = parse_scheduled_time(&scheduled_time) else {
+        let message =
+            format!("Invalid date format: {scheduled_time}. Use 'YYYY-MM-DD HH:MM' or ISO format.");
+        if json_mode {
+            let _ = write_python_json(
+                out,
+                &error_payload(
+                    "INVALID_DATE_FORMAT",
+                    &message,
+                    vec![("value", string(scheduled_time.clone()))],
+                ),
+            );
+        } else {
+            let _ = write_text(
+                out,
+                &format!(
+                    "Invalid date format: {scheduled_time}\nUse: 'YYYY-MM-DD HH:MM' or ISO format"
+                ),
+            );
+        }
+        return exit::CONFIG_ERROR;
+    };
+
+    // ── 5. The platform list ───────────────────────────────────────────────
+    let platform_list: Option<Vec<String>> = platforms_arg.as_ref().map(|raw| {
+        raw.split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+            .collect()
+    });
+    if let Some(list) = &platform_list {
+        if list.is_empty() {
+            // Python prints this to stdout even under `--json` (no
+            // `json_output` call), so the row is a text row in both engines.
+            let _ = write_text(
+                out,
+                &format!(
+                    "Invalid platforms: no usable platform names in {}",
+                    python_repr(platforms_arg.as_deref().unwrap_or(""))
+                ),
+            );
+            return exit::CONFIG_ERROR;
+        }
+    }
+
+    // ── 6. The route, resolved now ─────────────────────────────────────────
+    let config_path = match bootstrap::ensure_config(global) {
+        Ok(path) => path,
+        Err(error) => return bootstrap::report(err, json_mode, out, &error),
+    };
+    let document = match xpst_config::ConfigDocument::read(&config_path) {
+        Ok(document) => document.raw().clone(),
+        Err(error) => {
+            let _ = writeln!(err, "{error}");
+            return exit::CONFIG_ERROR;
+        }
+    };
+    let config_dir = config_path
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let env = |name: &str| std::env::var(name).ok();
+    let view = match ConfigView::load(&document, &config_dir, &env) {
+        Ok(view) => view,
+        Err(message) => {
+            let _ = writeln!(err, "xpst schedule add: {message}");
+            return exit::GENERAL;
+        }
+    };
+    let host = Host::new(&view, &config_dir, &env);
+    let request = xpst_core::preflight::PlanRequest {
+        media_paths: video_path
+            .as_ref()
+            .map(|path| vec![path.display().to_string()])
+            .unwrap_or_default(),
+        caption: caption.clone(),
+        per_platform_captions: per_platform_captions.clone(),
+        content_type: Some(entry_content_type.unwrap_or("auto").to_owned()),
+        requested: platform_list.clone(),
+        all_connected: false,
+        include_transform: false,
+        // Scheduling is a future publish: a credential missing *now* is not a
+        // reason to refuse the entry. The format/envelope verdict still applies.
+        include_readiness: false,
+        probe_media: true,
+        visibility: None,
+        check_loudness: false,
+    };
+    let route = xpst_core::preflight::build_route_plan(&host, &request);
+
+    if route.posting_destinations().is_empty() {
+        let (code, message) = route.actionable_error().map_or_else(
+            || {
+                (
+                    "NO_DESTINATIONS".to_owned(),
+                    "No destination would publish this entry.".to_owned(),
+                )
+            },
+            |error| (error.code.clone(), error.message.clone()),
+        );
+        if json_mode {
+            let mut payload = error_payload(&code, &message, vec![]);
+            if let xpst_config::Value::Mapping(map) = &mut payload {
+                map.insert(xpst_config::Value::from("route_plan"), plan_value(&route));
+                map.insert(
+                    xpst_config::Value::from("exit_code"),
+                    integer(i64::from(exit::CONFIG_ERROR)),
+                );
+            }
+            let _ = write_python_json(out, &payload);
+        } else {
+            let mut text = format!("Error: {message}\n");
+            for item in &route.destinations {
+                text.push_str(&format!(
+                    "  {}: {} — {}\n",
+                    item.platform, item.state, item.reason
+                ));
+            }
+            let _ = write_text(out, text.trim_end());
+        }
+        return exit::CONFIG_ERROR;
+    }
+    let platform_list: Vec<String> = platform_list.unwrap_or_else(|| {
+        route
+            .posting_destinations()
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    });
+    let effective_repeat = repeat_rule.filter(|rule| rule != "none");
+
+    let zone = jiff::tz::TimeZone::system();
+    let resolved_video = video_path
+        .as_ref()
+        .map(|path| {
+            std::fs::canonicalize(path)
+                .unwrap_or_else(|_| path.clone())
+                .display()
+                .to_string()
+        })
+        .unwrap_or_default();
+
+    // ── 7. `--dry-run` validates and prints without writing ────────────────
+    if dry_run {
+        if json_mode {
+            let payload = object(vec![
+                ("dry_run", boolean(true)),
+                ("video_path", string(resolved_video.clone())),
+                ("content_type", entry_content_type.map_or_else(null, string)),
+                ("caption", string(caption.clone())),
+                (
+                    "per_platform_captions",
+                    captions_value(&per_platform_captions),
+                ),
+                ("scheduled_time", string(naive.to_string())),
+                (
+                    "platforms",
+                    crate::output::array(platform_list.iter().cloned().map(string).collect()),
+                ),
+                ("target_source", string(route.source.clone())),
+                ("route_plan", plan_value(&route)),
+                (
+                    "repeat_rule",
+                    effective_repeat.clone().map_or_else(null, string),
+                ),
+            ]);
+            let _ = write_python_json(out, &payload);
+        } else {
+            let mut text = String::from("Dry run — would schedule:\n");
+            text.push_str(&format!(
+                "  File:     {}\n",
+                if resolved_video.is_empty() {
+                    "(text post — no media)"
+                } else {
+                    &resolved_video
+                }
+            ));
+            text.push_str(&format!("  Caption:  {}\n", truncate(&caption, 60)));
+            for (platform, override_text) in &per_platform_captions {
+                text.push_str(&format!(
+                    "  Caption for {platform}: {}\n",
+                    truncate(override_text, 60)
+                ));
+            }
+            text.push_str(&format!(
+                "  Time:     {}\n",
+                naive.strftime("%Y-%m-%d %H:%M")
+            ));
+            text.push_str(&format!(
+                "  Platforms: {}\n",
+                if platform_list.is_empty() {
+                    "none".to_owned()
+                } else {
+                    platform_list.join(", ")
+                }
+            ));
+            if let Some(rule) = &effective_repeat {
+                text.push_str(&format!("  Repeat:   {rule}\n"));
+            }
+            let _ = write_text(out, text.trim_end());
+        }
+        return exit::SUCCESS;
+    }
+
+    // ── 8. Write the entry ─────────────────────────────────────────────────
+    let Some(dir) = paths::config_dir() else {
+        let message =
+            "cannot determine the config directory: neither XPST_CONFIG_DIR nor HOME is set";
+        if json_mode {
+            let payload =
+                crate::output::error_payload_with("CONFIG_ERROR", message, serde_json::json!({}));
+            let _ = write_python_json_value(out, &payload);
+        } else {
+            let _ = writeln!(err, "{message}");
+        }
+        return exit::CONFIG_ERROR;
+    };
+    let operation_id = uuid4();
+    let spec = xpst_state::schedule::NewEntry {
+        id: operation_id.chars().take(8).collect(),
+        operation_id,
+        video_path: resolved_video,
+        caption: caption.clone(),
+        per_platform_captions: per_platform_captions.clone(),
+        platforms: platform_list.clone(),
+        scheduled_time_utc: to_utc_isoformat(naive, &zone),
+        timezone: zone.iana_name().unwrap_or_default().to_owned(),
+        created_at: python_naive_isoformat(&zone),
+        repeat_rule: effective_repeat.clone(),
+        content_type: entry_content_type.map(str::to_owned),
+        media_paths: Vec::new(),
+    };
+    let entry = xpst_state::schedule::new_entry(&spec);
+    if let Err(error) = xpst_state::schedule::append(&dir, entry.clone(), &|document| {
+        crate::output::python_pretty_json_utf8(document)
+    }) {
+        let _ = writeln!(err, "xpst schedule add: cannot write the queue: {error}");
+        return exit::GENERAL;
+    }
+    let entry = xpst_state::schedule::with_local_view(entry);
+
+    if json_mode {
+        let _ = write_python_json_value(out, &entry);
+    } else {
+        let mut text = String::from("✓ Scheduled post\n");
+        text.push_str(&format!(
+            "  ID:       {}\n",
+            entry["id"].as_str().unwrap_or("")
+        ));
+        text.push_str(&format!(
+            "  File:     {}\n",
+            if spec.video_path.is_empty() {
+                "(text post — no media)"
+            } else {
+                &spec.video_path
+            }
+        ));
+        text.push_str(&format!("  Caption:  {}\n", truncate(&caption, 60)));
+        for (platform, override_text) in &per_platform_captions {
+            text.push_str(&format!(
+                "  Caption for {platform}: {}\n",
+                truncate(override_text, 60)
+            ));
+        }
+        text.push_str(&format!(
+            "  Time:     {}\n",
+            naive.strftime("%Y-%m-%d %H:%M")
+        ));
+        text.push_str(&format!(
+            "  Platforms: {}\n",
+            if platform_list.is_empty() {
+                "none".to_owned()
+            } else {
+                platform_list.join(", ")
+            }
+        ));
+        if let Some(rule) = &effective_repeat {
+            text.push_str(&format!("  Repeat:   {rule}\n"));
+        }
+        let _ = write_text(out, text.trim_end());
+    }
+    exit::SUCCESS
+}
+
+/// `_error_payload()`: `{"ok": false, "error": {"code", "message", ...extra}}`.
+fn error_payload(
+    code: &str,
+    message: &str,
+    extra: Vec<(&str, xpst_config::Value)>,
+) -> xpst_config::Value {
+    let mut error = vec![("code", string(code)), ("message", string(message))];
+    error.extend(extra);
+    object(vec![("ok", boolean(false)), ("error", object(error))])
+}
+
+/// The `INVALID_CAPTION_FOR` refusal, shared by both malformed shapes.
+fn invalid_caption_for(out: &mut dyn Write, json_mode: bool, raw: &str) -> i32 {
+    let message = format!("expected PLATFORM=TEXT, got {}", python_repr(raw));
+    if json_mode {
+        let _ = write_python_json(out, &error_payload("INVALID_CAPTION_FOR", &message, vec![]));
+    } else {
+        let _ = write_text(out, &format!("Invalid --caption-for: {message}"));
+    }
+    exit::CONFIG_ERROR
+}
+
+/// `{platform: text}` in the order the caller supplied them.
+fn captions_value(captions: &[(String, String)]) -> xpst_config::Value {
+    object(
+        captions
+            .iter()
+            .map(|(platform, text)| (platform.as_str(), string(text.clone())))
+            .collect(),
+    )
+}
+
+/// `f"{value:,}"` — Python's thousands separator.
+fn thousands(value: usize) -> String {
+    let digits = value.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, character) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(character);
+    }
+    out
+}
+
+/// `text[:60] + ("..." if len(text) > 60 else "")`.
+fn truncate(text: &str, limit: usize) -> String {
+    let characters: Vec<char> = text.chars().collect();
+    if characters.len() <= limit {
+        return text.to_owned();
+    }
+    let mut out: String = characters.into_iter().take(limit).collect();
+    out.push_str("...");
+    out
+}
+
+/// `datetime.strptime` over the three formats `schedule add` accepts.
+///
+/// `%Y-%m-%d %H:%M`, `%Y-%m-%dT%H:%M:%S` and `%Y-%m-%d %H:%M:%S`. Python's
+/// `strptime` accepts one- or two-digit month/day/hour/minute/second and one to
+/// four digits for the year, and a literal space in the format matches a run of
+/// whitespace — all reproduced here, because `2026-6-8 10:0` is a valid entry in
+/// the shipped engine.
+fn parse_scheduled_time(raw: &str) -> Option<jiff::civil::DateTime> {
+    for (separator, with_seconds) in [(' ', false), ('T', true), (' ', true)] {
+        if let Some(parsed) = match_format(raw, separator, with_seconds) {
+            return Some(parsed);
+        }
+    }
+    None
+}
+
+fn match_format(raw: &str, separator: char, with_seconds: bool) -> Option<jiff::civil::DateTime> {
+    let (date, rest) = split_date(raw)?;
+    let rest = if separator == ' ' {
+        let trimmed = rest.trim_start_matches([' ', '\t']);
+        if trimmed.len() == rest.len() {
+            // The format's space must consume at least one character.
+            return None;
+        }
+        trimmed
+    } else {
+        rest.strip_prefix(separator)?
+    };
+    let fields: Vec<&str> = rest.split(':').collect();
+    let wanted = if with_seconds { 3 } else { 2 };
+    if fields.len() != wanted {
+        return None;
+    }
+    let hour = number(fields[0], 2)?;
+    let minute = number(fields[1], 2)?;
+    let second = if with_seconds {
+        number(fields[2], 2)?
+    } else {
+        0
+    };
+    jiff::civil::DateTime::new(
+        i16::try_from(date.0).ok()?,
+        i8::try_from(date.1).ok()?,
+        i8::try_from(date.2).ok()?,
+        i8::try_from(hour).ok()?,
+        i8::try_from(minute).ok()?,
+        i8::try_from(second).ok()?,
+        0,
+    )
+    .ok()
+}
+
+/// `YYYY-M-D` → `(year, month, day)` and the remainder.
+fn split_date(raw: &str) -> Option<((u32, u32, u32), &str)> {
+    let mut rest = raw;
+    let mut parts = [0u32; 3];
+    for (index, part) in parts.iter_mut().enumerate() {
+        let digits = rest.chars().take_while(char::is_ascii_digit).count();
+        if digits == 0 {
+            return None;
+        }
+        let limit = if index == 0 { 4 } else { 2 };
+        if digits > limit {
+            return None;
+        }
+        *part = rest[..digits].parse().ok()?;
+        rest = &rest[digits..];
+        if index < 2 {
+            rest = rest.strip_prefix('-')?;
+        }
+    }
+    Some(((parts[0], parts[1], parts[2]), rest))
+}
+
+/// A 1..=`limit`-digit unsigned field.
+fn number(raw: &str, limit: usize) -> Option<u32> {
+    if raw.is_empty() || raw.len() > limit || !raw.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    raw.parse().ok()
+}
+
+/// `to_utc(naive, zone).isoformat()` — always `+00:00`.
+///
+/// A wall clock a DST transition makes ambiguous (the hour a fall-back repeats)
+/// resolves to the earlier instant, and one it makes impossible (the hour a
+/// spring-forward skips) shifts forward by the gap — both are what Python's
+/// `dt.replace(tzinfo=zone)` does with the default `fold=0`, and both are
+/// jiff's `compatible` disambiguation.
+fn to_utc_isoformat(naive: jiff::civil::DateTime, zone: &jiff::tz::TimeZone) -> String {
+    let utc = match zone.to_ambiguous_zoned_datetime(naive).compatible() {
+        Ok(zoned) => zoned.timestamp().to_zoned_datetime(jiff::tz::TimeZone::UTC),
+        // A civil datetime outside the zone's range: read it as UTC rather than
+        // failing the entry, which is the only shape Python cannot produce.
+        Err(_) => match naive.to_zoned_datetime(jiff::tz::TimeZone::UTC) {
+            Ok(zoned) => zoned,
+            Err(_) => return format!("{naive}+00:00"),
+        },
+    };
+    utc.strftime("%Y-%m-%dT%H:%M:%S%.f%:z").to_string()
+}
+
+/// `datetime.now().isoformat()` — naive local wall clock, six fractional digits
+/// only when there are microseconds (Python omits a zero fraction).
+fn python_naive_isoformat(zone: &jiff::tz::TimeZone) -> String {
+    let now = jiff::Timestamp::now().to_zoned_datetime(zone.clone());
+    if now.subsec_nanosecond() / 1_000 == 0 {
+        now.strftime("%Y-%m-%dT%H:%M:%S").to_string()
+    } else {
+        now.strftime("%Y-%m-%dT%H:%M:%S%.6f").to_string()
+    }
+}
+
+/// `str(uuid.uuid4())` — lowercase hex, version 4, RFC 4122 variant.
+fn uuid4() -> String {
+    let mut bytes = [0u8; 16];
+    if getrandom::fill(&mut bytes).is_err() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default();
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte = ((nanos >> (index * 8)) & 0xff) as u8;
+        }
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
 }
 
 // ---------------------------------------------------------------------------
