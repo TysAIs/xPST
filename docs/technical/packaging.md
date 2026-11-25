@@ -51,7 +51,7 @@ Commands that produced those numbers, verbatim:
 cargo build --release --workspace
 python3 scripts/check_rust_binary_size.py \
     --binary target/release/xpst --binary target/release/xpst-mcp
-python3 scripts/measure_rust_boot.py --binary target/release/xpst --runs 30
+python3 scripts/measure_rust_boot.py --binary target/release/xpst --runs 20
 ```
 
 Output of the size gate:
