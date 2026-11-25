@@ -159,8 +159,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_cross_post_analytics",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads analytics.db, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::analytics::cross_post,
+            render: Render::Pretty,
         },
     ),
     (
@@ -190,15 +191,17 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_suggest_caption",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "calls the AI caption service",
+        Implementation::Ported {
+            handler: crate::tools::generate::suggest_caption,
+            render: Render::Pretty,
         },
     ),
     (
         "xpst_generate_ideas",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "calls the AI content service",
+        Implementation::Ported {
+            handler: crate::tools::generate::generate_ideas,
+            render: Render::Pretty,
         },
     ),
     (

@@ -293,7 +293,9 @@ fn the_ported_surface_is_exactly_the_read_only_network_free_set() {
             "xpst_capabilities",
             "xpst_chat",
             "xpst_config_show",
+            "xpst_cross_post_analytics",
             "xpst_followers",
+            "xpst_generate_ideas",
             "xpst_preflight",
             "xpst_providers",
             "xpst_rate_limit_status",
@@ -307,6 +309,7 @@ fn the_ported_surface_is_exactly_the_read_only_network_free_set() {
             "xpst_setup_status",
             "xpst_status",
             "xpst_stream",
+            "xpst_suggest_caption",
             "xpst_transcript",
         ]
     );

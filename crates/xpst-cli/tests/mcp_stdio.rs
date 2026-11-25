@@ -108,6 +108,113 @@ const FOLLOWER_SNAPSHOTS: [(&str, i64, &str); 6] = [
     ("instagram", 875, "2026-11-15T00:00:00+00:00"),
 ];
 
+/// One seeded cross-post group:
+/// `(content_hash, video_id, caption, source_url, created_at, platforms_json)`.
+type SeededGroup = (
+    &'static str,
+    &'static str,
+    Option<&'static str>,
+    Option<&'static str>,
+    &'static str,
+    &'static str,
+);
+
+/// One seeded metric snapshot:
+/// `(platform, post_id, captured_at, views, likes, comments, shares)`.
+type SeededSnapshot = (
+    &'static str,
+    &'static str,
+    &'static str,
+    i64,
+    Option<i64>,
+    i64,
+    i64,
+);
+
+/// The cross-post groups, byte-identical to `CROSS_POST_GROUPS` in the capture
+/// script. `created_at` is explicit because the read is
+/// `ORDER BY created_at DESC` and `record_cross_post_group()` stamps `now`.
+const CROSS_POST_GROUPS: [SeededGroup; 3] = [
+    (
+        "hash-parity-a",
+        "vid-parity",
+        Some("parity caption"),
+        Some("https://example.invalid/vid-parity"),
+        "2026-11-20T10:00:00+00:00",
+        r#"[{"platform": "youtube", "post_id": "yt-1", "url": "https://example.invalid/yt-1"}, {"platform": "x", "post_id": "x-1", "url": "https://example.invalid/x-1"}]"#,
+    ),
+    (
+        "hash-parity-b",
+        "vid-other",
+        None,
+        None,
+        "2026-11-19T10:00:00+00:00",
+        r#"[{"platform": "youtube", "post_id": "yt-2", "url": "https://example.invalid/yt-2"}, {"platform": "instagram", "post_id": "ig-2", "url": "https://example.invalid/ig-2"}]"#,
+    ),
+    (
+        "hash-parity-c",
+        "vid-zero",
+        Some("zero views"),
+        Some("https://example.invalid/vid-zero"),
+        "2026-11-18T10:00:00+00:00",
+        r#"[{"platform": "x", "post_id": "x-3", "url": "https://example.invalid/x-3"}, {"platform": "threads", "post_id": "th-4", "url": "https://example.invalid/th-4"}]"#,
+    ),
+];
+
+/// `(platform, post_id, captured_at, views, likes, comments, shares)`,
+/// byte-identical to `METRIC_SNAPSHOTS` in the capture script. `yt-1` carries
+/// two snapshots so "the LAST one wins" is pinned rather than assumed.
+const METRIC_SNAPSHOTS: [SeededSnapshot; 6] = [
+    (
+        "youtube",
+        "yt-1",
+        "2026-11-10T00:00:00+00:00",
+        900,
+        Some(40),
+        8,
+        4,
+    ),
+    (
+        "youtube",
+        "yt-1",
+        "2026-11-20T00:00:00+00:00",
+        1000,
+        Some(50),
+        10,
+        5,
+    ),
+    (
+        "x",
+        "x-1",
+        "2026-11-20T00:00:00+00:00",
+        2000,
+        Some(40),
+        20,
+        10,
+    ),
+    // A hidden like: `likes` stays NULL, which is "not reported", not zero.
+    (
+        "youtube",
+        "yt-2",
+        "2026-11-19T00:00:00+00:00",
+        500,
+        None,
+        5,
+        2,
+    ),
+    (
+        "instagram",
+        "ig-2",
+        "2026-11-19T00:00:00+00:00",
+        800,
+        Some(20),
+        4,
+        1,
+    ),
+    // Zero views with every metric reported: the per-platform rate is `0`.
+    ("x", "x-3", "2026-11-18T00:00:00+00:00", 0, Some(0), 0, 0),
+];
+
 struct Server {
     child: Child,
     stdin: ChildStdin,
@@ -244,6 +351,37 @@ fn profile(name: &str) -> PathBuf {
             .record_followers(platform, count, captured_at)
             .expect("seed follower");
     }
+    for (platform, post_id, captured_at, views, likes, comments, shares) in METRIC_SNAPSHOTS {
+        store
+            .record_snapshots(
+                &[
+                    xpst_store::NewSnapshot::new(platform, post_id, captured_at).metrics(
+                        xpst_store::Metrics {
+                            views: Some(views),
+                            likes,
+                            comments: Some(comments),
+                            shares: Some(shares),
+                            ..xpst_store::Metrics::default()
+                        },
+                    ),
+                ],
+            )
+            .expect("seed metric snapshot");
+    }
+    for (content_hash, video_id, caption, source_url, created_at, platforms_json) in
+        CROSS_POST_GROUPS
+    {
+        store
+            .record_cross_post_group(&xpst_store::CrossPostGroup {
+                content_hash: content_hash.to_string(),
+                video_id: video_id.to_string(),
+                caption: caption.map(str::to_string),
+                source_url: source_url.map(str::to_string),
+                created_at: created_at.to_string(),
+                platforms_json: platforms_json.to_string(),
+            })
+            .expect("seed cross-post group");
+    }
 
     dir
 }
@@ -331,6 +469,29 @@ fn substitute(value: &Value, root: &str) -> Value {
         ),
         other => other.clone(),
     }
+}
+
+/// The inverse of `substitute`, plus the fragment scrub the capture applies.
+///
+/// `xpst_suggest_caption` passes `video_path` as the transcript TEXT, and the
+/// caption generator splits that text on `[.!?]`. A path under a dotted home
+/// directory therefore reaches the payload as fragments of itself rather than
+/// as one string, so replacing only the whole path would leave the scratch
+/// directory's name in the body. `capture_mcp_stdio.py::scrub_profile` does
+/// exactly this on the Python side, so the comparison stays a byte comparison
+/// of the whole document.
+fn scrub_profile(text: &str, root: &str) -> String {
+    let mut text = text.replace(root, "<PROFILE>");
+    let mut fragments: Vec<&str> = root
+        .split(['.', '!', '?'])
+        .filter(|part| part.trim().chars().count() > 10)
+        .collect();
+    // Longest first, so a fragment that contains another is replaced whole.
+    fragments.sort_by_key(|fragment| std::cmp::Reverse(fragment.len()));
+    for fragment in fragments {
+        text = text.replace(fragment, "<PROFILE-FRAGMENT>");
+    }
+    text
 }
 
 /// FNV-1a 64-bit, the same digest `capture_mcp_stdio.py` records.
@@ -442,10 +603,10 @@ fn the_rust_server_speaks_the_python_wire() {
                         step["is_error"].as_bool().expect("is_error"),
                         "scenario `{name}`: {tool} error verdict drifted"
                     );
-                    let mut text = result["content"][0]["text"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .replace(&root, "<PROFILE>");
+                    let mut text = scrub_profile(
+                        result["content"][0]["text"].as_str().unwrap_or_default(),
+                        &root,
+                    );
                     // The renderer is a property of the tool (`indent=2` vs
                     // compact), and a masked body is re-rendered for the
                     // comparison — so pin the shape on the raw text first.

@@ -51,8 +51,11 @@ That is a structural property here, not a review checklist:
 | `xpst_setup_status` | `setup_transaction.json` | `status_json()`: the active transaction and its pending human actions, or `transaction: null` when there is none. Never creates one. |
 | `xpst_setup_resume` | `setup_transaction.json` | `resume_json()`: step state, `step_updates`, caller-verified `readiness`, `finish_later` and an allowlisted `error` code. Completion is derived from readiness, never trusted from disk. |
 | `xpst_setup_reset` | `setup_transaction.json` | `reset_json()`: deletes the transaction and every recovery copy, answering the `state: reset` document with the old id. |
+| `xpst_cross_post_analytics` | `analytics.db` | `get_cross_post_analytics()`: one entry per source video with its per-platform breakdown, aggregated totals, engagement rate and tier. A missing metric keeps the total `null` and the group rate `null` — never a rate computed from a fabricated zero. |
+| `xpst_suggest_caption` | nothing (pure string algorithm) | `generate_caption_deterministic()` over the `video_path` argument, which the shipped handler passes as the **transcript text** rather than reading the file. The LLM path is unreachable over MCP: `asyncio.run` inside the server's event loop always raises, so the deterministic branch is the contract. |
+| `xpst_generate_ideas` | nothing (pure string algorithm) | `generate_ideas_deterministic()`: the shipped template rotation, `count` clamped to 1–10 after Python's `int()`. Same `asyncio.run` fallback, so no LLM is required or reachable. |
 
-Twenty-five ported, twenty-one stubbed. Nothing is half-implemented: a tool is
+Twenty-eight ported, eighteen stubbed. Nothing is half-implemented: a tool is
 either answering from a real local store or saying `not_implemented` with the
 reason.
 
@@ -68,9 +71,6 @@ ledger), or it writes through an engine service that does not exist in Rust yet.
 | `xpst_run` | runs the posting pipeline, which is not ported |
 | `xpst_post` | publishes through provider adapters, which are not ported |
 | `xpst_analytics` | reads analytics.db and can refresh from platform APIs |
-| `xpst_cross_post_analytics` | reads analytics.db, which is not ported |
-| `xpst_suggest_caption` | calls the AI caption service |
-| `xpst_generate_ideas` | calls the AI content service |
 | `xpst_schedule_add` | writes the schedule store through Python services, which are not ported |
 | `xpst_schedule_cancel` | mutates the schedule store through Python services, which are not ported |
 | `xpst_schedule_pause` | writes the pause marker through Python services, which are not ported |

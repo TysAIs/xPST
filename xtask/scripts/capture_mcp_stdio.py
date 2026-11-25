@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -102,6 +103,42 @@ READ_ONLY_CALLS = [
     ("xpst_rate_limit_status", {}),
     ("xpst_best_time", {}),
     ("xpst_followers", {}),
+    # `xpst_cross_post_analytics` reads the local ledger only. The three seeded
+    # groups pin the three shapes: a full group (totals, rate, tier), a group
+    # with a hidden like (null rate, "unknown" tier), and a group whose only
+    # measured member has zero views (the per-platform rate is the INT `0`).
+    ("xpst_cross_post_analytics", {}),
+    # `xpst_suggest_caption` passes `video_path` as the TRANSCRIPT TEXT — the
+    # handler never reads the file — so the caption is a function of the path
+    # STRING. A path under the scratch profile would put the profile's own words
+    # in the hashtags and make the fixture machine-dependent, so these rows use
+    # a fixed media root (`XPST_MEDIA_ROOTS` in `SCENARIOS`) whose words are the
+    # same on both engines. The file need not exist: the guard checks
+    # containment, not existence.
+    ("xpst_suggest_caption", {"video_path": "/tmp/xpst-parity-media/clip.mp4"}),
+    (
+        "xpst_suggest_caption",
+        {"video_path": "/tmp/xpst-parity-media/a-longer-clip-name.mp4", "platform": "x"},
+    ),
+    # The path guard refuses a path outside every allowed root before the
+    # handler runs.
+    ("xpst_suggest_caption", {"video_path": "/nonexistent/parity.mp4"}),
+    # No `video_path` at all: `arguments.get("video_path", "")` is falsy, so the
+    # suggestions list is empty and the payload echoes `""`.
+    ("xpst_suggest_caption", {}),
+    ("xpst_generate_ideas", {"topic": "parity topic"}),
+    ("xpst_generate_ideas", {"topic": "parity topic", "count": 3}),
+    # `count` goes straight into `int()`: a numeric string is accepted, 99
+    # clamps to 10, 0 clamps to 1, and a null is a TypeError the handler does
+    # not catch (so the body is `Error: int() argument must be ...`).
+    ("xpst_generate_ideas", {"topic": "parity topic", "count": "2"}),
+    ("xpst_generate_ideas", {"topic": "parity topic", "count": 99}),
+    ("xpst_generate_ideas", {"topic": "parity topic", "count": 0}),
+    ("xpst_generate_ideas", {"topic": "parity topic", "count": None}),
+    # A blank topic uses the default template but the payload echoes the argument.
+    ("xpst_generate_ideas", {"topic": "   "}),
+    # No topic: falsy, so no ideas and `count: 0`.
+    ("xpst_generate_ideas", {}),
     ("xpst_activity", {}),
     ("kb_query", {"text": "parity"}),
     ("xpst_search", {"query": "parity"}),
@@ -385,13 +422,94 @@ POST_ARGUMENTS = {
     "caption": "parity fixture",
 }
 
+# Cross-post groups, written through the shipped `AnalyticsStore` so the schema
+# and the `platforms_json` encoding are the engine's. `created_at` is explicit
+# because `record_cross_post_group()` stamps `now`, and the read is
+# `ORDER BY created_at DESC` — a fixture whose order moved on every capture
+# would pin the clock, not the engine.
+#
+# Three groups, one per shape the report can take:
+#
+# * `hash-parity-a` — every metric reported by both members, so the group rate
+#   is real: (90 + 30 + 15) / 3000 * 100 = 4.5 → "medium".
+# * `hash-parity-b` — a hidden like on the YouTube member, so the group rate is
+#   `null` and the tier "unknown" rather than a rate computed from a
+#   fabricated zero.
+# * `hash-parity-c` — the only measured member has zero views, so its
+#   per-platform rate is the INT `0` (Python's `else 0`), while the second
+#   member has no snapshots at all, which keeps the group rate `null` instead
+#   of dividing by zero.
+CROSS_POST_GROUPS = [
+    (
+        "hash-parity-a",
+        "vid-parity",
+        "parity caption",
+        "https://example.invalid/vid-parity",
+        "2026-11-20T10:00:00+00:00",
+        [
+            {"platform": "youtube", "post_id": "yt-1", "url": "https://example.invalid/yt-1"},
+            {"platform": "x", "post_id": "x-1", "url": "https://example.invalid/x-1"},
+        ],
+    ),
+    (
+        "hash-parity-b",
+        "vid-other",
+        None,
+        None,
+        "2026-11-19T10:00:00+00:00",
+        [
+            {"platform": "youtube", "post_id": "yt-2", "url": "https://example.invalid/yt-2"},
+            {"platform": "instagram", "post_id": "ig-2", "url": "https://example.invalid/ig-2"},
+        ],
+    ),
+    (
+        "hash-parity-c",
+        "vid-zero",
+        "zero views",
+        "https://example.invalid/vid-zero",
+        "2026-11-18T10:00:00+00:00",
+        [
+            {"platform": "x", "post_id": "x-3", "url": "https://example.invalid/x-3"},
+            {"platform": "threads", "post_id": "th-4", "url": "https://example.invalid/th-4"},
+        ],
+    ),
+]
+
+# `(platform, post_id, captured_at, views, likes, comments, shares)`. `yt-1`
+# carries two snapshots so "the LAST one wins" is pinned rather than assumed.
+METRIC_SNAPSHOTS = [
+    ("youtube", "yt-1", "2026-11-10T00:00:00+00:00", 900, 40, 8, 4),
+    ("youtube", "yt-1", "2026-11-20T00:00:00+00:00", 1000, 50, 10, 5),
+    ("x", "x-1", "2026-11-20T00:00:00+00:00", 2000, 40, 20, 10),
+    # A hidden like: `likes` stays NULL, which is "not reported", not zero.
+    ("youtube", "yt-2", "2026-11-19T00:00:00+00:00", 500, None, 5, 2),
+    ("instagram", "ig-2", "2026-11-19T00:00:00+00:00", 800, 20, 4, 1),
+    # Zero views with every metric reported: the per-platform rate is `0`.
+    ("x", "x-3", "2026-11-18T00:00:00+00:00", 0, 0, 0, 0),
+]
+
 SCENARIOS = [
-    {"name": "default", "env": {}},
+    # `XPST_MEDIA_ROOTS` is a fixed media root so the `xpst_suggest_caption`
+    # rows are a function of a path whose words are identical on both engines.
+    # The caption generator treats `video_path` as the transcript TEXT, so a
+    # profile-relative path would put the scratch directory's own words in the
+    # hashtags and make the fixture machine-dependent.
+    {"name": "default", "env": {"XPST_MEDIA_ROOTS": "/tmp/xpst-parity-media"}},
     {
         "name": "readonly",
-        "env": {"XPST_MCP_READONLY": "1", "XPST_MCP_ALLOW_MUTATIONS": "1"},
+        "env": {
+            "XPST_MCP_READONLY": "1",
+            "XPST_MCP_ALLOW_MUTATIONS": "1",
+            "XPST_MEDIA_ROOTS": "/tmp/xpst-parity-media",
+        },
     },
-    {"name": "require_confirm", "env": {"XPST_MCP_REQUIRE_CONFIRM": "1"}},
+    {
+        "name": "require_confirm",
+        "env": {
+            "XPST_MCP_REQUIRE_CONFIRM": "1",
+            "XPST_MEDIA_ROOTS": "/tmp/xpst-parity-media",
+        },
+    },
 ]
 
 
@@ -409,6 +527,25 @@ def mask_clock(value, keys: list[str]):
     if isinstance(value, list):
         return [mask_clock(item, keys) for item in value]
     return value
+
+
+def scrub_profile(text: str, profile: Path) -> str:
+    """Replace the scratch profile's path with `<PROFILE>`, and the fragments of
+    it that survive a `[.!?]` split with `<PROFILE-FRAGMENT>`.
+
+    `xpst_suggest_caption` passes `video_path` as the transcript TEXT, and the
+    caption generator splits that text on `[.!?]`. A path under a dotted home
+    directory therefore reaches the payload as fragments of itself rather than
+    as one string, so replacing only the whole path would leave the random
+    temp-dir name in the fixture. The Rust test applies the same scrub to its
+    own output, so the comparison stays a byte comparison.
+    """
+    root = str(profile)
+    text = text.replace(root, "<PROFILE>")
+    fragments = [part for part in re.split(r"[.!?]+", root) if len(part.strip()) > 10]
+    for fragment in sorted(fragments, key=len, reverse=True):
+        text = text.replace(fragment, "<PROFILE-FRAGMENT>")
+    return text
 
 
 def fnv1a64(text: str) -> str:
@@ -551,6 +688,28 @@ def run_scenario(python: str, scenario: dict) -> dict:
                 "(platform, count, captured_at) VALUES (?, ?, ?)",
                 (platform, count, captured_at),
             )
+        for platform, post_id, captured_at, views, likes, comments, shares in METRIC_SNAPSHOTS:
+            connection.execute(
+                "INSERT OR REPLACE INTO metric_snapshots "
+                "(platform, post_id, captured_at, views, likes, comments, shares) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (platform, post_id, captured_at, views, likes, comments, shares),
+            )
+    for content_hash, video_id, caption, source_url, created_at, platforms in CROSS_POST_GROUPS:
+        with store._connect() as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO cross_post_groups "
+                "(content_hash, video_id, caption, source_url, created_at, platforms_json) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    content_hash,
+                    video_id,
+                    caption,
+                    source_url,
+                    created_at,
+                    json.dumps(platforms, default=str),
+                ),
+            )
 
     env = dict(os.environ)
     env["PYTHONPATH"] = str(ROOT / "src")
@@ -623,7 +782,7 @@ def run_scenario(python: str, scenario: dict) -> dict:
             continue
         if step["method"] == "tools/call":
             tool = step["params"]["name"]
-            text = result["content"][0]["text"].replace(str(profile), "<PROFILE>")
+            text = scrub_profile(result["content"][0]["text"], profile)
             # The renderer's observable shape: `indent=2` is multi-line, compact
             # is one line. Recorded from the RAW text, before any masking, because
             # a masked body is re-rendered compact and would hide a renderer
