@@ -53,6 +53,12 @@ pub enum Implementation {
 pub enum Render {
     /// `json.dumps(payload, indent=2, default=str)` — insertion order.
     Pretty,
+    /// `json.dumps(payload, indent=2, sort_keys=True)` — every level sorted.
+    ///
+    /// The `xpst_setup_*` handlers are the only ones that sort: they serve the
+    /// transaction document, whose key order is a property of the writer, not
+    /// of the reader.
+    PrettySorted,
     /// `json.dumps(payload, default=str)` — insertion order, compact.
     Compact,
 }
@@ -350,8 +356,9 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_auth_start",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "builds the per-platform auth plan from the auth flow, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::auth_start::run,
+            render: Render::Compact,
         },
     ),
     (
@@ -431,32 +438,33 @@ const ENTRIES: &[(&str, Consent, Implementation)] = &[
     (
         "xpst_setup_start",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason:
-                "writes the setup transaction file through Python services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::setup::start,
+            render: Render::PrettySorted,
         },
     ),
     (
         "xpst_setup_status",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason: "reads the setup transaction service, which is not ported",
+        Implementation::Ported {
+            handler: crate::tools::setup::status,
+            render: Render::PrettySorted,
         },
     ),
     (
         "xpst_setup_resume",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason:
-                "writes the setup transaction file through Python services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::setup::resume,
+            render: Render::PrettySorted,
         },
     ),
     (
         "xpst_setup_reset",
         Consent::ReadOnly,
-        Implementation::Stub {
-            reason:
-                "removes the setup transaction file through Python services, which are not ported",
+        Implementation::Ported {
+            handler: crate::tools::setup::reset,
+            render: Render::PrettySorted,
         },
     ),
     (

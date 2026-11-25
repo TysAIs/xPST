@@ -75,6 +75,11 @@ serde-saphyr = { version = "2.2", default-features = false, features = [
 # system copy and reads the system database where one exists.
 jiff = "1"
 thiserror = "2"
+# A setup transaction's identifier is a v4 UUID (`uuid.uuid4()` in Python), and
+# `_validate_transaction` parses it back with `uuid.UUID(...)`. The crate is
+# already in the graph transitively; declaring it here is what makes the
+# dependency honest instead of relying on another crate's feature selection.
+uuid = { version = "1", features = ["v4"] }
 xpst-config = { path = "crates/xpst-config" }
 xpst-state = { path = "crates/xpst-state" }
 xpst-media = { path = "crates/xpst-media" }

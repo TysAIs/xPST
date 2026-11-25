@@ -284,6 +284,36 @@ fn mask_fields(text: &str, fields: &[&str]) -> String {
     xpst_config::python_style_json_compact(&payload).expect("render the masked body")
 }
 
+/// Keys whose STRING value is a clock reading or a random identifier, replaced
+/// at any depth exactly the way `capture_mcp_stdio.py` replaces them. The setup
+/// transaction stamps `created_at`/`updated_at`/`started_at`/`completed_at`/
+/// `verified_at` and mints a fresh v4 `transaction_id`, so none of them can be
+/// byte-compared. A `null` is left alone: "never stamped" is still compared.
+fn mask_keys(text: &str, keys: &[&str]) -> String {
+    fn walk(value: &mut Value, keys: &[&str]) {
+        match value {
+            Value::Object(map) => {
+                for (key, item) in map.iter_mut() {
+                    if keys.contains(&key.as_str()) && item.is_string() {
+                        *item = json!("<CLOCK>");
+                    } else {
+                        walk(item, keys);
+                    }
+                }
+            }
+            Value::Array(items) => items.iter_mut().for_each(|item| walk(item, keys)),
+            _ => {}
+        }
+    }
+    let Ok(mut payload) = serde_json::from_str::<Value>(text) else {
+        // A handler that raised serves `Error: <sentence>`, not JSON; there is
+        // nothing to mask in it.
+        return text.to_string();
+    };
+    walk(&mut payload, keys);
+    xpst_config::python_style_json_compact(&payload).expect("render the masked body")
+}
+
 /// Replace `<PROFILE>` in every string of a recorded value.
 ///
 /// The fixture records a media path as `<PROFILE>/clip.mp4` so it is
@@ -437,6 +467,13 @@ fn the_rust_server_speaks_the_python_wire() {
                         .unwrap_or_default();
                     if !mask.is_empty() {
                         text = mask_checks(&text, &mask);
+                    }
+                    let clock_keys: Vec<&str> = step["mask_keys"]
+                        .as_array()
+                        .map(|keys| keys.iter().filter_map(Value::as_str).collect())
+                        .unwrap_or_default();
+                    if !clock_keys.is_empty() {
+                        text = mask_keys(&text, &clock_keys);
                     }
                     assert_eq!(
                         text,

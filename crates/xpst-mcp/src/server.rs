@@ -172,6 +172,11 @@ impl ServerHandler for XpstMcp {
 fn success_result(value: &Value, render: Render) -> CallToolResult {
     let text = match render {
         Render::Pretty => xpst_config::python_style_json_pretty(value),
+        Render::PrettySorted => {
+            let mut sorted = value.clone();
+            xpst_config::sort_keys_recursive(&mut sorted);
+            xpst_config::python_style_json_pretty(&sorted)
+        }
         Render::Compact => xpst_config::python_style_json_compact(value),
     }
     .unwrap_or_else(|_| "null".to_string());

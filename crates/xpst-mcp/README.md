@@ -46,9 +46,15 @@ That is a structural property here, not a review checklist:
 | `xpst_chat` | captured chat read-path registry, `config.yaml`, credential store | `chat_readiness()`: per-platform transport, channels, missing credentials and the next step. `read: true` is the network half and answers `not_implemented`. |
 | `xpst_stream` | captured stream registry, credential store, `config.yaml` | `stream_report()`: every platform's ingest class, `key_present`, and whether xPST could fetch a key itself. An unknown `platform` is the payload with `code: unknown_platform` and `isError: true`. `include_live: true` answers `not_implemented`. |
 | `xpst_preflight` | `config.yaml`, credential store, quota ledger, ffprobe | The composite: `resolve_targets`, `content_verdict`, `PostPreflightService.plan` and `build_route_plan` in one document. Never uploads, never touches the network. |
+| `xpst_auth_start` | captured provider registry | The human-only auth plan: `platform`, `status: human_action_required`, `browser_opened: false`, the `xpst connect <platform>` command and the provider's docs URL. Never opens a browser, never accepts a secret. Compact render, as Python's handler does. |
+| `xpst_setup_start` | `setup_transaction.json` | `SetupTransactionService.start_json()`: the shared resumable onboarding transaction, created from `selected_role_capabilities` (defaults to the five built-in role-capabilities) or returned as-is when one is already active. `indent=2, sort_keys=True`, as Python's handler does. |
+| `xpst_setup_status` | `setup_transaction.json` | `status_json()`: the active transaction and its pending human actions, or `transaction: null` when there is none. Never creates one. |
+| `xpst_setup_resume` | `setup_transaction.json` | `resume_json()`: step state, `step_updates`, caller-verified `readiness`, `finish_later` and an allowlisted `error` code. Completion is derived from readiness, never trusted from disk. |
+| `xpst_setup_reset` | `setup_transaction.json` | `reset_json()`: deletes the transaction and every recovery copy, answering the `state: reset` document with the old id. |
 
-Twenty ported, twenty-six stubbed. Nothing is half-implemented: a tool is either
-answering from a real local store or saying `not_implemented` with the reason.
+Twenty-five ported, twenty-one stubbed. Nothing is half-implemented: a tool is
+either answering from a real local store or saying `not_implemented` with the
+reason.
 
 ## Stubbed tools
 
@@ -73,7 +79,6 @@ ledger), or it writes through an engine service that does not exist in Rust yet.
 | `xpst_health` | probes every platform over the network |
 | `xpst_backfill` | re-posts through provider adapters, which are not ported |
 | `xpst_auth_status` | probes platform credentials, which needs the network |
-| `xpst_auth_start` | builds the per-platform auth plan from the auth flow, which is not ported |
 | `xpst_disconnect` | removes stored credentials through Python services, which are not ported |
 | `xpst_delete` | deletes posts on the platform, which needs provider adapters |
 | `messenger_send` | sends through the Meta Graph API |
@@ -81,10 +86,6 @@ ledger), or it writes through an engine service that does not exist in Rust yet.
 | `xpst_messenger_check_comments` | reads and replies on the Meta Graph API |
 | `kb_add` | ingests into the knowledge store, which is not ported |
 | `kb_organize` | writes the knowledge store, which is not ported |
-| `xpst_setup_start` | writes the setup transaction file through Python services, which are not ported |
-| `xpst_setup_status` | reads the setup transaction service, which is not ported |
-| `xpst_setup_resume` | writes the setup transaction file through Python services, which are not ported |
-| `xpst_setup_reset` | removes the setup transaction file through Python services, which are not ported |
 
 That list is not a promise that they will be ported in that order. It is the
 current truth, and the parity test fails if this document and the registry
@@ -176,6 +177,19 @@ of scope for this crate.
   refused before dispatch. The **URL** half (`net_guard.validate_public_url`,
   which resolves DNS and blocks private addresses) is not ported yet, so a
   URL-shaped argument is accepted here where Python may refuse it.
+- `xpst_setup_*` reproduces a Python quirk rather than fixing it: `_reconcile`
+  reads `readiness.get(role)` with the *role* name (`source`,
+  `video_destination`) while the document keys are the plural ones (`sources`,
+  `video_destinations`), so the top-level `readiness.verified_at` is always
+  `null`. The per-entry `verified_at` is the field that carries the fact, and it
+  is compared.
+- `xpst_setup_*`'s transaction file is written with `sort_keys=True, indent=2`
+  and a recovery copy (`.bak`) on every save, including the first. The protocol
+  fixture masks the clock and the random `transaction_id` at any depth — a
+  `null` is left alone, so "never stamped" is still compared.
+- `xpst_auth_start` serves the static plan from the captured provider registry.
+  It is not the auth *flow*: `xpst connect` (which opens a browser and exchanges
+  a code) is still a stub, and this tool never claims otherwise.
 - The served schemas come from the captured fixture, so they track Python by
   regeneration rather than by parallel hand-editing.
 
