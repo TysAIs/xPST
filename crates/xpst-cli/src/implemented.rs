@@ -258,7 +258,7 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
     implemented(
         "kb areas",
         "xpst-store",
-        "Discovered knowledge areas in course order (`order_index`, label, id) with their nugget counts, read from the workspace's `areas.json`; payload byte-compared with the Python CLI. An invalid `--workspace` reproduces Python's uncaught `ValueError` contract — empty stdout, exit 1 — with the exception line on stderr instead of the traceback frames.",
+        "Discovered knowledge areas in course order (`order_index`, label, id) with their nugget counts, read from the workspace's `areas.json`; payload byte-compared with the Python CLI. The reader reproduces `JsonKnowledgeStore._load_file`: a decode failure, an unknown key or a missing required key renames the file to `<name>.corrupt` and starts empty, while a non-object document escapes as Python's `AttributeError`. An invalid `--workspace` reproduces Python's uncaught `ValueError` contract — empty stdout, exit 1 — with the exception line on stderr instead of the traceback frames.",
         kb_areas,
     ),
     implemented(
@@ -266,6 +266,30 @@ pub const IMPLEMENTED: &[ImplementedCommand] = &[
         "xpst-state",
         "Cancels one entry through the same local-store contract (`operation`/`scope`/`found`/`cancelled`/`entry`, `POST_NOT_FOUND` on an unknown id) with `--dry-run`; payload and resulting `schedule.json` byte-compared with the Python CLI. Control characters in a caption are escaped (`\\u0001`) in the written file, so both engines can read it back.",
         schedule_remove,
+    ),
+    implemented(
+        "kb course",
+        "xpst-store",
+        "The assembled course outline (`assemble_course`): areas in course order, each with its nuggets in beginner->advanced order and a trailing `Unassigned` module for unclaimed nuggets; payload byte-compared with the Python CLI. The store reader is strict like `Nugget.from_dict`/`Area.from_dict`, so an unknown or missing key quarantines the file exactly as Python does.",
+        kb_course,
+    ),
+    implemented(
+        "kb doctor",
+        "xpst-store",
+        "The read-only health report (`doctor.diagnose`): dependency probe, store integrity, embedding widths, orphaned areas/nuggets, queue counts and the manifest source count, with the same severities, messages and exit code; payload byte-compared with the Python CLI. The optional-dependency probe asks an interpreter out-of-process (`XPST_PYTHON`, else `python3`), because a Rust binary has no `sys.path`.",
+        kb_doctor,
+    ),
+    implemented(
+        "kb query",
+        "xpst-store",
+        "Substring search over the JSON store (`query_nuggets`): `workspace`/`query`/`mode`/`count`/`nuggets` with citation, timestamps, a null score and the area id; payload byte-compared with the Python CLI. The embedding stack is not ported, so the semantic path is not taken — the same answer Python gives without the knowledge extra or on an unembedded store.",
+        kb_query,
+    ),
+    implemented(
+        "search",
+        "xpst-store",
+        "`kb query` on the `default` workspace rendered with `json.dumps(indent=2)` (ASCII-escaped), including Python's text-mode quirk of reading a `hits` key the payload never carries; payload byte-compared with the Python CLI.",
+        search,
     ),
 ];
 
@@ -649,6 +673,42 @@ fn schedule_remove(
     err: &mut dyn Write,
 ) -> i32 {
     commands::schedule::remove(global, leaf, out, err)
+}
+
+fn kb_course(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::kb::course(global, leaf, out, err)
+}
+
+fn kb_doctor(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::kb::doctor(global, leaf, out, err)
+}
+
+fn kb_query(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::kb::query(global, leaf, out, err)
+}
+
+fn search(
+    global: &GlobalOptions,
+    leaf: Option<&ArgMatches>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    commands::kb::search(global, leaf, out, err)
 }
 
 #[cfg(test)]

@@ -26,7 +26,9 @@ Notes on determinism (the fixture is checked in and runs on every OS):
   is measured from the wall clock at call time;
 * a scenario may carry `env` (extra environment for both engines, with the
   `PROFILE` token replaced by the scratch profile), `mask` (payload paths whose
-  value is the wall clock — `paused_at`, `checked_at`), `allow_nonzero` (a
+  value is the wall clock — `paused_at`, `checked_at`), `mask_findings` (a
+  `kb doctor` finding whose answer depends on the interpreter's installed
+  packages), `allow_nonzero` (a
   recorded failure is behaviour, not a capture bug) and `files` (relative paths
   whose content after the run is part of the expectation, which is how the
   config write path is held to the same bytes as the Python engine);
@@ -200,6 +202,54 @@ accounts:
 monitoring:
   log_level: INFO
 """
+
+#: A valid knowledge store: three nuggets (one with an empty `source_url`, so the
+#: citation falls back to the video id), two areas (one empty), a queue with a
+#: failed item and a manifest with two sources.
+KB_NUGGETS = (
+    '{"n1": {"id": "n1", "point": "Intro to routing", "source_video_id": "vid-a", '
+    '"timestamp_start": 0.0, "timestamp_end": 12.5, '
+    '"source_url": "https://example.invalid/a", "difficulty": "beginner", "area_id": "a1"}, '
+    '"n2": {"id": "n2", "point": "Advanced concurrency tuning", "source_video_id": "vid-a", '
+    '"timestamp_start": 30.0, "timestamp_end": 45.0, "source_url": null, '
+    '"difficulty": "advanced", "area_id": "a1"}, '
+    '"n3": {"id": "n3", "point": "Loose note about caching", "source_video_id": "vid-b", '
+    '"timestamp_start": 5.0, "timestamp_end": 9.0, "source_url": "", '
+    '"difficulty": "intermediate", "area_id": null}}'
+)
+
+KB_AREAS = (
+    '{"a1": {"id": "a1", "label": "Routing", "centroid": [], '
+    '"nugget_ids": ["n1", "n2"], "order_index": 0}, '
+    '"a2": {"id": "a2", "label": "Empty module", "centroid": [], '
+    '"nugget_ids": [], "order_index": 1}}'
+)
+
+KB_QUEUE = (
+    '{"schema_version": 1, "items": ['
+    '{"id": "q1", "source": "https://example.invalid/one", "status": "failed", '
+    '"reason": "transcript unavailable", "enqueued_at": 1.0, "seq": 1}, '
+    '{"id": "q2", "source": "https://example.invalid/two", "status": "done", '
+    '"enqueued_at": 2.0, "seq": 2}, '
+    '{"id": "q3", "source": "https://example.invalid/three", "status": "pending", '
+    '"enqueued_at": 3.0, "seq": 3}]}'
+)
+
+KB_MANIFEST = (
+    '{"schema_version": 1, "sources": {'
+    '"vid-a": {"source": "a", "embed_model": "m", "embed_dim": 3, "recorded_at": 0.0}, '
+    '"vid-b": {"source": "b", "embed_model": "m", "embed_dim": 3, "recorded_at": 0.0}}, '
+    '"aliases": {}}'
+)
+
+KB_STORE = {
+    "config.yaml": "version: 4\n",
+    "knowledge/default/nuggets.json": KB_NUGGETS,
+    "knowledge/default/areas.json": KB_AREAS,
+    "knowledge/default/queue.json": KB_QUEUE,
+    "knowledge/default/manifest.json": KB_MANIFEST,
+}
+
 
 SCENARIOS = [
     {
@@ -1136,27 +1186,156 @@ SCENARIOS = [
         "allow_nonzero": True,
         "compare": "stdout",
     },
+    # The knowledge workspace resolves from XPST_HOME (default `~/.xpst`), not
+    # from XPST_CONFIG_DIR, so every kb scenario pins XPST_HOME to the profile
+    # and seeds `<profile>/knowledge/<name>/...`. (The first version of these
+    # rows seeded `.xpst/knowledge/...` while pinning XPST_HOME to the profile,
+    # so neither engine ever read the file and "populated" asserted an empty
+    # store — a vacuous row. The seeds below are the real thing.)
     {
-        # The knowledge workspace resolves from XPST_HOME (default `~/.xpst`),
-        # not from XPST_CONFIG_DIR, so the scenario pins it to the profile.
         "name": "kb_areas_empty",
         "argv": ["kb", "areas", "--json"],
         "seed": {"config.yaml": "version: 4\n"},
         "env": {"XPST_HOME": "PROFILE"},
-        "compare": "json",
+        "compare": "stdout",
     },
     {
         "name": "kb_areas_populated",
         "argv": ["kb", "areas", "--json"],
+        "seed": {"config.yaml": "version: 4\n", "knowledge/default/areas.json": KB_AREAS},
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
+    },
+    {
+        # `Area.from_dict` splats the mapping into the dataclass, so a record
+        # with no `id` is a TypeError: Python quarantines the file and reports
+        # an empty store. The renamed file is part of the expectation.
+        "name": "kb_areas_quarantined_missing_id",
+        "argv": ["kb", "areas", "--json"],
         "seed": {
             "config.yaml": "version: 4\n",
-            ".xpst/knowledge/default/areas.json": (
-                '{"b": {"label": "Beta", "order_index": 1, "nugget_ids": ["n1"]}, '
-                '"a": {"label": "Alpha", "order_index": 0, "nugget_ids": ["n1", "n2"]}}'
+            "knowledge/default/areas.json": (
+                '{"a": {"label": "Alpha", "order_index": 0, "nugget_ids": ["n1"]}}'
             ),
         },
         "env": {"XPST_HOME": "PROFILE"},
+        "files": ["knowledge/default/areas.json.corrupt"],
         "compare": "json",
+    },
+    {
+        "name": "kb_course_empty",
+        "argv": ["kb", "course", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
+    },
+    {
+        "name": "kb_course_populated",
+        "argv": ["kb", "course", "--json"],
+        "seed": KB_STORE,
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
+    },
+    {
+        "name": "kb_course_area_filter",
+        "argv": ["kb", "course", "--area", "a1", "--json"],
+        "seed": KB_STORE,
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
+    },
+    {
+        "name": "kb_course_unknown_area",
+        "argv": ["kb", "course", "--area", "nope", "--json"],
+        "seed": KB_STORE,
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
+    },
+    {
+        "name": "kb_doctor_empty",
+        "argv": ["kb", "doctor", "--json"],
+        "seed": {"config.yaml": "version: 4\n"},
+        "env": {"XPST_HOME": "PROFILE"},
+        "mask_findings": ["dependencies"],
+        "compare": "json",
+    },
+    {
+        "name": "kb_doctor_populated",
+        "argv": ["kb", "doctor", "--json"],
+        "seed": KB_STORE,
+        "env": {"XPST_HOME": "PROFILE"},
+        "mask_findings": ["dependencies"],
+        "compare": "json",
+    },
+    {
+        # A dangling membership reference and a stale `area_id` back-pointer are
+        # both errors, so the command exits 1 after printing the report.
+        "name": "kb_doctor_orphans",
+        "argv": ["kb", "doctor", "--json"],
+        "seed": {
+            "config.yaml": "version: 4\n",
+            "knowledge/default/nuggets.json": (
+                '{"n1": {"id": "n1", "point": "One", "source_video_id": "v", '
+                '"timestamp_start": 0.0, "timestamp_end": 1.0, "area_id": "gone"}}'
+            ),
+            "knowledge/default/areas.json": (
+                '{"a1": {"id": "a1", "label": "Alpha", "nugget_ids": ["n1", "missing"], '
+                '"order_index": 0}}'
+            ),
+        },
+        "env": {"XPST_HOME": "PROFILE"},
+        "mask_findings": ["dependencies"],
+        "allow_nonzero": True,
+        "compare": "json",
+    },
+    {
+        # `Manifest.source_count()` is `len(data["sources"])`, so a list counts
+        # its items rather than reporting zero.
+        "name": "kb_doctor_manifest_sources_list",
+        "argv": ["kb", "doctor", "--json"],
+        "seed": {
+            "config.yaml": "version: 4\n",
+            "knowledge/default/manifest.json": (
+                '{"schema_version": 1, "sources": ["a", "b", "c"], "aliases": {}}'
+            ),
+        },
+        "env": {"XPST_HOME": "PROFILE"},
+        "mask_findings": ["dependencies"],
+        "compare": "json",
+    },
+    {
+        "name": "kb_query_hits",
+        "argv": ["kb", "query", "ing", "--json"],
+        "seed": KB_STORE,
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
+    },
+    {
+        "name": "kb_query_limit",
+        "argv": ["kb", "query", "ing", "--limit", "2", "--json"],
+        "seed": KB_STORE,
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
+    },
+    {
+        "name": "kb_query_no_hits",
+        "argv": ["kb", "query", "zzz", "--json"],
+        "seed": KB_STORE,
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
+    },
+    {
+        "name": "search_hits",
+        "argv": ["search", "ing", "--json"],
+        "seed": KB_STORE,
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
+    },
+    {
+        "name": "search_no_hits",
+        "argv": ["search", "zzz", "--json"],
+        "seed": KB_STORE,
+        "env": {"XPST_HOME": "PROFILE"},
+        "compare": "stdout",
     },
     {
         "name": "schedule_remove_ok",
@@ -1258,7 +1437,8 @@ def env_for(scenario: dict, profile: Path) -> dict[str, str]:
     return env
 
 
-def normalize(payload, profile: Path, mask: list[str] | None = None):
+def normalize(payload, profile: Path, mask: list[str] | None = None,
+              mask_findings: list[str] | None = None):
     """Strip the values that cannot be compared across machines.
 
     * the scratch profile's absolute path becomes `<PROFILE>` (a payload that
@@ -1266,14 +1446,21 @@ def normalize(payload, profile: Path, mask: list[str] | None = None):
     * a snapshot's `modified_at` is machine-local, so it is dropped and the file
       name is compared instead;
     * `mask` names payload paths that carry the wall clock (`paused_at`,
-      `checked_at`), which two runs never agree on.
+      `checked_at`), which two runs never agree on;
+    * `mask_findings` names `kb doctor` findings whose answer depends on the
+      interpreter's installed packages (`dependencies`). The finding is blanked
+      and the severity count it contributed is decremented, so every other
+      finding and the remaining counts are still compared exactly.
     """
     if isinstance(payload, str):
         return payload.replace(str(profile), "<PROFILE>")
     if isinstance(payload, list):
-        return [normalize(item, profile, mask) for item in payload]
+        return [normalize(item, profile, mask, mask_findings) for item in payload]
     if isinstance(payload, dict):
-        result = {key: normalize(value, profile, mask) for key, value in payload.items()}
+        result = {
+            key: normalize(value, profile, mask, mask_findings)
+            for key, value in payload.items()
+        }
         if "paused_snapshots" in result:
             for snapshot in result["paused_snapshots"]:
                 snapshot.pop("modified_at", None)
@@ -1282,6 +1469,16 @@ def normalize(payload, profile: Path, mask: list[str] | None = None):
         for path in mask or []:
             if path in result:
                 result[path] = "<TS>"
+        for check in mask_findings or []:
+            for finding in result.get("findings") or []:
+                if not isinstance(finding, dict) or finding.get("check") != check:
+                    continue
+                if finding.get("severity") == "warning":
+                    result["warning_count"] = max(0, result.get("warning_count", 0) - 1)
+                elif finding.get("severity") == "error":
+                    result["error_count"] = max(0, result.get("error_count", 0) - 1)
+                finding["severity"] = "<ENV>"
+                finding["message"] = "<ENV>"
         return result
     return payload
 
@@ -1331,7 +1528,10 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
         if scenario["compare"] in ("json", "digest"):
             try:
                 payload = normalize(
-                    json.loads(proc.stdout.strip()), profile, scenario.get("mask")
+                    json.loads(proc.stdout.strip()),
+                    profile,
+                    scenario.get("mask"),
+                    scenario.get("mask_findings"),
                 )
             except json.JSONDecodeError:
                 payload = None
@@ -1356,7 +1556,10 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
             path = profile / relative
             if path.exists():
                 files[relative] = normalize(
-                    path.read_text(encoding="utf-8"), profile, scenario.get("mask")
+                    path.read_text(encoding="utf-8"),
+                    profile,
+                    scenario.get("mask"),
+                    scenario.get("mask_findings"),
                 )
         return {
             "exit_code": proc.returncode,
@@ -1367,6 +1570,11 @@ def observe(scenario: dict, prefix: list[str]) -> dict:
             "stdout_normalized": normalize(stdout, profile, scenario.get("mask")),
             "stderr": stderr,
             "stderr_normalized": normalize(stderr, profile, scenario.get("mask")),
+            "stdout": proc.stdout,
+            "stdout_normalized": normalize(
+                proc.stdout, profile, scenario.get("mask"), scenario.get("mask_findings")
+            ),
+            "stderr": proc.stderr,
         }
     finally:
         shutil.rmtree(profile, ignore_errors=True)
@@ -1430,6 +1638,8 @@ def run_scenario(scenario: dict, python: str) -> dict:
         record["backup_dir"] = scenario["backup_dir"]
     if scenario.get("mask"):
         record["mask"] = scenario["mask"]
+    if scenario.get("mask_findings"):
+        record["mask_findings"] = scenario["mask_findings"]
     if scenario.get("allow_nonzero"):
         record["allow_nonzero"] = True
     if scenario.get("credential"):
