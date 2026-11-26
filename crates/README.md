@@ -23,7 +23,7 @@ questions and refuses everything else with
 | `xpst schedule list` | The queue with each entry's local rendering, plus the pause marker and any `schedule.json.paused-*` snapshots, so an empty list cannot read as "paused and emptied". |
 | `xpst failures list` | The dead-letter queue: status (`open`/`resolved`), age, count and the platform's error. |
 
-Everything else — 22 of the 88 leaf commands — parses its arguments exactly as the
+Everything else — 21 of the 88 leaf commands — parses its arguments exactly as the
 Python CLI does and then exits `1` with the message above. Argument errors (missing
 required option, unknown flag) are exit `2`, matching Click. The 14 group containers
 (`analytics`, `byo`, `chat`, `config`, `failures`, `generate`, `kb`, `mcp`, `media`,
