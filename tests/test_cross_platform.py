@@ -756,6 +756,51 @@ class TestUnicodePaths:
 # 9. FFmpeg path resolution
 # ---------------------------------------------------------------------------
 
+
+def _normalise_path_entry(entry: str, path_module=os.path) -> str:
+    """Canonical form of a PATH entry, for comparing directories.
+
+    Windows accepts both ``\\`` and ``/`` as separators and compares paths
+    case-insensitively, so a literal string comparison rejects a legitimate
+    entry such as ``D:\\a\\_temp/xpst-media-bin`` even though Windows resolves
+    it. ``normpath`` folds the separators and ``normcase`` folds the case on
+    Windows (a no-op on POSIX). Surrounding whitespace and quotes are dropped
+    because Windows PATH entries are commonly written as ``"C:\\Program Files\\x"``.
+
+    ``path_module`` exists so the Windows rules can be pinned from any platform
+    with ``ntpath``; production callers use ``os.path``.
+    """
+    return path_module.normcase(path_module.normpath(entry.strip().strip('"')))
+
+
+def _path_entries(path_value: str, path_module=os.path) -> list[str]:
+    """The entries of ``path_value`` in canonical form (empty entries dropped)."""
+    return [_normalise_path_entry(entry, path_module) for entry in path_value.split(os.pathsep) if entry.strip()]
+
+
+def _assert_ffmpeg_dir_is_a_path_entry() -> None:
+    """Assert the directory ffmpeg resolved from is one of the PATH entries.
+
+    Kept as a function so the negative control below exercises this exact code
+    path instead of a re-implementation of it.
+    """
+    path_value = os.environ.get("PATH", "")
+    # Verify PATH contains at least some directories
+    assert len(path_value) > 0
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        pytest.skip("ffmpeg is not on PATH on this machine")
+        return  # unreachable; narrows the type for type checkers
+
+    ffmpeg_dir = str(Path(ffmpeg).parent)
+    entries = _path_entries(path_value)
+    assert _normalise_path_entry(ffmpeg_dir) in entries, (
+        f"ffmpeg resolved to {ffmpeg!r}, but its directory {ffmpeg_dir!r} is not a PATH entry "
+        f"(PATH entries: {path_value.split(os.pathsep)!r})"
+    )
+
+
 class TestFFmpegPath:
     """FFmpeg path works with absolute, relative, and from PATH."""
 
@@ -782,14 +827,53 @@ class TestFFmpegPath:
 
     def test_ffmpeg_path_from_path_env(self):
         """ffmpeg found via PATH environment variable."""
-        original_path = os.environ.get("PATH", "")
-        # Verify PATH contains at least some directories
-        assert len(original_path) > 0
+        _assert_ffmpeg_dir_is_a_path_entry()
 
-        ffmpeg = shutil.which("ffmpeg")
-        if ffmpeg is not None:
-            ffmpeg_dir = str(Path(ffmpeg).parent)
-            assert ffmpeg_dir in original_path.split(os.pathsep)
+    def test_ffmpeg_path_env_check_rejects_a_directory_that_is_not_on_path(self, monkeypatch, tmp_path):
+        """Negative control: the PATH check still fails when the dir is not a PATH entry.
+
+        Without this, a comparison that always returned True — or an assertion
+        weakened to ``ffmpeg is not None`` — would pass the test above.
+        """
+        on_path = tmp_path / "on-path"
+        off_path = tmp_path / "off-path"
+        on_path.mkdir()
+        off_path.mkdir()
+        fake_ffmpeg = off_path / ("ffmpeg.exe" if platform.system() == "Windows" else "ffmpeg")
+        fake_ffmpeg.write_text("")
+
+        # A sibling whose name merely starts with the real directory's name must
+        # not match: the comparison is entry equality, not a substring test.
+        monkeypatch.setenv("PATH", os.pathsep.join([str(on_path), f"{off_path}-extra"]))
+        monkeypatch.setattr(shutil, "which", lambda name, *args, **kwargs: str(fake_ffmpeg))
+
+        with pytest.raises(AssertionError, match="is not a PATH entry"):
+            _assert_ffmpeg_dir_is_a_path_entry()
+
+        # Same fake binary, but now its directory IS a PATH entry: the check passes.
+        # This proves the failure above is the missing entry, not a broken helper.
+        monkeypatch.setenv("PATH", os.pathsep.join([str(on_path), str(off_path)]))
+        _assert_ffmpeg_dir_is_a_path_entry()
+
+    def test_path_entry_comparison_folds_windows_separators_and_case(self):
+        """A forward-slash or differently-cased PATH entry names the same directory.
+
+        Measured on windows-latest (PR #54 round 1): PATH held
+        ``D:\\a\\_temp/xpst-media-bin`` while ``str(Path(which("ffmpeg")).parent)``
+        produced ``D:\\a\\_temp\\xpst-media-bin``, and the literal comparison failed
+        even though Windows resolved the binary. ``ntpath`` pins the Windows rules
+        on every platform, so this regression is caught on Linux too.
+        """
+        import ntpath
+
+        canonical = r"D:\a\_temp\xpst-media-bin"
+        for entry in (
+            "D:\\a\\_temp/xpst-media-bin",  # forward slashes
+            r"d:\A\_TEMP\xpst-media-bin",  # different case
+            r"D:\a\_temp\xpst-media-bin\..\xpst-media-bin",  # unnormalised
+            '"D:\\a\\_temp\\xpst-media-bin"',  # quoted
+        ):
+            assert _normalise_path_entry(entry, ntpath) == _normalise_path_entry(canonical, ntpath), entry
 
     def test_video_processor_uses_custom_path(self, tmp_path):
         """VideoProcessor passes custom ffmpeg_path through."""
