@@ -25,23 +25,77 @@ jobs:
 
       # setup-ffmpeg@v3 has an open upstream breakage ("TypeError: fetch
       # failed") affecting all runners since mid-2025; apt carries ffmpeg on
-      # the ubuntu image. macos-latest runners are ARM64 → brew. Windows
-      # runners ship chocolatey elevated, so choco is used there.
+      # the ubuntu image. macos-latest runners are ARM64 → brew. Windows has no
+      # system ffmpeg and is handled after the package install, below.
       - name: Install FFmpeg
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - name: Install FFmpeg (macOS arm64)
         if: runner.os == 'macOS'
         run: brew install ffmpeg
-      - name: Install FFmpeg (Windows)
-        if: runner.os == 'Windows'
-        run: choco install ffmpeg -y --no-progress
 
       - name: Install package
         shell: bash
         run: |
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install -e ".[full,dev]" build pip-audit
+
+      # Windows: `choco install ffmpeg` is not a reliable way to get ffmpeg.
+      # Measured 2026-11-25 (main 1dcbfcc, run 45688432461): the community feed
+      # answered 504 (Gateway Timeout), choco printed "Chocolatey installed 0/0
+      # packages" and still exited 0, so all four windows-latest legs ran with
+      # no ffmpeg and six tests failed (FFmpegNotFoundError, a 404 media
+      # preview, a readiness verdict counting ffmpeg as a missing setup item).
+      # A step that reports success while installing nothing is the defect.
+      #
+      # Use the product's own pinned downloader instead: src/xpst/media/binaries.py
+      # pins the immutable eugeneware/ffmpeg-static b6.1.1 tag plus a SHA-256 for
+      # every asset, resumes partial transfers and smoke-runs the binary before
+      # installing it. It lands in a runner-temp dir (never the runner's
+      # ~/.xpst) which is then put on PATH, so every later step — including the
+      # tests that pin HOME and XPST_CONFIG_DIR — resolves the same binaries.
+      # Deliberately no choco fallback: an unpinned second source would defeat
+      # the determinism, and the verification step below makes any failure loud.
+      - name: Install FFmpeg (Windows, pinned + checksum-verified)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          XPST_MEDIA_BIN_DIR: ${{ runner.temp }}/xpst-media-bin
+        run: |
+          set -euo pipefail
+          python -m xpst media fetch --json
+          # GITHUB_PATH wants a native path. A mixed-separator entry still works
+          # for Windows, but code that compares PATH entries literally
+          # (tests/test_cross_platform.py::test_ffmpeg_path_from_path_env) needs
+          # the canonical form, so normalise it exactly the way pathlib does.
+          python - "$XPST_MEDIA_BIN_DIR" "$GITHUB_PATH" <<'PY'
+          import os
+          import pathlib
+          import sys
+
+          bin_dir, github_path = sys.argv[1], sys.argv[2]
+          path = pathlib.Path(bin_dir)
+          if path.is_dir():
+              with open(github_path, "a", encoding="utf-8") as handle:
+                  handle.write(os.path.normpath(str(path)) + "\n")
+          PY
+
+      # Prove the binaries actually run before the suite depends on them, so a
+      # silent no-op install can never reach the tests again.
+      - name: Verify FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for binary in ffmpeg ffprobe; do
+            resolved="$(command -v "$binary" || true)"
+            if [ -z "$resolved" ]; then
+              echo "::error::$binary is not on PATH after the install step"
+              exit 1
+            fi
+            echo "$binary -> $resolved"
+            "$binary" -version
+          done
 
       - name: Test
         run: python -m pytest
