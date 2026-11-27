@@ -53,7 +53,7 @@ use serde_json::{Map, Value as Json};
 use xpst_config::output::{array, boolean, integer, null, number, object, string};
 use xpst_config::Value;
 
-use crate::isotime::{fromisoformat, ParsedStamp};
+use crate::isotime::{fromisoformat, Offset, ParsedStamp};
 
 /// `PLATFORM_ORDER` — the render order, including platforms with nothing.
 pub const PLATFORM_ORDER: [&str; 5] = ["youtube", "x", "instagram", "tiktok", "threads"];
@@ -641,7 +641,13 @@ fn derive_collection_status(
 /// `_parse_utc_timestamp()`: an aware UTC instant, or `None`.
 pub(crate) fn parse_utc_timestamp(value: &str) -> Option<jiff::Timestamp> {
     let stamp: ParsedStamp = fromisoformat(&value.replace('Z', "+00:00")).ok()?;
-    let offset = stamp.offset?;
+    // A naive stamp is UTC: `_parse_utc_timestamp` and `_parse_ts` both do
+    // `parsed.replace(tzinfo=timezone.utc)`, and legacy state files carry
+    // naive timestamps.
+    let offset = stamp.offset.unwrap_or(Offset {
+        seconds: 0,
+        micros: 0,
+    });
     let offset = jiff::tz::Offset::from_seconds(offset.seconds as i32).ok()?;
     let zone = jiff::tz::TimeZone::fixed(offset);
     let zoned = stamp.civil.to_zoned_datetime(zone).ok()?;

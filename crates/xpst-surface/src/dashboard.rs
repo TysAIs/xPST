@@ -832,3 +832,121 @@ pub fn normalised_status(value: Option<&Json>) -> &'static str {
 pub fn parse_isoformat(raw: &str) -> Option<String> {
     fromisoformat(raw).ok().map(|stamp| stamp.isoformat())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn instant(text: &str) -> jiff::Timestamp {
+        parse_utc_timestamp(text).expect("a parseable stamp")
+    }
+
+    #[test]
+    fn a_missing_metric_never_becomes_a_zero() {
+        assert_eq!(accumulate(None, None), None);
+        assert_eq!(accumulate(Some(5), None), Some(5));
+        assert_eq!(accumulate(None, Some(0)), Some(0));
+        assert_eq!(accumulate(Some(5), Some(3)), Some(8));
+    }
+
+    #[test]
+    fn relative_time_is_honest_about_a_missing_or_broken_stamp() {
+        let now = instant("2026-11-20T12:00:00+00:00");
+        assert_eq!(relative_time(None, now), "—");
+        assert_eq!(relative_time(Some(""), now), "—");
+        assert_eq!(relative_time(Some("not-a-time"), now), "not-a-time");
+        assert_eq!(
+            relative_time(Some("2026-11-20T11:59:30+00:00"), now),
+            "just now"
+        );
+        assert_eq!(
+            relative_time(Some("2026-11-20T11:30:00+00:00"), now),
+            "30m ago"
+        );
+        assert_eq!(
+            relative_time(Some("2026-11-20T00:00:00+00:00"), now),
+            "12h ago"
+        );
+        assert_eq!(
+            relative_time(Some("2026-11-18T12:00:00+00:00"), now),
+            "2d ago"
+        );
+    }
+
+    #[test]
+    fn a_naive_stamp_is_read_as_utc() {
+        let naive = parse_ts(Some(&Json::from("2026-11-20T12:00:00"))).expect("naive parses");
+        assert_eq!(naive, instant("2026-11-20T12:00:00+00:00"));
+        assert_eq!(parse_ts(Some(&Json::Null)), None);
+        assert_eq!(parse_ts(None), None);
+    }
+
+    #[test]
+    fn post_links_are_derived_only_where_they_are_reliable() {
+        assert_eq!(
+            post_links("youtube", "fic-yt-1"),
+            (
+                "https://www.youtube.com/watch?v=fic-yt-1".to_string(),
+                "https://www.youtube.com/embed/fic-yt-1".to_string(),
+                "https://i.ytimg.com/vi/fic-yt-1/hqdefault.jpg".to_string(),
+            )
+        );
+        assert_eq!(
+            post_links("x", "fic-x-1"),
+            (
+                "https://x.com/i/status/fic-x-1".to_string(),
+                String::new(),
+                String::new(),
+            )
+        );
+        assert_eq!(
+            post_links("nope", "fic-1"),
+            (String::new(), String::new(), String::new())
+        );
+        assert_eq!(
+            post_links("youtube", "  "),
+            (String::new(), String::new(), String::new())
+        );
+    }
+
+    /// The newest capture is chosen by INSTANT, not by string order: two rows
+    /// can carry different offsets for the same wall clock.
+    #[test]
+    fn last_captured_at_compares_instants_not_strings() {
+        let dir = std::env::temp_dir().join(format!(
+            "xpst-dashboard-last-captured-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        {
+            let store = xpst_store::Store::open(dir.join("analytics.db")).expect("open");
+            store
+                .record_snapshots(&[
+                    // Lexicographically the largest string, but the EARLIER instant.
+                    xpst_store::NewSnapshot::new("youtube", "fic-a", "2026-11-20T01:00:00+05:00"),
+                    // Lexicographically smaller, but the LATER instant.
+                    xpst_store::NewSnapshot::new("youtube", "fic-b", "2026-11-19T21:00:00+00:00"),
+                ])
+                .expect("record");
+        }
+        assert_eq!(
+            last_captured_at(&dir).as_deref(),
+            Some("2026-11-19T21:00:00+00:00")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_state_file_is_pythons_empty_default() {
+        let dir =
+            std::env::temp_dir().join(format!("xpst-dashboard-empty-state-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let state = load_state(&dir);
+        assert_eq!(state["posted_videos"], serde_json::json!({}));
+        assert_eq!(state["health"]["platforms"], serde_json::json!({}));
+        assert_eq!(state["health"]["total_processed"], serde_json::json!(0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
