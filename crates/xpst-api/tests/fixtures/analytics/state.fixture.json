@@ -1,0 +1,115 @@
+{
+  "version": 2,
+  "posted_videos": {
+    "fic-vid-0001": {
+      "source_platform": "local",
+      "caption": "Fictional clip one",
+      "source_url": "https://example.invalid/fic-1",
+      "downloaded_at": "2026-11-19T09:00:00+00:00",
+      "last_attempt": "2026-11-19T09:05:00+00:00",
+      "local_path": "",
+      "thumbnail": "fic-thumb-0001.jpg",
+      "posted_to": {
+        "youtube": {
+          "id": "fic-yt-0001",
+          "url": "https://www.youtube.com/watch?v=fic-yt-0001",
+          "timestamp": "2026-11-19T09:06:00+00:00"
+        },
+        "x": {
+          "id": "fic-x-0001",
+          "url": "https://x.com/i/status/fic-x-0001",
+          "timestamp": "2026-11-19T09:07:00+00:00"
+        }
+      },
+      "errors": {}
+    },
+    "fic-vid-0002": {
+      "source_platform": "local",
+      "caption": "Fictional clip two",
+      "source_url": "https://example.invalid/fic-2",
+      "downloaded_at": "2026-11-10T08:00:00+00:00",
+      "last_attempt": "2026-11-10T08:10:00+00:00",
+      "posted_to": {
+        "youtube": {
+          "post_id": "fic-yt-0002",
+          "url": "https://www.youtube.com/watch?v=fic-yt-0002",
+          "timestamp": "2026-11-10T08:11:00+00:00",
+          "soft_hidden": true
+        },
+        "instagram": {
+          "id": "fic-ig-0002",
+          "url": "https://www.instagram.com/p/fic-ig-0002/",
+          "timestamp": "2026-11-10T08:12:00+00:00"
+        }
+      },
+      "errors": {
+        "x": {
+          "error": "Fictional rate limit",
+          "retryable": true,
+          "timestamp": "2026-11-10T08:13:00+00:00"
+        },
+        "tiktok": {
+          "error": "Fictional upload rejected",
+          "retryable": false
+        }
+      }
+    },
+    "fic-vid-0003": {
+      "source_platform": "local",
+      "caption": "Fictional clip three",
+      "downloaded_at": "2026-11-18T20:00:00+00:00",
+      "posted_to": {
+        "youtube": {
+          "id": "fic-yt-0003",
+          "url": "https://www.youtube.com/watch?v=fic-yt-0003",
+          "timestamp": "2026-11-18T20:05:00+00:00",
+          "deleted": true
+        }
+      },
+      "errors": {}
+    },
+    "fic-vid-0004": {
+      "source_platform": "local",
+      "caption": "Fictional clip four",
+      "downloaded_at": "2026-11-01T07:00:00+00:00",
+      "posted_to": {},
+      "errors": {}
+    },
+    "fic-vid-0005": {
+      "source_platform": "local",
+      "caption": "Fictional clip five",
+      "downloaded_at": "2026-11-15T10:00:00+00:00",
+      "posted_to": {
+        "threads": {
+          "id": "fic-th-0005",
+          "url": "https://www.threads.net/post/fic-th-0005",
+          "timestamp": "2026-11-15T10:02:00+00:00"
+        }
+      },
+      "errors": {}
+    }
+  },
+  "content_hashes": {
+    "fic-hash-0001": "fic-vid-0001"
+  },
+  "health": {
+    "platforms": {
+      "youtube": {
+        "status": "ok",
+        "last_success": "2026-11-19T09:06:00+00:00",
+        "failures": 0,
+        "last_error": null
+      },
+      "x": {
+        "status": "degraded",
+        "last_success": "2026-11-19T09:07:00+00:00",
+        "failures": 2,
+        "last_error": "Fictional timeout"
+      }
+    },
+    "sources": {},
+    "total_processed": 5,
+    "last_check": "2026-11-20T11:00:00+00:00",
+    "last_wake_check": null
+  }
+}

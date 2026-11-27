@@ -108,7 +108,7 @@ pub struct AnalyticsError {
 }
 
 impl AnalyticsError {
-    fn store(detail: impl std::fmt::Display) -> Self {
+    pub(crate) fn store(detail: impl std::fmt::Display) -> Self {
         Self {
             message: detail.to_string(),
         }
@@ -118,7 +118,7 @@ impl AnalyticsError {
 // ── Python scalar semantics ─────────────────────────────────────────────────
 
 /// Python truthiness for a JSON value.
-fn truthy(value: Option<&Json>) -> bool {
+pub(crate) fn truthy(value: Option<&Json>) -> bool {
     match value {
         None | Some(Json::Null) => false,
         Some(Json::Bool(flag)) => *flag,
@@ -134,7 +134,7 @@ fn truthy(value: Option<&Json>) -> bool {
 /// A container renders as its compact JSON rather than Python's `repr`; the
 /// only callers are a timestamp, a status and an error string, and a container
 /// in any of those is a corrupt row rather than a document anyone parses.
-fn python_str(value: &Json) -> String {
+pub(crate) fn python_str(value: &Json) -> String {
     match value {
         Json::Null => "None".to_string(),
         Json::Bool(true) => "True".to_string(),
@@ -146,7 +146,7 @@ fn python_str(value: &Json) -> String {
 }
 
 /// `str(value or "")` — the shape `normalise_collection_status` reads.
-fn python_str_or_empty(value: Option<&Json>) -> String {
+pub(crate) fn python_str_or_empty(value: Option<&Json>) -> String {
     match value {
         Some(value) if truthy(Some(value)) => python_str(value),
         _ => String::new(),
@@ -217,7 +217,7 @@ fn iso(value: Option<&Json>) -> Option<String> {
 }
 
 /// `normalise_collection_status()`: an unlabelled row is `unknown`, never `ok`.
-fn normalise_collection_status(value: Option<&Json>) -> &'static str {
+pub(crate) fn normalise_collection_status(value: Option<&Json>) -> &'static str {
     match python_str_or_empty(value).trim().to_lowercase().as_str() {
         "ok" => "ok",
         "partial" => "partial",
@@ -257,7 +257,7 @@ fn source_label(data_source: Option<&str>, staleness: &str) -> &'static str {
 /// The `extra` JSON is merged over the row (so it can override a column), and
 /// `collection_status` is normalised *after* the merge — an `extra` object
 /// carrying a status is normalised too.
-fn row_to_dict(row: &xpst_store::SnapshotRow) -> Map<String, Json> {
+pub fn row_to_dict(row: &xpst_store::SnapshotRow) -> Map<String, Json> {
     let mut map = Map::new();
     map.insert("platform".into(), Json::String(row.platform.clone()));
     map.insert("post_id".into(), Json::String(row.post_id.clone()));
@@ -301,7 +301,7 @@ fn optional_integer(value: Option<i64>) -> Json {
 }
 
 /// `resolve_platform_post_id()`: the canonical `id`, then the legacy `post_id`.
-fn resolve_platform_post_id(info: Option<&Map<String, Json>>) -> String {
+pub fn resolve_platform_post_id(info: Option<&Map<String, Json>>) -> String {
     let Some(info) = info else {
         return String::new();
     };
@@ -364,7 +364,7 @@ fn recipient_index(rows: &[Map<String, Json>]) -> BTreeMap<(String, String), &Ma
 // ── State and ownership ─────────────────────────────────────────────────────
 
 /// `_read_state()`: `state.json` as an object, or an empty one when unusable.
-fn read_state(config_dir: &Path) -> Json {
+pub(crate) fn read_state(config_dir: &Path) -> Json {
     let path = config_dir.join("state.json");
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Json::Object(Map::new());
@@ -432,7 +432,11 @@ fn read_state_platform_ids(config_dir: &Path, platform: &str) -> (bool, BTreeSet
 /// `_get_owned_platform_ids()`.
 ///
 /// `None` means ownership cannot be verified — the platform fails closed.
-fn owned_platform_ids(config_dir: &Path, platform: &str, state: &Json) -> Option<BTreeSet<String>> {
+pub(crate) fn owned_platform_ids(
+    config_dir: &Path,
+    platform: &str,
+    state: &Json,
+) -> Option<BTreeSet<String>> {
     let platform = platform.to_lowercase();
     if platform == "youtube" {
         return youtube_owned_ids(config_dir);
@@ -465,7 +469,7 @@ fn youtube_owned_ids(config_dir: &Path) -> Option<BTreeSet<String>> {
 }
 
 /// `_platform_has_records()`: is there anything worth verifying ownership for?
-fn platform_has_records(
+pub(crate) fn platform_has_records(
     platform: &str,
     state: &Json,
     snapshot_rows: &[Map<String, Json>],
@@ -545,7 +549,7 @@ fn persisted_collection_status(
 /// With no live attempt, no live failure and no unavailability, the answer comes
 /// from the persisted ledger; a platform with neither reports `unknown` — never
 /// a silent `ok`.
-fn collection_status(
+pub(crate) fn collection_status(
     platform: &str,
     runs: &BTreeMap<String, xpst_store::CollectionRunRow>,
 ) -> Json {
@@ -635,7 +639,7 @@ fn derive_collection_status(
 // ── Freshness ───────────────────────────────────────────────────────────────
 
 /// `_parse_utc_timestamp()`: an aware UTC instant, or `None`.
-fn parse_utc_timestamp(value: &str) -> Option<jiff::Timestamp> {
+pub(crate) fn parse_utc_timestamp(value: &str) -> Option<jiff::Timestamp> {
     let stamp: ParsedStamp = fromisoformat(&value.replace('Z', "+00:00")).ok()?;
     let offset = stamp.offset?;
     let offset = jiff::tz::Offset::from_seconds(offset.seconds as i32).ok()?;
@@ -645,7 +649,7 @@ fn parse_utc_timestamp(value: &str) -> Option<jiff::Timestamp> {
 }
 
 /// `_freshness_metadata()`: `(last_captured, staleness_hours, staleness)`.
-fn freshness(
+pub(crate) fn freshness(
     timestamp: Option<&str>,
     now: jiff::Timestamp,
 ) -> (Option<String>, Option<f64>, &'static str) {
@@ -1272,7 +1276,7 @@ pub fn build_outcome_report(request: &ReportRequest<'_>) -> Value {
 
 /// `datetime.now(timezone.utc).isoformat()` — six digits when the microsecond
 /// field is non-zero, none when it is zero.
-fn utc_isoformat(instant: jiff::Timestamp) -> String {
+pub(crate) fn utc_isoformat(instant: jiff::Timestamp) -> String {
     let zoned = instant.to_zoned_datetime(jiff::tz::TimeZone::UTC);
     if zoned.subsec_nanosecond() / 1_000 == 0 {
         zoned.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string()
@@ -1331,6 +1335,60 @@ pub enum PlatformFilter<'a> {
     Unmatchable,
 }
 
+/// `AnalyticsCollector.outcome_report()` with no live collection.
+///
+/// The recorded-mode report every surface renders: the ledger's latest rows,
+/// the persisted collection outcomes, the ownership gate and
+/// [`build_outcome_report`]. A ledger that cannot be opened yields an empty
+/// report rather than an error — Python's `outcome_report` catches the store
+/// failure and reports "no data", because a broken db must not 500 the UI.
+///
+/// YouTube ownership is a network call in Python (`channels.list` plus a
+/// paginated `playlistItems` walk), so this build answers `unverifiable` for
+/// it — the same verdict Python reaches when the check cannot run.
+pub fn outcome_report(config_dir: &Path, now: jiff::Timestamp) -> Value {
+    let db = config_dir.join("analytics.db");
+    let (all_rows, runs) = match xpst_store::Store::open(&db) {
+        Ok(store) => {
+            let rows = store
+                .latest(None)
+                .map(|rows| rows.iter().map(row_to_dict).collect::<Vec<_>>())
+                .unwrap_or_default();
+            let runs = store.latest_collection_runs().unwrap_or_default();
+            (rows, runs)
+        }
+        Err(_) => (Vec::new(), BTreeMap::new()),
+    };
+
+    let state = read_state(config_dir);
+    let live_rows: Vec<Map<String, Json>> = Vec::new();
+
+    let mut owned_ids: BTreeMap<String, Option<BTreeSet<String>>> = BTreeMap::new();
+    for name in PLATFORM_ORDER {
+        if !platform_has_records(name, &state, &all_rows, &live_rows) {
+            continue;
+        }
+        owned_ids.insert(
+            name.to_string(),
+            owned_platform_ids(config_dir, name, &state),
+        );
+    }
+
+    let mut statuses: BTreeMap<String, Json> = BTreeMap::new();
+    for name in PLATFORM_ORDER {
+        statuses.insert(name.to_string(), collection_status(name, &runs));
+    }
+
+    build_outcome_report(&ReportRequest {
+        state: &state,
+        snapshots: &all_rows,
+        live_rows: &live_rows,
+        owned_ids: &owned_ids,
+        collection_status: &statuses,
+        now,
+    })
+}
+
 /// `_handle_analytics()` with `live=false`.
 ///
 /// `platform` filters the raw `posts` array and the `platforms` aggregate; the
@@ -1358,43 +1416,7 @@ pub fn payload(config_dir: &Path, filter: PlatformFilter<'_>) -> Result<Value, A
     let snapshot_count = store.snapshot_count().map_err(AnalyticsError::store)?;
 
     // `outcome_report()` reads the WHOLE ledger, not the filtered view.
-    let all_rows = store
-        .latest(None)
-        .map_err(AnalyticsError::store)?
-        .iter()
-        .map(row_to_dict)
-        .collect::<Vec<_>>();
-    let runs = store
-        .latest_collection_runs()
-        .map_err(AnalyticsError::store)?;
-
-    let state = read_state(config_dir);
-    let live_rows: Vec<Map<String, Json>> = Vec::new();
-
-    let mut owned_ids: BTreeMap<String, Option<BTreeSet<String>>> = BTreeMap::new();
-    for name in PLATFORM_ORDER {
-        if !platform_has_records(name, &state, &all_rows, &live_rows) {
-            continue;
-        }
-        owned_ids.insert(
-            name.to_string(),
-            owned_platform_ids(config_dir, name, &state),
-        );
-    }
-
-    let mut statuses: BTreeMap<String, Json> = BTreeMap::new();
-    for name in PLATFORM_ORDER {
-        statuses.insert(name.to_string(), collection_status(name, &runs));
-    }
-
-    let report = build_outcome_report(&ReportRequest {
-        state: &state,
-        snapshots: &all_rows,
-        live_rows: &live_rows,
-        owned_ids: &owned_ids,
-        collection_status: &statuses,
-        now: jiff::Timestamp::now(),
-    });
+    let report = outcome_report(config_dir, jiff::Timestamp::now());
 
     // `per_platform` from the (possibly filtered) `latest` rows.
     let mut per_platform = xpst_config::Mapping::new();

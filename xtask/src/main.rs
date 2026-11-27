@@ -32,6 +32,7 @@ fn main() {
         "parity" => parity(&rest),
         "ledger" => ledger(&rest),
         "routes" => routes(&rest),
+        "analytics-routes" => analytics_routes(&rest),
         "size" => size(&rest),
         "" | "help" | "--help" | "-h" => {
             usage();
@@ -63,6 +64,10 @@ fn usage() {
          routes    Re-capture the dashboard HTTP route table and payload shapes\n              \
          from the Python FastAPI app and compare them with xpst-api's copy\n              \
          (--write updates the checked-in fixtures)\n    \
+         analytics-routes\n              \
+         Re-capture the six analytics-backed read routes as byte fixtures\n              \
+         (state.json + a Python-created analytics.db, clock pinned) and diff\n              \
+         them; --write updates the checked-in fixture\n    \
          size      Build the release binary and report its size\n\
          \n\
          ENV:\n    \
@@ -160,6 +165,48 @@ fn routes(args: &[String]) -> i32 {
         eprintln!("  re-run: cargo xtask routes --write, then review the diff");
         1
     }
+}
+
+/// Re-capture the six analytics-backed read routes as byte fixtures.
+///
+/// The fixture is a seeded config directory (a fictional `state.json` plus an
+/// `analytics.db` created by Python's `AnalyticsStore`) driven through the real
+/// FastAPI app with the clock pinned, so the bodies are reproducible. `--check`
+/// re-captures into a temp dir and diffs; `--write` updates the checked-in copy.
+fn analytics_routes(args: &[String]) -> i32 {
+    let root = repo_root();
+    let script = root.join("xtask/scripts/capture_analytics_routes.py");
+    let python = std::env::var("XPST_PYTHON").unwrap_or_else(|_| "python3".to_string());
+    let write = args.iter().any(|a| a == "--write");
+
+    let mut command = Command::new(&python);
+    command
+        .arg(&script)
+        .current_dir(&root)
+        .env("PYTHONPATH", root.join("src"));
+    if !write {
+        command.arg("--check");
+    }
+
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(error) => {
+            eprintln!("xtask analytics-routes: cannot run `{python}`: {error}");
+            eprintln!(
+                "  set XPST_PYTHON to an interpreter that can import `xpst.dashboard.server`"
+            );
+            return 2;
+        }
+    };
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    if !output.status.success() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        if !write {
+            eprintln!("  re-run: cargo xtask analytics-routes --write, then review the diff");
+        }
+        return 1;
+    }
+    0
 }
 
 fn repo_root() -> PathBuf {

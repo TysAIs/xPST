@@ -4,6 +4,7 @@
 //! never decides whether the request is allowed (that is [`crate::auth`]) and
 //! never decides whether the route exists (that is [`crate::registry`]).
 
+pub mod analytics;
 pub mod pairing;
 pub mod plans;
 pub mod preflight;
@@ -25,6 +26,12 @@ pub async fn handle(handler: Handler, context: RequestContext<'_>) -> Response {
         Handler::Capabilities => reads::capabilities(&context),
         Handler::Settings => reads::settings(&context),
         Handler::HealthStatus => reads::health_status(&context),
+        Handler::Summary => analytics::summary(&context),
+        Handler::AnalyticsOutcomes => analytics::analytics_outcomes(&context),
+        Handler::Videos => analytics::videos(&context),
+        Handler::VideoDetail => analytics::video_detail(&context),
+        Handler::Activity => analytics::activity(&context),
+        Handler::State => analytics::state(&context),
         Handler::Schedules => reads::schedules(&context),
         Handler::ScheduleCancel => reads::schedule_cancel(&context),
         Handler::RateLimits => reads::rate_limits(&context),
