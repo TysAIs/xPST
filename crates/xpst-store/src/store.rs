@@ -206,6 +206,26 @@ impl NewCollectionRun {
     }
 }
 
+/// `AnalyticsStore.platform_totals()` — one row per platform, summed over the
+/// latest snapshot per post.
+///
+/// Every field is `Option<i64>` for the hidden-counts rule: SQLite's `SUM`
+/// ignores NULLs, so a metric no latest snapshot reported stays `None` ("no
+/// snapshot reported this") instead of becoming a fabricated zero. A real
+/// reported zero still sums to `0`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlatformTotals {
+    /// The `platform` column, carried inside the row because Python's
+    /// `dict(row)` includes it and `/api/videos` serves the row verbatim.
+    pub platform: String,
+    pub views: Option<i64>,
+    pub likes: Option<i64>,
+    pub comments: Option<i64>,
+    pub shares: Option<i64>,
+    pub reposts: Option<i64>,
+    pub saves: Option<i64>,
+}
+
 /// A stored collection outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CollectionRunRow {
@@ -447,6 +467,55 @@ impl Store {
         Ok(rows)
     }
 
+    /// `AnalyticsStore.platform_totals()` — sum the core metrics over the
+    /// LATEST snapshot per post, one row per platform.
+    ///
+    /// Rows whose `collection_status` is `failed` are excluded: a failed fetch
+    /// produced no measurement, so its numbers must not enter a total. Rows
+    /// with `unknown` (legacy, unlabelled) are still counted — they are
+    /// readable data — and callers pair this with
+    /// [`Store::latest_collection_runs`] so the uncertainty stays visible.
+    ///
+    /// Python's query has no `ORDER BY`; SQLite returns the groups in
+    /// `platform` order, and the order is pinned here so the wire body is
+    /// reproducible rather than a property of the query plan.
+    pub fn platform_totals(&self) -> Result<Vec<PlatformTotals>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "
+            SELECT s.platform AS platform,
+                   SUM(s.views)    AS views,
+                   SUM(s.likes)    AS likes,
+                   SUM(s.comments) AS comments,
+                   SUM(s.shares)   AS shares,
+                   SUM(s.reposts)  AS reposts,
+                   SUM(s.saves)    AS saves
+            FROM metric_snapshots s
+            JOIN (
+                SELECT platform, post_id, MAX(captured_at) AS captured_at
+                FROM metric_snapshots GROUP BY platform, post_id
+            ) m ON s.platform = m.platform AND s.post_id = m.post_id
+               AND s.captured_at = m.captured_at
+            WHERE COALESCE(s.collection_status, '') != 'failed'
+            GROUP BY s.platform
+            ORDER BY s.platform
+            ",
+        )?;
+        let mut query = stmt.query([])?;
+        let mut rows = Vec::new();
+        while let Some(row) = query.next()? {
+            rows.push(PlatformTotals {
+                platform: row.get("platform")?,
+                views: row.get("views")?,
+                likes: row.get("likes")?,
+                comments: row.get("comments")?,
+                shares: row.get("shares")?,
+                reposts: row.get("reposts")?,
+                saves: row.get("saves")?,
+            });
+        }
+        Ok(rows)
+    }
+
     /// Snapshot history for one post, newest first.
     pub fn history(
         &self,
@@ -475,6 +544,37 @@ impl Store {
             .query_row("SELECT COUNT(*) FROM metric_snapshots", [], |row| {
                 row.get(0)
             })?)
+    }
+
+    /// Every stored `captured_at` value, optionally for one platform.
+    ///
+    /// `AnalyticsStore.last_captured_at` parses each value as an instant before
+    /// choosing the newest, so a string `MAX()` is not equivalent: two rows can
+    /// carry different offsets for the same instant, and a lexicographic
+    /// comparison would pick the wrong one. The caller parses and compares.
+    pub fn captured_at_values(&self, platform: Option<&str>) -> Result<Vec<String>, StoreError> {
+        let mut rows = Vec::new();
+        match platform {
+            Some(platform) => {
+                let mut stmt = self
+                    .conn
+                    .prepare("SELECT captured_at FROM metric_snapshots WHERE platform = ?")?;
+                let mut query = stmt.query(params![platform])?;
+                while let Some(row) = query.next()? {
+                    rows.push(row.get(0)?);
+                }
+            }
+            None => {
+                let mut stmt = self
+                    .conn
+                    .prepare("SELECT captured_at FROM metric_snapshots")?;
+                let mut query = stmt.query([])?;
+                while let Some(row) = query.next()? {
+                    rows.push(row.get(0)?);
+                }
+            }
+        }
+        Ok(rows)
     }
 
     /// Delete rows for `platform` whose id is not in `owned`.

@@ -23,6 +23,12 @@ xpst-config = { path = "../xpst-config" }
 xpst-state = { path = "../xpst-state" }
 xpst-limits = { path = "../xpst-limits" }
 xpst-media = { path = "../xpst-media" }
+# The analytics ledger and the payload builders the CLI/MCP surfaces already
+# share: the HTTP surface reads the same store and renders the same documents,
+# so a number cannot disagree between surfaces.
+xpst-store = { path = "../xpst-store" }
+xpst-surface = { path = "../xpst-surface" }
+jiff = { workspace = true }
 
 [dev-dependencies]
 http-body-util = "0.1"

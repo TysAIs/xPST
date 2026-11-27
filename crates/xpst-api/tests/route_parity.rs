@@ -109,6 +109,8 @@ fn the_implemented_set_is_the_documented_one() {
     implemented.sort_unstable();
     let expected = [
         "api.rate_limits",
+        "api_activity",
+        "api_analytics_outcomes",
         "api_capabilities",
         "api_device_revoke",
         "api_devices",
@@ -124,14 +126,32 @@ fn the_implemented_set_is_the_documented_one() {
         "api_schedule_cancel",
         "api_schedules",
         "api_settings",
+        "api_summary",
+        "api_video_detail",
+        "api_videos",
         "dashboard_index",
         "health_check",
+        "state",
         "ui_static",
     ];
     assert_eq!(
         implemented, expected,
         "the implemented route set changed; update the documented list deliberately"
     );
+}
+
+/// The served fraction, pinned so a doc claim cannot drift from the table.
+#[test]
+fn the_served_route_count_is_the_documented_one() {
+    let served = ROUTES
+        .iter()
+        .filter(|spec| !is_extension(spec.id) && spec.status.is_implemented())
+        .count();
+    assert_eq!(
+        served, 23,
+        "23 of the 57 Python routes are served; the other 34 answer a typed 501"
+    );
+    assert_eq!(parity::python_routes().len(), 57);
 }
 
 #[test]
@@ -166,6 +186,8 @@ fn sample_request(sample: &str) -> Option<(String, String, Option<Value>)> {
             Some(json!({"caption": "hi"})),
         ),
         "api.plans.get_error" => ("GET".into(), "/api/plans/plan_missing".into(), None),
+        "api.summary" => ("GET".into(), "/api/summary".into(), None),
+        "state" => ("GET".into(), "/state".into(), None),
         _ => return None,
     })
 }
@@ -212,7 +234,7 @@ async fn every_claimed_route_has_the_python_payload_shape() {
         checked += 1;
     }
     assert!(
-        checked >= 11,
+        checked >= 13,
         "expected the captured samples, checked {checked}"
     );
 }

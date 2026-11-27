@@ -65,6 +65,21 @@ pub const DIVERGENCES: &[(&str, &str, &str)] = &[
         "Prometheus text",
         "typed 501 (no metrics registry)",
     ),
+    (
+        "/api/analytics/outcomes?live=1",
+        "a real collection against every platform API",
+        "typed 501 (LIVE_COLLECTION_NOT_IMPLEMENTED); live=0 serves the recorded report",
+    ),
+    (
+        "YouTube ownership in the outcome report",
+        "channels.list + a paginated playlistItems walk",
+        "unverifiable, so the platform fails closed — the verdict Python reaches when the check cannot run",
+    ),
+    (
+        "/api/activity",
+        "StateStore creates the config dir, backups/ and .state.lock",
+        "reads state.json only; a GET creates nothing",
+    ),
 ];
 
 /// How strictly a route's payload shape is compared.

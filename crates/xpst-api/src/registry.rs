@@ -89,6 +89,12 @@ pub enum Handler {
     Capabilities,
     Settings,
     HealthStatus,
+    Summary,
+    AnalyticsOutcomes,
+    Videos,
+    VideoDetail,
+    Activity,
+    State,
     Schedules,
     ScheduleCancel,
     RateLimits,
@@ -161,8 +167,6 @@ const NOT_MEDIA_INGEST: &str =
     "media ingestion is not ported: staging writes a probe record from ffprobe";
 const NOT_CONNECT: &str = "interactive sign-in is not ported to this surface: xpst-authflow owns the flow, and no HTTP bridge exists yet";
 const NOT_POST: &str = "one-shot posting is not served here: use POST /api/plans then confirm and publish, which is the pipeline's own contract";
-const NOT_ANALYTICS: &str =
-    "aggregated analytics are not ported: they are read from Python's analytics.db collector";
 const NOT_TOKENS: &str = "token refresh is not ported: it needs the provider refresh paths wired to the credential store";
 const NOT_RETRY: &str = "failure retry is not ported: it needs the recorded-failure store";
 const NOT_LIBRARY: &str =
@@ -181,8 +185,6 @@ const NOT_BIO_EDIT: &str = "the link-in-bio editor is not ported";
 const NOT_OAUTH: &str =
     "the xpst:// deep-link intake is not ported: it delivers into xpst-authflow's session store";
 const NOT_METRICS: &str = "no Prometheus registry exists in the Rust engine yet";
-const NOT_STATE: &str =
-    "the aggregated state summary is not ported: it reads Python's analytics.db collector";
 
 /// Every route this surface knows about, in match order.
 ///
@@ -219,7 +221,7 @@ pub const ROUTES: &[RouteSpec] = &[
         Method::Get,
         "/state",
         Access::Credentialed,
-        RouteStatus::NotImplemented(NOT_STATE),
+        RouteStatus::Implemented(Handler::State),
         Payload::Json,
     ),
     route(
@@ -284,7 +286,7 @@ pub const ROUTES: &[RouteSpec] = &[
         Method::Get,
         "/api/summary",
         Access::Credentialed,
-        RouteStatus::NotImplemented(NOT_ANALYTICS),
+        RouteStatus::Implemented(Handler::Summary),
         Payload::Json,
     ),
     route(
@@ -292,7 +294,7 @@ pub const ROUTES: &[RouteSpec] = &[
         Method::Get,
         "/api/analytics/outcomes",
         Access::Credentialed,
-        RouteStatus::NotImplemented(NOT_ANALYTICS),
+        RouteStatus::Implemented(Handler::AnalyticsOutcomes),
         Payload::Json,
     ),
     route(
@@ -300,7 +302,7 @@ pub const ROUTES: &[RouteSpec] = &[
         Method::Get,
         "/api/videos",
         Access::Credentialed,
-        RouteStatus::NotImplemented(NOT_ANALYTICS),
+        RouteStatus::Implemented(Handler::Videos),
         Payload::Json,
     ),
     route(
@@ -308,7 +310,7 @@ pub const ROUTES: &[RouteSpec] = &[
         Method::Get,
         "/api/videos/{video_id}",
         Access::Credentialed,
-        RouteStatus::NotImplemented(NOT_ANALYTICS),
+        RouteStatus::Implemented(Handler::VideoDetail),
         Payload::Json,
     ),
     route(
@@ -340,7 +342,7 @@ pub const ROUTES: &[RouteSpec] = &[
         Method::Get,
         "/api/activity",
         Access::Credentialed,
-        RouteStatus::NotImplemented(NOT_ANALYTICS),
+        RouteStatus::Implemented(Handler::Activity),
         Payload::Json,
     ),
     route(

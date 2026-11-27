@@ -54,7 +54,7 @@ pub use ownership::{
 };
 pub use store::{
     CollectionRunRow, CollectionStatus, CrossPostGroup, JournalMode, Metrics, NewCollectionRun,
-    NewSnapshot, OpenOptions, RecordOutcome, SnapshotRow, Store,
+    NewSnapshot, OpenOptions, PlatformTotals, RecordOutcome, SnapshotRow, Store,
 };
 
 /// Everything that can go wrong opening or using the ledger.

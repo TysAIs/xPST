@@ -1,0 +1,48 @@
+{
+  "captured_from": "src/xpst/dashboard/api.py + src/xpst/dashboard/analytics.py",
+  "fixed_now": "2026-11-20T12:00:00+00:00",
+  "fixed_now_ms": 1795176000000,
+  "routes": {
+    "activity": {
+      "method": "GET",
+      "path": "/api/activity"
+    },
+    "analytics_outcomes": {
+      "method": "GET",
+      "path": "/api/analytics/outcomes"
+    },
+    "state": {
+      "method": "GET",
+      "path": "/state"
+    },
+    "summary": {
+      "method": "GET",
+      "path": "/api/summary"
+    },
+    "video_detail": {
+      "method": "GET",
+      "path": "/api/videos/fic-vid-0001"
+    },
+    "video_detail_unknown": {
+      "method": "GET",
+      "path": "/api/videos/fic-vid-9999"
+    },
+    "videos": {
+      "method": "GET",
+      "path": "/api/videos"
+    }
+  },
+  "sha256": {
+    "analytics.db": "1fb713c79dea55d26f46a5b20f52d86071730d41035ec9acc0c9ab0b8e7852d7",
+    "state.fixture.json": "ed9672804eb848b19cb71e6f268f3aa293664d4ae95aa85f309d282fa8eec315"
+  },
+  "statuses": {
+    "activity": 200,
+    "analytics_outcomes": 200,
+    "state": 200,
+    "summary": 200,
+    "video_detail": 200,
+    "video_detail_unknown": 404,
+    "videos": 200
+  }
+}

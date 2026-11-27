@@ -23,6 +23,18 @@
 //! fallback performs the match — deliberately: one row per route is what makes
 //! "everything the engine cannot do is a 501" a checkable property.
 //!
+//! # The analytics-backed reads
+//!
+//! `/api/summary`, `/state`, `/api/analytics/outcomes`, `/api/videos`,
+//! `/api/videos/{video_id}` and `/api/activity` are served from `state.json`
+//! plus `analytics.db` — no Python import, no socket. The documents are built
+//! by `xpst-surface`'s dashboard and analytics builders, the same code the CLI
+//! and MCP surfaces render, and `tests/analytics_parity.rs` compares the bodies
+//! byte for byte against a capture from the real Python app over a seeded
+//! fixture (a fictional `state.json` and an `analytics.db` created by Python's
+//! `AnalyticsStore`, clock pinned). Re-capture with
+//! `cargo xtask analytics-routes --write`.
+//!
 //! # Public by design, and nothing else
 //!
 //! [`auth::PUBLIC_BY_DESIGN`] enumerates every path that answers without a
@@ -48,6 +60,10 @@
 //! | schedule rows | adds `scheduled_time_local` | persisted entry verbatim | no timezone database in the engine yet; the store is UTC |
 //! | plan records | `plan_service` preview + digest | pipeline-native record, same top-level keys | the Rust engine freezes plans in `xpst-pipeline` |
 //! | `/metrics` | Prometheus text | typed `501` | no metrics registry in the Rust engine |
+//! | `/api/analytics/outcomes?live=1` | a real collection against every platform API | typed `501` (`LIVE_COLLECTION_NOT_IMPLEMENTED`) | the collection is the network tranche; `live=0` (the default) serves the recorded report |
+//! | YouTube ownership in the outcome report | `channels.list` + a paginated `playlistItems` walk | `unverifiable`, so the platform fails closed | the same verdict Python reaches when the check cannot run |
+//! | `/api/activity` | `StateStore` creates the config dir, `backups/` and `.state.lock` on construction | reads `state.json` only | a GET should not create files |
+//! | a `state.json` whose root is not an object | `AttributeError` → `500` | the empty document | a corrupt file must not 500 the page |
 //! | unmatched `/api/*` on a non-loopback bind | `401` | `401` | same rule, kept: the gate is by path, not by table row |
 
 #![forbid(unsafe_code)]

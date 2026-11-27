@@ -27,6 +27,7 @@ pub mod config_save;
 pub mod config_view;
 pub mod content_request;
 pub mod cross_post;
+pub mod dashboard;
 pub mod disconnect;
 pub mod followers;
 pub mod generate;
